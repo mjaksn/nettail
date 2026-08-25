@@ -1,0 +1,186 @@
+"""The s key prints the traffic summary without stopping the collector."""
+import argparse
+import io
+import socket
+import struct
+import sys
+import time
+from collections import Counter
+
+from harness import FakeTTY, check, finish, plain
+from lanname import Resolver
+from netflume import SamplingWatch, SequenceWatch
+
+import nettail as main
+from nettail import cli
+
+# --- write_summary stands on its own ---------------------------------------
+args = argparse.Namespace(resolve="all", json=False, external_only=False,
+                          fqdn=False, header_every=40, verbose=False)
+stats = Counter({"packets": 12, "bytes_rx": 4096, "flows": 30,
+                 "templates_new": 2, "option_records": 1})
+tally = main.Tally()
+for peer, octets in (("9.9.9.9", 5000), ("1.1.1.1", 100)):
+    tally.add({"src_addr": "192.168.1.5", "dst_addr": peer, "proto": 6,
+               "octets": octets, "packets": 10, "src_port": 51000,
+               "dst_port": 443}, {"exporter": "10.0.0.1"})
+resolver = Resolver(mode="off", workers=1)
+sequences = SequenceWatch()
+sampling = SamplingWatch()
+
+out = io.StringIO()
+cli.write_summary(stats, tally, resolver, sequences, sampling, args,
+                  time.time() - 42, out=out)
+report = plain(out.getvalue())
+check("the report has a heading", "Summary" in report)
+check("it counts datagrams", "datagrams received 12" in report, repr(report[:200]))
+check("it counts flows", "flows decoded      30" in report)
+check("it reports the runtime as a clock", "runtime            00:00:42" in report,
+      repr([ln for ln in report.splitlines() if "runtime" in ln]))
+check("the clock pads the hours", main.human_clock(42) == "00:00:42",
+      main.human_clock(42))
+check("and fills them in as they arrive", main.human_clock(3 * 3600 + 4 * 60 + 5)
+      == "03:04:05", main.human_clock(3 * 3600 + 4 * 60 + 5))
+check("a run past a day keeps counting hours rather than wrapping",
+      main.human_clock(50 * 3600) == "50:00:00", main.human_clock(50 * 3600))
+check("nothing yet is still a clock", main.human_clock(0) == "00:00:00")
+check("and a missing runtime is not", main.human_clock(None) == "-")
+check("it lists the top talkers", "9.9.9.9" in report and "1.1.1.1" in report)
+check("it writes where it is told", sys.stdout is not out)
+
+# sampling and gaps appear when there is something to say
+sampling.note("10.0.0.1", 0, {"sampling_interval": 1000})
+for seq in (0, 10, 20):
+    sequences.observe("10.0.0.1", 0, 10, seq, 10)
+sequences.observe("10.0.0.1", 0, 10, 40, 10)
+out = io.StringIO()
+cli.write_summary(stats, tally, resolver, sequences, sampling, args,
+                  time.time(), out=out)
+report = plain(out.getvalue())
+check("export gaps appear when there are any", "Export gaps" in report
+      and "never arrived" in report)
+check("sampling appears when advertised",
+      "Sampling" in report and "1 in 1000" in report)
+resolver.shutdown()
+
+
+# --- the key calls it -------------------------------------------------------
+def build():
+    a = argparse.Namespace(json=False, external_only=False, fqdn=False,
+                           resolve="off", header_every=40, verbose=False)
+    r = Resolver(mode="off", workers=1)
+    printed = []
+    controls = main.Controls(a, main.SizeScale(), r, None, Counter(), main.Tally(),
+                             SequenceWatch(), out=io.StringIO(),
+                             summary=lambda: printed.append("report"))
+    return controls, printed, r
+
+
+c, printed, r = build()
+check("s prints the report", c.handle("s") is None and printed == ["report"],
+      str(printed))
+check("s adds no chatter of its own", c.out.getvalue() == "", repr(c.out.getvalue()))
+check("s can be pressed again", c.handle("s") is None and len(printed) == 2)
+check("uppercase S works too", c.handle("S") is None and len(printed) == 3)
+check("s does not quit", c.quit is False)
+check("s does not pause", c.paused is False)
+r.shutdown()
+
+c, printed, r = build()
+c.summary = None
+check("s with nothing to print is harmless", c.handle("s") is None)
+r.shutdown()
+
+# The reminder line points at the ? listing rather than naming the keys, so
+# the listing is where the s key has to be advertised.
+check("the key listing describes it",
+      "summary" in dict(main.KEYS)["s"], dict(main.KEYS).get("s"))
+
+
+# --- through the loop -------------------------------------------------------
+V5_HDR = struct.Struct("!HHIIIIBBH")
+V5_REC = struct.Struct("!4s4s4sHHIIIIHHBBBBHHBBH")
+
+
+def v5_packet(seq, count=3):
+    pkt = V5_HDR.pack(5, count, 100000, int(time.time()), 0, seq, 0, 0, 0)
+    for i in range(count):
+        pkt += V5_REC.pack(
+            bytes([192, 168, 1, 10 + i]), bytes([8, 8, 8, 8]), bytes([192, 168, 1, 1]),
+            1, 2, 12, 1500, 90000, 100000, 51000 + i, 443, 0,
+            0x18, 6, 0, 0, 0, 24, 24, 0)
+    return pkt
+
+
+def run(script, packets, argv=()):
+    keys = list(script)
+    queue = list(packets)
+
+    class FakeSocket:
+        calls = 0
+
+        def __init__(self, *a, **kw):
+            pass
+
+        def setsockopt(self, *a):
+            pass
+
+        def bind(self, *a):
+            pass
+
+        def settimeout(self, *a):
+            pass
+
+        def close(self):
+            pass
+
+        def recvfrom(self, _n):
+            FakeSocket.calls += 1
+            if FakeSocket.calls > 500:
+                raise KeyboardInterrupt
+            if queue:
+                return queue.pop(0), ("10.0.0.1", 2055)
+            raise socket.timeout
+
+    main.Keyboard.start = lambda self: setattr(self, "enabled", True) or True
+    main.Keyboard.poll = lambda self: (keys.pop(0) if keys and self.enabled else None)
+    main.Keyboard.stop = lambda self: setattr(self, "enabled", False)
+    socket.socket = FakeSocket
+
+    out, err = FakeTTY(), io.StringIO()
+    real_out, real_err = sys.stdout, sys.stderr
+    sys.stdout, sys.stderr = out, err
+    sys.argv = ["nettail", "--resolve", "off", "--no-color"] + list(argv)
+    try:
+        main.main()
+    finally:
+        sys.stdout, sys.stderr = real_out, real_err
+    return out.getvalue(), err.getvalue()
+
+
+out, err = run([None, "s", None, "\x1b", None], [v5_packet(0)])
+check("the report is printed twice: once for s, once on the way out",
+      err.count("Summary") == 2, "%d times" % err.count("Summary"))
+check("the mid-run report counts what had arrived by then",
+      err.count("flows decoded      3") == 2,
+      repr([ln for ln in err.splitlines() if "flows decoded" in ln]))
+check("flows keep printing after the report", len(
+    [ln for ln in out.splitlines() if "8.8.8.8" in ln]) == 3)
+check("s did not stop the collector", "closing" in err)
+
+# the report reflects the moment it is asked for
+out, err = run([None, "s", None, None, "s", None, "\x1b", None],
+               [v5_packet(0), v5_packet(3)])
+decoded = [ln.strip() for ln in err.splitlines() if "flows decoded" in ln]
+check("three reports in all", len(decoded) == 3, str(decoded))
+check("each report is a snapshot of that moment",
+      decoded == ["flows decoded      3", "flows decoded      6",
+                  "flows decoded      6"], str(decoded))
+
+# c then s: the report reflects the cleared counters
+out, err = run([None, "c", None, "s", None, "\x1b", None], [v5_packet(0)])
+decoded = [ln.strip() for ln in err.splitlines() if "flows decoded" in ln]
+check("clearing statistics shows through in the report",
+      decoded == ["flows decoded      0", "flows decoded      0"], str(decoded))
+
+finish("summary key")

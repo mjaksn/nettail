@@ -1,0 +1,42 @@
+# Service names the system database is missing.
+#
+# Consulted only after the system database has been asked and had nothing to
+# say, so an entry here can never override /etc/services or the Windows
+# services file. It exists because those files differ from machine to machine:
+# port 5353 is named on most Linux and macOS installs and unnamed on Windows,
+# which is the difference between a flow reading 5353/mdns and reading 5353.
+#
+# The format is the one /etc/services uses:
+#
+#     name   port/protocol   [aliases]   # trailing comment
+#
+# Anything after a # is ignored, as is a blank line. Aliases are read and
+# discarded, since a column has room for one name. A malformed line is skipped
+# rather than treated as an error, so editing this file cannot stop the
+# collector starting.
+#
+# Save it as UTF-8. Saved as UTF-16, which is what PowerShell redirection and
+# an editor's "Unicode" both mean by default, every line here fails to read at
+# once rather than one at a time. The collector says so at startup rather than
+# running on quietly with none of these names.
+#
+# Edit it freely, or pass --no-supplemental-services to ignore it entirely.
+#
+# Ports at or above 49152 are never looked up here. That range is ephemeral and
+# a name found in it would describe the client end of a connection, which is an
+# accident of whatever the kernel handed out rather than a service.
+
+mdns            5353/udp     # multicast DNS, what Apple and Linux answer to
+mdns            5353/tcp
+llmnr           5355/udp     # link-local name resolution, Windows' own
+llmnr           5355/tcp
+ssdp            1900/udp     # simple service discovery, the UPnP half
+domain-s         853/udp     # DNS over TLS
+domain-s         853/tcp
+coap            5683/udp     # constrained application protocol, IoT
+coaps           5684/udp
+mqtt            1883/tcp     # message broker, IoT and home automation
+secure-mqtt     8883/tcp
+netbios-ns       137/udp     # NetBIOS name service, what --resolve all asks
+netbios-dgm      138/udp
+netbios-ssn      139/tcp

@@ -1,0 +1,144 @@
+name: CI
+
+# Deliberately not on every push. A branch with no pull request open against
+# it runs nothing, and a merge runs the suite once rather than twice:
+#
+#   pull_request       while a change is up for review, re-running on each
+#                      push to it, so what passed is always the code being
+#                      merged.
+#   push to main       after the merge has happened.
+#   workflow_dispatch  on demand, for a run nobody asked for by pushing.
+#
+# The pull_request trigger is what makes the requirement enforceable, and it
+# is not interchangeable with dispatching by hand. A dispatched run does
+# attach its checks to the branch head commit, but they do not enter the pull
+# request's status check rollup, and the rollup, not the commit, is what a
+# ruleset evaluates. A repository configured the other way shows a head commit
+# covered in green checks while the merge stays blocked on an empty rollup. So
+# dispatch is a convenience here, never the gate.
+#
+# The ruleset on main should require the `gate` job below and nothing else.
+# Requiring the matrix jobs directly would mean naming all ten of them, and
+# renaming one would quietly stop protecting anything.
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+      - name: install the tools
+        run: pip install ruff
+      - name: ruff
+        run: ruff check .
+      # No mypy step, unlike netflume and lanname. Those two ship annotations
+      # and a py.typed, so their types are part of what a consumer receives
+      # and are worth checking. This is a program: nothing imports it for its
+      # signatures, it carries no annotations to check, and a mypy run over it
+      # would report on the two packages it calls rather than on anything
+      # here. Add the step alongside the annotations if that ever changes.
+
+  test:
+    name: tests ${{ matrix.python }} on ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+        exclude:
+          # 3.9 is no longer in the windows runner image's tool cache, so
+          # setup-python spends the better part of a minute fetching an
+          # interpreter to run a suite that takes seconds, and `gate` waits
+          # for the slowest job, so that sits on the critical path of every
+          # merge.
+          #
+          # Dropped rather than the whole of 3.9, because the two axes catch
+          # different things. 3.9 catches syntax and stdlib incompatibility,
+          # which is the same on either OS and is still covered on ubuntu.
+          # Windows catches the terminal handling, which is where this program
+          # differs most per platform, and which is still covered on four
+          # versions. Only the intersection goes untested.
+          - os: windows-latest
+            python: "3.9"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: ${{ matrix.python }}
+      - name: install the two dependencies
+        # The program is not installed, only what it imports. The suite runs
+        # against the source tree, which is the code being reviewed.
+        run: pip install "lanname>=0.2.0,<0.3" "netflume>=0.1.0,<0.2"
+      - name: run the suite
+        # One suite reaches the network, and only over loopback: it starts a
+        # real collector on 127.0.0.1 and sends it NetFlow v5 datagrams.
+        # Nothing here leaves the runner.
+        run: python tests/run.py
+
+  build:
+    name: build and install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+      - run: pip install build twine
+      - name: build the distributions
+        run: python -m build
+      - name: check the metadata
+        run: twine check dist/*
+      - name: install the wheel somewhere else and run it
+        # From another directory on purpose. Running from the repository root
+        # would run the source tree and prove nothing about the wheel, which
+        # is the thing anybody else actually receives.
+        run: |
+          python -m venv /tmp/probe
+          /tmp/probe/bin/python -m pip install --quiet dist/*.whl
+          cd /tmp
+          /tmp/probe/bin/nettail --help > /dev/null
+          /tmp/probe/bin/python - <<'PY'
+          import pathlib
+          import nettail
+          from nettail import services
+          here = pathlib.Path(nettail.__file__).parent
+          data = here / "supplemental-services"
+          assert data.exists(), "supplemental-services missing from the wheel"
+          assert services.load() is None, "the shipped list did not load"
+          assert services.service_name(5353, 17) == "mdns", "5353 was not named"
+          print("ran", nettail.__version__, "from", here)
+          PY
+
+  gate:
+    name: gate
+    # The single check for branch protection to require. Runs whatever the
+    # others did, so a failure upstream is reported here rather than leaving
+    # the gate skipped and the requirement satisfied by default.
+    if: always()
+    needs: [lint, test, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: every job must have succeeded
+        run: |
+          echo "lint  ${{ needs.lint.result }}"
+          echo "test  ${{ needs.test.result }}"
+          echo "build ${{ needs.build.result }}"
+          [ "${{ needs.lint.result }}"  = "success" ] || exit 1
+          [ "${{ needs.test.result }}"  = "success" ] || exit 1
+          [ "${{ needs.build.result }}" = "success" ] || exit 1

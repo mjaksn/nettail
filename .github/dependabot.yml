@@ -1,0 +1,26 @@
+version: 2
+
+# Actions, and the two packages this one is built on. Unlike netflume and
+# lanname, this has dependencies: they are the halves of this program that
+# were lifted out of it, and a release of either is worth being told about
+# rather than finding out from a bug report.
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "ci"
+    open-pull-requests-limit: 3
+
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "deps"
+    open-pull-requests-limit: 3

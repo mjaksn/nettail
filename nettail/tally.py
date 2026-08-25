@@ -1,0 +1,248 @@
+"""Everything the traffic summary reports, accumulated one flow at a time.
+
+Fed every decoded flow, shown or hidden, so the report describes what the
+exporter sent rather than what happened to fit on screen.
+"""
+
+import heapq
+from collections import Counter
+
+from netflume import (
+    PROTO_NAMES,
+    addr_kind,
+    flow_duration,
+    flow_endpoints,
+    flow_timestamp,
+)
+
+from .services import service_name
+
+TOP_N = 5                    # rows in each of the "busiest" tables
+MAX_SPEED_EVENTS = 100000    # rate changes kept for the concurrency estimate
+MAX_TRACKED_KEYS = 50000     # pairs, services or addresses held at once
+
+
+class Tally:
+    """Running totals behind the traffic summary."""
+
+    def __init__(self, top=TOP_N):
+        self.top = top
+        self.reset()
+
+    def reset(self):
+        """Forget everything. What the c key does."""
+        self.flows = 0
+
+        self.proto_flows = Counter()
+        self.proto_bytes = Counter()
+        self.proto_packets = Counter()
+
+        self.service_bytes = Counter()
+        self.service_flows = Counter()
+
+        self.pair_bytes = Counter()
+        self.pair_packets = Counter()
+        self.talkers = Counter()
+
+        self.longest = []            # a heap of the `top` longest lived flows
+        self._tick = 0               # breaks ties without comparing addresses
+
+        self.external_bytes = 0
+        self.external_flows = 0
+        self.inbound_bytes = 0
+        self.outbound_bytes = 0
+
+        self.timed_flows = 0
+        self.rated_flows = 0          # external timed flows in the estimate
+        self._events = []
+        self.events_dropped = 0
+        self.pruned = 0
+
+        # A floor needs no assumptions: a flow's own average over its own
+        # lifetime, and what whole flows delivered inside a single second.
+        self.peak_flow_bits = 0.0
+        self.second_bits = Counter()
+
+    def clear(self):
+        """Alias for reset(), so the key that clears counters can call clear()
+        on this the same way it does on the Counters it replaced."""
+        self.reset()
+
+    # -- collecting ---------------------------------------------------------
+
+    def add(self, rec, hdr):
+        """Fold one decoded flow in."""
+        octets = rec.get("octets", rec.get("octets_total")) or 0
+        packets = rec.get("packets", rec.get("packets_total")) or 0
+        proto = rec.get("proto")
+        proto_name = PROTO_NAMES.get(proto, str(proto) if proto is not None else "?")
+        src, dst = flow_endpoints(rec)
+
+        self.flows += 1
+        self.proto_flows[proto_name] += 1
+        self.proto_bytes[proto_name] += octets
+        self.proto_packets[proto_name] += packets
+
+        service = self.service_of(rec, proto)
+        self.service_bytes[service] += octets
+        self.service_flows[service] += 1
+
+        if src and dst:
+            # Direction is collapsed: a conversation is a conversation whichever
+            # end opened it, and two rows for one exchange would just split it.
+            pair = (src, dst) if src <= dst else (dst, src)
+            self.pair_bytes[pair] += octets
+            self.pair_packets[pair] += packets
+
+        src_public = bool(src) and addr_kind(src) == "public"
+        dst_public = bool(dst) and addr_kind(dst) == "public"
+        if dst_public:
+            self.talkers[dst] += octets
+        if src_public:
+            self.talkers[src] += octets
+
+        if src_public or dst_public:
+            self.external_bytes += octets
+            self.external_flows += 1
+            # A flow between two public addresses is both arriving and leaving,
+            # and is counted in each direction rather than assigned to one.
+            if src_public:
+                self.inbound_bytes += octets
+            if dst_public:
+                self.outbound_bytes += octets
+
+        self._prune((self.pair_bytes, self.pair_packets))
+        self._prune((self.service_bytes, self.service_flows))
+        self._prune((self.talkers,))
+
+        duration = flow_duration(rec, hdr)
+        if not duration:
+            # A flow with no duration says nothing about how long anything took
+            # or how fast it went, so it stays out of both of those answers.
+            return
+        self.timed_flows += 1
+        self._remember_longest(duration, rec, src, dst, proto_name, octets)
+        if not (src_public or dst_public):
+            return
+
+        start = flow_timestamp(rec, hdr)
+        bits = octets * 8.0
+        rate = bits / duration
+        # Whatever else the link did, it carried this flow's bytes inside this
+        # flow's lifetime, so its average is a rate the link certainly reached.
+        self.peak_flow_bits = max(self.peak_flow_bits, rate)
+        if int(start) == int(start + duration):
+            # Begun and ended inside one second, so all of it crossed in that
+            # second and several such flows add up without any assuming.
+            self.second_bits[int(start)] += bits
+            self._prune((self.second_bits,))
+        self._add_rate(start, start + duration, rate)
+
+    @staticmethod
+    def service_of(rec, proto):
+        """The port a flow is filed under, with its name where it has one.
+
+        Whichever port has a name wins, destination first, since that is the
+        one being connected to in the ordinary case. The number is always
+        shown even when a name is known: a name is a convention and the number
+        is the fact, and it is the number you reach for when writing a firewall
+        rule or searching a capture.
+        """
+        for port in (rec.get("dst_port"), rec.get("src_port")):
+            named = service_name(port, proto)
+            if named:
+                return f"{port}/{named}"
+        ports = [p for p in (rec.get("dst_port"), rec.get("src_port")) if p]
+        if not ports:
+            return PROTO_NAMES.get(proto, "other").lower()
+        return f"{min(ports)}/{PROTO_NAMES.get(proto, 'ip').lower()}"
+
+    def _remember_longest(self, duration, rec, src, dst, proto_name, octets):
+        # A heap of `top` entries, so a busy run costs five slots and not one
+        # per flow. The counter breaks ties, which keeps addresses out of the
+        # comparison where a None would raise.
+        entry = (duration, self._tick,
+                 (src, rec.get("src_port"), dst, rec.get("dst_port"),
+                  proto_name, octets))
+        self._tick += 1
+        if len(self.longest) < self.top:
+            heapq.heappush(self.longest, entry)
+        else:
+            heapq.heappushpop(self.longest, entry)
+
+    def _add_rate(self, start, end, rate):
+        if len(self._events) + 2 > MAX_SPEED_EVENTS:
+            self.events_dropped += 1
+            return
+        self.rated_flows += 1
+        self._events.append((start, rate))
+        self._events.append((end, -rate))
+
+    def _prune(self, counters):
+        """Drop the small fry from counters that would otherwise grow forever.
+
+        Only the busiest handful is ever reported, so holding every
+        conversation a long run has ever seen costs memory to no purpose. What
+        survives is whatever ranks highest in any of the counters given, since
+        a pair can be large by bytes or by packets and either earns its keep.
+        """
+        primary = counters[0]
+        if len(primary) <= MAX_TRACKED_KEYS:
+            return
+        keep = set()
+        for counter in counters:
+            keep.update(key for key, _ in counter.most_common(MAX_TRACKED_KEYS // 2))
+        dropped = [key for key in primary if key not in keep]
+        for counter in counters:
+            for key in dropped:
+                counter.pop(key, None)
+        self.pruned += len(dropped)
+
+    # -- reporting ----------------------------------------------------------
+
+    def longest_flows(self):
+        """The longest lived flows, longest first, as (duration, details)."""
+        return [(duration, details)
+                for duration, _tick, details in sorted(self.longest, reverse=True)]
+
+    def top_pairs_by_bytes(self):
+        return self.pair_bytes.most_common(self.top)
+
+    def top_pairs_by_packets(self):
+        return self.pair_packets.most_common(self.top)
+
+    def min_link_speed(self):
+        """Bits per second the external link certainly carried at some point.
+
+        Two things are true without assuming anything about how a flow spread
+        its bytes. A flow delivered all of them inside its own lifetime, so the
+        link reached at least that flow's average at some instant within it.
+        And flows that began and ended inside the same second delivered all of
+        their bytes during that second, so those add up. The larger of the two
+        is the answer, and it is a floor in the strict sense: the link cannot
+        have been slower.
+        """
+        busiest_second = max(self.second_bits.values(), default=0.0)
+        return max(self.peak_flow_bits, busiest_second)
+
+    def busiest_moment(self):
+        """Concurrent demand, if every flow delivered its bytes evenly.
+
+        Each flow is spread across its own lifetime and the rates are laid on a
+        timeline; the tallest point is the answer. This is an estimate and not
+        a bound, which is a distinction worth keeping: two flows that merely
+        overlap need not have been sending at the same instant, so the sum of
+        their averages can exceed anything the link was actually required to
+        do. Real traffic is also burstier than an even spread, which pushes the
+        other way. It is the shape of the traffic, not a measurement.
+
+        Where a flow ends exactly as another begins the ending is counted
+        first, which keeps the number on the conservative side.
+        """
+        if not self._events:
+            return 0.0
+        peak = running = 0.0
+        for _when, delta in sorted(self._events):
+            running += delta
+            peak = max(peak, running)
+        return peak
