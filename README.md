@@ -161,8 +161,8 @@ change.
 ## Command line options
 
 ```
-usage: nettail [-h] [--bind BIND] [--port PORT] [--external-only] [--verbose]
-               [--json] [--no-color] [--header-every HEADER_EVERY]
+usage: nettail [-h] [--version] [--bind BIND] [--port PORT] [--external-only]
+               [--verbose] [--json] [--no-color] [--header-every HEADER_EVERY]
                [--sticky-header] [--hide-status] [--no-supplemental-services]
                [--size-scale-max BYTES | --size-scale-dynamic]
                [--size-scale-window FLOWS] [--resolve {off,dns,all}]
@@ -175,6 +175,7 @@ usage: nettail [-h] [--bind BIND] [--port PORT] [--external-only] [--verbose]
 
 | Option | Default | Description |
 | --- | --- | --- |
+| `--version` | | Print the version and exit |
 | `--bind ADDR` | `0.0.0.0` | Address to bind the UDP socket to |
 | `--port PORT` | `2055` | UDP port to listen on |
 | `--external-only` | off | Only display flows where the source or destination is a public IP. Everything is still counted in the summary |
@@ -1239,7 +1240,7 @@ python tests/run.py tally keys    # only suites whose name contains either
 python tests/run.py -v            # print every check, not only failures
 ```
 
-746 checks across 23 suites, in about eight seconds. No test dependencies and no
+756 checks across 24 suites, in about eight seconds. No test dependencies and no
 test runner to learn: the suites need only netflume and lanname, the same as
 the collector.
 
@@ -1286,6 +1287,7 @@ another suite's result.
 | `test_sticky_with_gradient` | the pinned header and the size ramp sharing one screen |
 | `test_services` | the supplemental port names, the parser behind them, the system database keeping precedence, and the ephemeral floor pinned to where netflume actually puts it |
 | `test_endpoints`, `test_top_talkers` | one definition of a flow's ends, both directions counted |
+| `test_version` | `--version`, and the package, pyproject and changelog agreeing about the number |
 
 Nothing reaches the network except `test_size_end_to_end`, which starts a real
 collector on the loopback interface, waits to be told the socket is bound, and

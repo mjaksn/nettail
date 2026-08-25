@@ -32,6 +32,7 @@ console: the part that decides what a flow should look like on a terminal.
   prompted it: named on most Linux and macOS installs, unnamed on Windows, and
   the same capture should not read differently on two machines.
   `--no-supplemental-services` turns it off.
+- `--version`, which prints the number the package reports and nothing else.
 - A `?` key that lists every keyboard control and what it does, so the
   reminder line under the startup banner can be a pointer rather than a
   two-hundred-character list that wrapped and then scrolled away.
