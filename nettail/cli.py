@@ -22,7 +22,7 @@ from netflume import (
     flow_timestamp,
 )
 
-from . import services
+from . import __version__, services
 from .colour import C
 from .display import HEADER_LINE, proto_colour, render
 from .keys import KEY_HELP, Controls, Keyboard
@@ -361,6 +361,9 @@ def main():
     ap = argparse.ArgumentParser(
         prog="nettail",
         description="Listen for NetFlow v5/v9/IPFIX and print flows to the console.")
+    ap.add_argument("--version", action="version",
+                    version=f"nettail {__version__}",
+                    help="print the version and exit")
     ap.add_argument("--bind", default="0.0.0.0",
                     help="address to bind (default 0.0.0.0)")
     ap.add_argument("--port", type=int, default=2055, help="UDP port (default 2055)")
