@@ -199,7 +199,7 @@ buf = io.StringIO()
 main.write_keys(buf)
 listing = plain(buf.getvalue()).strip("\n")
 check("the README quotes the key listing exactly as the ? key prints it",
-      any(listing in block for block in BLOCKS),
+      listing in BLOCKS,
       "%d lines, first %r" % (len(listing.splitlines()),
                               listing.splitlines()[0]))
 
