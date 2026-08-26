@@ -1,5 +1,10 @@
 # nettail
 
+[![CI](https://github.com/mjaksn/nettail/actions/workflows/ci.yml/badge.svg)](https://github.com/mjaksn/nettail/actions/workflows/ci.yml)
+[![Release](https://github.com/mjaksn/nettail/actions/workflows/release.yml/badge.svg)](https://github.com/mjaksn/nettail/actions/workflows/release.yml)
+[![PyPI](https://img.shields.io/pypi/v/nettail)](https://pypi.org/project/nettail/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/mjaksn/nettail/blob/main/LICENSE)
+
 A NetFlow and IPFIX collector that prints flow records to the console in a
 readable table, annotating addresses with hostnames where it can find them.
 `tail -f` for your network.
