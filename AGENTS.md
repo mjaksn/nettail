@@ -67,9 +67,11 @@ test:
   actually stops naming ports and pins ours to it.
 - **The version** appears in `pyproject.toml`, `nettail/__init__.py` and
   `CHANGELOG.md`. `release.yml` refuses to publish unless the tag agrees with
-  the first two. `cli.py` imports `__version__` from the package, which works
-  because `__init__.py` assigns it above its submodule imports; keep that
-  order.
+  the first two, and the release notes it posts are the changelog's section
+  for that tag, so a tag the changelog says nothing about fails the release
+  rather than putting up an empty page. `cli.py` imports `__version__` from
+  the package, which works because `__init__.py` assigns it above its
+  submodule imports; keep that order.
 
 ## Service names
 
