@@ -11,6 +11,17 @@ but it is a program rather than a library, and the names inside it may move
 without that being a breaking change. `--json` output is the part meant to be
 parsed, and it is treated as public.
 
+## [0.1.2] - 2026-08-26
+
+### Documentation
+
+- The README now carries the same badge set as the sibling projects: CI,
+  Release, PyPI version, and licence. Released so that the badges appear on the
+  PyPI project page, which is rendered from the README inside the uploaded
+  distribution and cannot be edited in place.
+
+No code changed in this release.
+
 ## [0.1.1] - 2026-08-25
 
 ### Fixed
@@ -49,5 +60,6 @@ console: the part that decides what a flow should look like on a terminal.
   reminder line under the startup banner can be a pointer rather than a
   two-hundred-character list that wrapped and then scrolled away.
 
+[0.1.2]: https://github.com/mjaksn/nettail/releases/tag/v0.1.2
 [0.1.1]: https://github.com/mjaksn/nettail/releases/tag/v0.1.1
 [0.1.0]: https://github.com/mjaksn/nettail/releases/tag/v0.1.0
