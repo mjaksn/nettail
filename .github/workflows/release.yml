@@ -101,7 +101,7 @@ jobs:
         # definition sits at the foot of the changelog, so lifted out on its
         # own it would render as bare brackets.
         run: |
-          python - <<'PY' > notes.md
+          python3 - <<'PY' > notes.md
           import os, pathlib, re, sys
           version = os.environ["GITHUB_REF_NAME"][1:]
           text = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
