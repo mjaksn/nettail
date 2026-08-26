@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nettail"
-version = "0.1.1"
+version = "0.1.2"
 description = "A NetFlow v5, NetFlow v9 and IPFIX collector that prints flows to a console, with hostnames, colour and a live status bar"
 readme = "README.md"
 requires-python = ">=3.9"

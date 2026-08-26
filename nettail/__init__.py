@@ -36,7 +36,7 @@ than lifted out of it: ``services.load()`` says what it loads and a bare
 ``load`` in this namespace would not.
 """
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 
 from .cli import main, report_events, should_show, write_hosts, write_summary
 from .colour import C
