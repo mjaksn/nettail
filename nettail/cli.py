@@ -358,9 +358,20 @@ def main():
     # Named rather than taken from argv[0], which is the console script's full
     # path when installed and "__main__.py" under `python -m`. Neither is what
     # anyone types, and the usage line is quoted in the README.
+    #
+    # Python 3.14 gave argparse a colour scheme of its own, over the usage
+    # line and the options beneath it, in the help and in the usage printed
+    # above an error alike. It is chosen while parsing, which is before
+    # --no-color has been read and so out of reach of the switch further down:
+    # `nettail --no-color --help` came out in colour regardless, and so did a
+    # plain `--help` at a terminal. What colour this program prints is settled
+    # in one place, so argparse is asked to keep out of it. The keyword does
+    # not exist before 3.14, hence the gate.
+    plain_help = {"color": False} if sys.version_info >= (3, 14) else {}
     ap = argparse.ArgumentParser(
         prog="nettail",
-        description="Listen for NetFlow v5/v9/IPFIX and print flows to the console.")
+        description="Listen for NetFlow v5/v9/IPFIX and print flows to the console.",
+        **plain_help)
     ap.add_argument("--version", action="version",
                     version=f"nettail {__version__}",
                     help="print the version and exit")

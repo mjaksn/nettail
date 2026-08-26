@@ -15,11 +15,11 @@ Neither has dependencies of its own, so `pip install nettail` brings in three
 pure Python packages and nothing else.
 
 ```
-TIME         EXPORTER   PROTO  SOURCE                              DESTINATION                            PKTS   BYTES     DUR  FLAGS
-13:40:03.000 10.0.0.1   TCP    192.168.1.42:51234 (macbook-pro)  ↑ 140.82.114.4:443/https                   23    4.1K   4.90s  ...AP.SF
-13:40:03.000 10.0.0.1   UDP    192.168.1.77:5353/mdns            ⇄ 224.0.0.251:5353/mdns                     2     180B   4.90s
-13:39:56.103 10.0.0.1   TCP    10.0.1.5:44321 (nas)              ↑ 104.244.42.1:443/https (twitter-edge)    412   57.5K  12.50s  ...AP...
-13:40:08.453 10.0.0.1   TCP    1.1.1.1:853/domain-s              ↓ 10.0.1.5:39012 (nas)                       4     320B   0.15s  ......S.
+TIME         EXPORTER        PROTO  SOURCE                                     DESTINATION                                 PKTS    BYTES     DUR  FLAGS
+13:40:03.000 10.0.0.1        TCP    192.168.1.42:51234 (macbook-pro)         ↑ 140.82.114.4:443/https (github)               23     4.1K   4.90s  ...AP.SF
+13:40:03.000 10.0.0.1        UDP    192.168.1.77:5353/mdns (hue)             ⇄ 224.0.0.251:5353/mdns                          2     180B   4.90s
+13:39:56.103 10.0.0.1        TCP    10.0.1.5:44321 (nas)                     ↑ 104.244.42.1:443/https (twitter-edge)        412    57.5K  12.50s  ...AP...
+13:40:08.453 10.0.0.1        TCP    1.1.1.1:853/domain-s                     ↓ 10.0.1.5:39012 (nas)                           4     320B   0.15s  ......S.
 ```
 
 ---
@@ -147,6 +147,53 @@ proof that sampling is off, so check the UniFi UI as well. On v5 there are no op
 records at all: sampling is read from the header, and an exporter that stops
 sampling simply clears the field, which is reported as nothing rather than as a
 change.
+
+### Local traffic may never arrive
+
+Selecting every network in the table above reads like a request for visibility into
+all of them. On a UDM Pro it is not what you get. Traffic to and from the internet
+arrives. Traffic between two local hosts may not, and the two reasons for that are
+worth telling apart, because only one of them is surprising.
+
+**Two hosts on the same VLAN never produce a flow record at all.** They talk through
+a switch and the gateway routes nothing between them, so there is nothing for it to
+account. This is not a fault and no setting changes it. A flow exporter running on
+the router cannot see traffic that never reaches the router, and every tool reading
+NetFlow from a gateway has this property, this one included.
+
+**Two hosts on different VLANs are routed by the gateway and may still be missing.**
+This is the surprising one. Traffic between separate subnets has to pass through the
+UDM Pro, and a `tracert` or `traceroute` between the hosts shows it as a hop, so the
+router demonstrably handles the packets. They can still be absent from the export,
+with every network selected.
+
+Two mechanisms would account for that and they cannot be told apart from outside the
+box. The routing may be offloaded to hardware along a path the flow accounting does
+not sit on, or the accounting may be scoped to the internet-facing path by design.
+The consequence is the same either way, which is why the distinction matters less
+than it looks: neither this collector nor anything in the export configuration
+changes it.
+
+This is behaviour observed on a UDM Pro rather than anything Ubiquiti documents, so
+establish it on your own hardware before concluding. Three checks, in order of
+effort:
+
+1. `tracert` or `traceroute` between the two hosts. The UDM's address as a hop means
+   it routes them, and the rest of this section applies. A switch address instead
+   means a layer 3 switch is doing the routing and the gateway has nothing to report,
+   which is a different problem with a different answer.
+2. **Insights > Flows** in the UniFi Network application. Sessions listed there and
+   absent from your export mean the data exists on the box and only the export scope
+   is holding it back. That is the version worth raising with Ubiquiti, being a
+   demonstrable gap rather than a suspicion.
+3. This collector's own exit summary. Compare `flows decoded` under **Summary** with
+   `flows` under **External traffic**. Two equal figures mean every flow that arrived
+   had a public endpoint, so nothing internal is being exported at all.
+
+If it is east-west visibility you need, a gateway is the wrong vantage point for it.
+Mirror the VLANs you care about to a capture host at the switch and read packets
+rather than flow records, which is the same advice as for sampled export and for a
+different reason.
 
 ### Other notes
 
@@ -458,6 +505,16 @@ Keyboard controls
   space  pause and resume printing, holding flows meanwhile
       x  clear the screen, and the held flows with it while paused
       s  print the traffic summary now, without stopping
+      l  list the local addresses seen, and their names
+      c  clear the statistics and restart the runtime clock
+      b  hide the status bar at the foot of the window, or bring it back
+      d  re-range the size colour scale as flows arrive, or pin it
+      m  ask for a new fixed top for the size colour scale
+      h  cycle host name resolution: off, dns, all
+      n  show a host by its name in place of its address
+      p  show hardware addresses on a line under each flow
+      f  show full domain names instead of the first label
+      e  show only flows with a public endpoint, or show all
       ?  this list
     esc  close the program, printing the exit summary
 ```
@@ -531,32 +588,57 @@ that was decoded, whether or not it was displayed, so `--external-only` narrows
 the screen without narrowing the report.
 
 ```
+Summary
+  runtime            01:00:00
+  datagrams received 61
+  bytes received     40.0K
+  flows decoded      6
+  templates learned  3
+  option records     2
+
 Protocols
                       bytes    flows    packets
-  TCP                 27.3M        4      21.6k
-  UDP                  9.8K        2         82
+  TCP                 26.1M        4      21.5k
+  UDP                  9.6K        2         82
 
 Services
                       bytes    flows
-  443/https            5.4M        2
-  53/domain            9.8K        2
+  445/microsoft-ds    20.0M        1
+  443/https            5.2M        2
+  22/ssh             878.9K        1
+  53/domain            9.6K        2
 
 Busiest 5 pairs by volume
-  192.168.1.10 (laptop) <-> 93.184.216.34                  5.4M
+  192.168.1.13 <-> 192.168.1.20                                  20.0M
+  192.168.1.10 (laptop) <-> 93.184.216.34                         5.2M
+  140.82.121.4 <-> 192.168.1.12 (buildbox)                      878.9K
 
 Busiest 5 pairs by packets
-  192.168.1.10 (laptop) <-> 93.184.216.34                  4.1k
+  140.82.121.4 <-> 192.168.1.12 (buildbox)                       17.0k
+  192.168.1.10 (laptop) <-> 93.184.216.34                         4.1k
+  192.168.1.13 <-> 192.168.1.20                                    400
 
 Longest 5 flows
-    1h00m  TCP    192.168.1.12:51004 (buildbox) -> 140.82.121.4:22    878.9K
+    1h00m  TCP    192.168.1.12:51004 (buildbox) -> 140.82.121.4:22            878.9K
+     8.0s  TCP    192.168.1.13:51005 -> 192.168.1.20:445                       20.0M
+     3.0s  TCP    192.168.1.10:51000 (laptop) -> 93.184.216.34:443              5.1M
 
 External traffic
-  total               6.3M
-  inbound             5.9K
-  outbound            6.3M
-  flows               6
-  minimum link speed  1.2 Mbps
-  concurrent demand   1.7 Mbps  if every flow sent evenly
+  total              6.1M
+  inbound            0B
+  outbound           6.1M
+  flows              5
+  minimum link speed 14.4 Mbps
+  concurrent demand  14.6 Mbps  if every flow sent evenly
+
+Name resolution
+  names found        4 (dns 1, mdns 2, netbios 1)
+  unresolved         2
+
+Top external addresses by bytes
+  93.184.216.34                                          5.2M
+  140.82.121.4                                         878.9K
+  9.9.9.9                                                4.9K
 ```
 
 **Protocols and services.** A flow is filed under whichever of its two ports has
@@ -672,10 +754,11 @@ escapes at all.
 ## Output format
 
 ```
-TIME         EXPORTER   PROTO  SOURCE                            DESTINATION                     PKTS   BYTES     DUR  FLAGS
-13:40:03.000 10.0.0.1   TCP    192.168.1.42:51234 (macbook)    ↑ 140.82.114.4:443/https (github)    23    4.1K   4.90s  ...AP.SF
-13:40:03.000 10.0.0.1   UDP    192.168.1.77:5353 (hue)         ⇄ 224.0.0.251:5353                    2     180B   4.90s
-13:39:56.103 10.0.0.1   TCP    104.244.42.1:443/https          ↓ 10.0.1.5:44321 (nas)              412   57.5K  12.50s  ...AP...
+TIME         EXPORTER        PROTO  SOURCE                                     DESTINATION                                 PKTS    BYTES     DUR  FLAGS
+13:40:03.000 10.0.0.1        TCP    192.168.1.42:51234 (macbook-pro)         ↑ 140.82.114.4:443/https (github)               23     4.1K   4.90s  ...AP.SF
+13:40:03.000 10.0.0.1        UDP    192.168.1.77:5353/mdns (hue)             ⇄ 224.0.0.251:5353/mdns                          2     180B   4.90s
+13:39:56.103 10.0.0.1        TCP    10.0.1.5:44321 (nas)                     ↑ 104.244.42.1:443/https (twitter-edge)        412    57.5K  12.50s  ...AP...
+13:40:08.453 10.0.0.1        TCP    1.1.1.1:853/domain-s                     ↓ 10.0.1.5:39012 (nas)                           4     320B   0.15s  ......S.
 ```
 
 | Column | Meaning |
@@ -1192,13 +1275,19 @@ template it is not retransmitting, or template datagrams are being dropped in tr
 
 ### Only some flows show up
 
-Two possibilities, and the exit summary distinguishes them.
+Three possibilities. The exit summary names the first two outright, and the third is
+what is left when neither of them appears.
 
 **Sampling**, if a `Sampling` section appears or a warning was printed while running.
 See [Configuring the UDM Pro](#configuring-the-udm-pro).
 
 **Export loss**, if an `Export gaps` section appears. Exports left the router and
 never reached the decoder. See [Export gaps](#export-gaps).
+
+**Never exported**, if neither section appears and what is missing is local traffic.
+Nothing was lost, because nothing was sent: the router may not export flows between
+local hosts at all, whether or not it routes them. See
+[Local traffic may never arrive](#local-traffic-may-never-arrive).
 
 ### Hostnames never resolve
 
