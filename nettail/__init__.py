@@ -11,8 +11,10 @@ hostname. Decoding v5, v9 and IPFIX, the template store behind them, sequence
 gaps and advertised sampling rates live in netflume; turning an address into a
 name over reverse DNS, mDNS and NetBIOS lives in lanname. Both were lifted out
 of this program and are now packages in their own right. What is left here is
-the console: the part that decides what a flow should look like on a
-terminal.
+the display: the part that decides what a flow should look like. Mostly that
+means a terminal, which is what this is for and where all of it works. It can
+also mirror the same display into a browser, which is off unless asked for and
+draws what the terminal draws rather than deciding anything of its own.
 
     colour      ANSI codes and the switch that disables them
     values      sizes, rates and durations, written for a column
@@ -23,6 +25,8 @@ terminal.
     statusbar   the two-line bar along the foot of the window
     tally       the running totals behind the exit summary
     keys        the keyboard and what each key does
+    feed        the events a browser watches, and the queues they wait in
+    web         serving those events over HTTP, and taking keys back
     cli         argument parsing, the receive loop, and the exit summary
 
 Nothing from either dependency is re-exported below. A program wanting the
@@ -36,64 +40,88 @@ than lifted out of it: ``services.load()`` says what it loads and a bare
 ``load`` in this namespace would not.
 """
 
-__version__ = "0.1.2"
+__version__ = "0.2.0"
 
-from .cli import main, report_events, should_show, write_hosts, write_summary
+from .cli import (
+    flow_record,
+    main,
+    report_events,
+    should_show,
+    tee,
+    write_hosts,
+    write_summary,
+)
 from .colour import C
 from .display import (
-                      ENDPOINT_INDENT,
-                      ENDPOINT_WIDTH,
-                      HEADER_LINE,
-                      WAY_WIDTH,
-                      endpoint,
-                      flow_macs,
-                      proto_colour,
-                      render,
-                      way,
+    COLUMNS,
+    ENDPOINT_INDENT,
+    ENDPOINT_WIDTH,
+    HEADER_LINE,
+    WAY_WIDTH,
+    endpoint,
+    flow_macs,
+    proto_colour,
+    render,
+    row_cells,
+    way,
 )
+from .feed import CLIENT_BACKLOG, EVENTS, PROSE_KINDS, Feed
 from .keys import (
-                      HELP_KEY,
-                      KEY_HELP,
-                      KEY_WIDTH,
-                      KEYS,
-                      PAUSE_BUFFER,
-                      Controls,
-                      Keyboard,
-                      write_keys,
+    HELP_KEY,
+    KEY_HELP,
+    KEY_WIDTH,
+    KEYS,
+    PAUSE_BUFFER,
+    WEB_EXCLUDED,
+    Controls,
+    Keyboard,
+    web_keys,
+    write_keys,
 )
 from .services import EPHEMERAL_FLOOR, SUPPLEMENTAL_SERVICES, service_name
 from .sizescale import (
-                      DEFAULT_SIZE_SCALE_MAX,
-                      MIN_DYNAMIC_SCALE_MAX,
-                      SIZE_RAMP,
-                      SIZE_SCALE_FLOOR,
-                      SizeScale,
-                      SpanScale,
-                      size_scale_arg,
-                      size_window_arg,
+    DEFAULT_SIZE_SCALE_MAX,
+    MIN_DYNAMIC_SCALE_MAX,
+    SIZE_RAMP,
+    SIZE_SCALE_FLOOR,
+    SizeScale,
+    SpanScale,
+    size_scale_arg,
+    size_window_arg,
 )
 from .statusbar import (
-                      MIN_STATUS_ROWS,
-                      RATE_WINDOW,
-                      REPAINT_INTERVAL,
-                      STATUS_ROWS,
-                      Rates,
-                      StatusBar,
-                      run_line,
-                      snapshot,
-                      status_lines,
-                      wire_line,
+    MIN_STATUS_ROWS,
+    RATE_WINDOW,
+    REPAINT_INTERVAL,
+    STATUS_ROWS,
+    Rates,
+    StatusBar,
+    run_line,
+    snapshot,
+    status_lines,
+    wire_line,
 )
 from .sticky import (
-                      HEADER_ROWS,
-                      MIN_STICKY_ROWS,
-                      RESIZE_POLL_LINES,
-                      StickyHeader,
-                      enable_windows_vt,
-                      scroll_region,
+    HEADER_ROWS,
+    MIN_STICKY_ROWS,
+    RESIZE_POLL_LINES,
+    StickyHeader,
+    enable_windows_vt,
+    scroll_region,
 )
 from .tally import MAX_SPEED_EVENTS, MAX_TRACKED_KEYS, TOP_N, Tally
 from .values import human_bits, human_bytes, human_clock, human_count, human_duration
+from .web import (
+    DEFAULT_WEB_PORT,
+    HEARTBEAT,
+    MAX_CLIENTS,
+    WEB_ENDPOINT_WIDTH,
+    WebInterface,
+    content_policy,
+    host_allowed,
+    is_loopback,
+    origin_allowed,
+)
 
 __all__ = [
     "C", "Controls", "DEFAULT_SIZE_SCALE_MAX", "ENDPOINT_INDENT",
@@ -114,4 +142,9 @@ __all__ = [
     "enable_windows_vt", "endpoint",
     "human_bytes", "human_count", "main", "render", "report_events",
     "should_show", "size_scale_arg", "size_window_arg",
+    "COLUMNS", "row_cells", "tee", "flow_record",
+    "CLIENT_BACKLOG", "EVENTS", "PROSE_KINDS", "Feed",
+    "DEFAULT_WEB_PORT", "HEARTBEAT", "MAX_CLIENTS", "WEB_ENDPOINT_WIDTH",
+    "WEB_EXCLUDED", "WebInterface", "content_policy", "host_allowed",
+    "is_loopback", "origin_allowed", "web_keys",
 ]

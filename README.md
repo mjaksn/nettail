@@ -37,6 +37,7 @@ TIME         EXPORTER        PROTO  SOURCE                                     D
 - [Command line options](#command-line-options)
 - [The status bar](#the-status-bar)
 - [Keyboard controls](#keyboard-controls)
+- [The web interface](#the-web-interface)
 - [The traffic summary](#the-traffic-summary)
 - [Output format](#output-format)
 - [Hostname resolution](#hostname-resolution)
@@ -214,8 +215,10 @@ different reason.
 
 ```
 usage: nettail [-h] [--version] [--bind BIND] [--port PORT] [--external-only]
-               [--verbose] [--json] [--no-color] [--header-every HEADER_EVERY]
-               [--sticky-header] [--hide-status] [--no-supplemental-services]
+               [--verbose] [--json] [--colour WHEN] [--no-color]
+               [--header-every HEADER_EVERY] [--sticky-header] [--hide-status]
+               [--no-supplemental-services] [--web] [--web-port PORT]
+               [--web-bind ADDR] [--web-token TOKEN] [--web-readonly]
                [--size-scale-max BYTES | --size-scale-dynamic]
                [--size-scale-window FLOWS] [--resolve {off,dns,all}]
                [--hosts FILE] [--resolve-public] [--fqdn]
@@ -233,11 +236,24 @@ usage: nettail [-h] [--version] [--bind BIND] [--port PORT] [--external-only]
 | `--external-only` | off | Only display flows where the source or destination is a public IP. Everything is still counted in the summary |
 | `--verbose` | off | Print every decoded field on an indented line under each flow. Also surfaces parse errors |
 | `--json` | off | Emit one JSON object per flow on stdout instead of the table |
-| `--no-color` | auto | Disable ANSI colour. Colour is also disabled automatically when stdout is not a TTY or when `NO_COLOR` is set |
+| `--colour WHEN` | `auto` | When to use ANSI colour: `auto`, `always` or `never`. Under `auto` a terminal gets colour and a redirected stream does not, and `NO_COLOR` in the environment turns it off. `--color` is accepted too |
+| `--no-color` | off | The same as `--colour never` |
 | `--header-every N` | `40` | Reprint the column header every N lines. `0` disables repeats |
 | `--sticky-header` | off | Pin the column header to the top row of the window. See below |
 | `--hide-status` | off | Turn off the two-line status bar at the foot of the window, which is shown by default whenever output is going to a terminal. The `b` key toggles it while the collector runs. See [The status bar](#the-status-bar) |
 | `--no-supplemental-services` | off | Name ports from the system services database alone. Without it, a short list shipped with this program fills in the ports the system does not know. See [Service names](#service-names) |
+
+### Web interface
+
+All off unless `--web` is given. See [The web interface](#the-web-interface).
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `--web` | off | Also serve the display to a browser |
+| `--web-port PORT` | `2056` | Port for the web interface |
+| `--web-bind ADDR` | `127.0.0.1` | Address for the web interface. Anything other than loopback exposes this network's traffic over cleartext HTTP, and is warned about at startup |
+| `--web-token TOKEN` | random | Use this token in the URL instead of a fresh random one, so a bookmark survives a restart |
+| `--web-readonly` | off | Serve the display but accept no keys from the browser |
 
 ### Sticky header
 
@@ -578,6 +594,185 @@ exit alongside the scroll region the status bar and the sticky header share.
 One consequence worth knowing: with keys live the socket wait drops from one
 second to a quarter, so that a keypress on a silent network is answered
 promptly rather than up to a second later.
+
+---
+
+## The web interface
+
+`--web` mirrors the display into a browser. It is off unless you ask for it,
+it binds loopback, and the URL it prints carries a token that nothing else
+knows.
+
+```bash
+nettail --web
+```
+
+```
+Listening for NetFlow/IPFIX on 0.0.0.0:2055
+Hostname resolution: reverse DNS, mDNS, NetBIOS (sends probes to the LAN)
+v9 and IPFIX exporters resend templates periodically. Data records before the
+first template are counted as deferred.
+Web interface: http://127.0.0.1:2056/t/QoYm2ZP4rD8xN1sVbTgKcW7e/
+keys: the collector takes single keypresses; press ? to list them
+```
+
+Open that URL and you get the same flows, in the same colours, with the same
+keys. The terminal keeps working throughout; this is a second view of one
+collector rather than a second collector.
+
+### What it shows
+
+Everything the terminal shows, arriving as it arrives:
+
+- **Flow rows**, in a table with the column header pinned to the top. The
+  endpoint columns are wider than a terminal's, so a long hostname that would
+  have been trimmed to an ellipsis is shown whole.
+- **The banner**, including for a browser that connects an hour in. It travels
+  in the greeting each stream opens with rather than being printed once and
+  missed.
+- **Decoder notices**, the running commentary about sampling and lost exports.
+- **The traffic summary and the host list** when the `s` and `l` keys print
+  them, and the exit summary when the collector stops.
+- **A status footer** carrying what the terminal's status bar carries.
+
+### Keys and buttons
+
+The keys live in a drawer, shut by default so the flows have the window. Open
+it with **Keys** in the top bar and every control is there as a labelled
+button, in a grid, with the key it mirrors beside it. Press the key itself and
+it does the same thing. The drawer remembers whether you left it open.
+
+A button that mirrors a setting shows whether that setting is on, and it reads
+that off the collector rather than tracking it locally, so a key pressed at the
+terminal or in another browser moves this one too.
+
+The buttons are built from the collector's own key table, so a key added to the
+program appears in the browser without the page being touched. Two keys are
+treated differently.
+
+`esc` closes the program, which would end it for everybody, this terminal
+included. That is not something that should arrive as a side effect of
+mirroring a keyboard, so it does not cross at all: stop the collector where you
+started it.
+
+`?` has no button, for the same reason: it prints the list of keys, and the
+drawer is that list, labelled and already in front of you. The key itself still
+works. Press it and the listing appears among the flows, as it does at the
+terminal, showing the keys a browser can press.
+
+The `m` key asks for a value, which at a terminal means typing a line. In a
+browser it prompts and sends the answer along with the key.
+
+### While the tab is in the background
+
+A tab you switch away from gives up its connection after about fifteen seconds,
+and takes it back when you return. This is not tidiness. A hidden tab is
+throttled and may be frozen outright, and while it is, the browser goes on
+reading the connection and buffering what arrives with nothing running to
+consume it. On a busy link that buffer grows until the tab is killed for
+memory, which happens while you are not looking at it.
+
+The delay before disconnecting means switching away and straight back costs
+nothing. While the tab is parked the collector gets its watcher slot back.
+
+Switching tabs is the easy case to notice and the mildest one. Minimising the
+whole window is worse, for two reasons. A window that is not on screen can be
+starved of time without ever being marked hidden, and the buffer is itself what
+puts the tab under memory pressure, so the browser freezes it, and a frozen tab
+no longer runs the timer that would have closed the connection. The buffering
+that caused the freeze then outlives it.
+
+So the page watches three things rather than one. It gives the connection up
+when the tab is marked hidden, when the browser says it is about to freeze it,
+and when its own clock shows it has not been run for ten seconds. Any of the
+three is enough on its own, and whichever noticed, coming back works the same
+way and reports the same count.
+
+On return the page says how many flows went past:
+
+```
+12,431 flows arrived while this tab was in the background. The collector has
+them in its totals; they were not kept for the page.
+```
+
+That figure is the collector's own count of flows that passed the display
+filter, asked for on reconnection rather than counted by the page, which by
+definition saw none of them. The totals in the status bar and the traffic
+summary are unaffected: nothing was missed by the collector, only by the view.
+
+### Following the tail
+
+**Follow**, beside the connection indicator, decides whether new flows pull the
+view down with them. It is on to start with. Scroll up and it clears itself, so
+you can read something without wrestling the page for it; scroll back to the
+bottom and it fills again.
+
+If it was on when you switched away from the tab, returning puts you back at
+the bottom straight away rather than leaving you where you were until the next
+flow arrives to carry you there.
+
+`--web-readonly` serves the display and accepts nothing back, which is the
+setting for a session left up on a machine other people use.
+
+### What it is safe to do with
+
+What this serves is a live map of which machines on your network talked to
+which, with hostnames attached, and the control route can switch hostname
+resolution to active mDNS and NetBIOS probing. Treat the URL as a password.
+
+- It binds `127.0.0.1`. Only this machine can reach it.
+- The URL carries a random token. Without it every request is a 404.
+- The `Host` header is checked on every request, which is what stops a web page
+  you happen to have open from reaching it by rebinding a name to `127.0.0.1`.
+- The page loads nothing from anywhere and is served under a content security
+  policy that names the hashes of its own script and style.
+- Hostnames off the wire are shown as text and never as markup, which matters
+  because a hostname is whatever some machine on your network answered.
+
+`--web-bind` will put it on another address, and the collector says plainly
+what that means when you do:
+
+```
+the web interface is bound to 0.0.0.0, not to loopback. Anyone who can reach
+that address and guess nothing worse than the token can read which machines on
+this network talked to which, and the hostnames behind them. This is plain
+HTTP, so the token in the URL travels in the clear and so does everything it
+fetches.
+```
+
+There is no TLS and no login. If you want it reachable from elsewhere, put it
+behind something that provides both, and bind it to loopback so that thing is
+the only way in.
+
+### With `--json`
+
+The two work together, and it is a genuinely useful pairing:
+
+```bash
+nettail --json --web --colour always > flows.jsonl
+```
+
+stdout stays machine-readable while a browser gets the human view. Two things
+follow from that.
+
+`--json` turns the local keyboard off, so the browser becomes the only place
+keys can be pressed. And `pause` holds the browser view only: stdout is the
+part of the interface meant to be parsed, so it keeps flowing rather than
+gaining holds and drops that a consumer would have to cope with.
+
+`--colour always` is worth having there. Colour is normally switched off when
+output is redirected, which would otherwise hand the browser the colourless
+version because of the state of a stream it is not watching.
+
+### Limits
+
+- Four browsers at once. Each holds a connection open for as long as its tab
+  is, and the cap is what stops that being unbounded.
+- A browser that falls a long way behind has the oldest events dropped and is
+  told how many, rather than being shown a gap that looks like continuity.
+- The page keeps the last few thousand rows and trims the rest, saying so when
+  it does. A tab left open on a busy link would otherwise become unusable.
+- IPv4 only, matching the collector socket.
 
 ---
 
@@ -1164,6 +1359,50 @@ RestartSec=5
 WantedBy=multi-user.target
 ```
 
+### With the web interface
+
+A unit is the case `--web` was most worth building for: the flows go to a file
+and there is no terminal to watch, so the browser becomes the only human view.
+
+```ini
+ExecStart=/opt/netflow/venv/bin/nettail \
+    --port 2055 \
+    --resolve dns \
+    --hosts /opt/netflow/lan-hosts \
+    --json \
+    --colour always \
+    --web \
+    --web-token ${NETTAIL_TOKEN}
+```
+
+Three things are worth knowing about that.
+
+**Keep it on loopback.** The default bind is `127.0.0.1`, and on a server that
+means reaching it through an SSH tunnel:
+
+```bash
+ssh -N -L 2056:127.0.0.1:2056 netflow-host
+```
+
+Then open the URL the unit logged, on your own machine. That gives you TLS and
+authentication from SSH, which is more than `--web-bind` on its own will ever
+give you.
+
+**Pin the token.** A fresh random token every restart means a fresh URL every
+restart. `--web-token` read from an environment file keeps one bookmark
+working:
+
+```ini
+EnvironmentFile=/etc/netflow/nettail.env    # NETTAIL_TOKEN=...
+```
+
+Make that file readable only by the service user. The token is the whole of the
+access control.
+
+**Ask for colour.** Output is redirected here, so colour is off by default and
+the browser would get the plain version. `--colour always` is what puts it
+back.
+
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable --now nettail
@@ -1204,7 +1443,10 @@ finding out what a machine is called. Decoding v5, v9 and IPFIX, the template
 store behind them, sequence gaps and advertised sampling rates live in
 netflume; hostname discovery and its cache live in lanname. Both were lifted
 out of this program and released on their own. What is left here is the
-console: the part that decides what a flow should look like on a terminal.
+display: the part that decides what a flow should look like. Mostly that
+means a terminal, and since 0.2.0 the same display can be mirrored into a
+browser, which draws what the terminal draws rather than deciding anything
+of its own.
 
 | It comes from | What lives there |
 | --- | --- |
@@ -1229,12 +1471,15 @@ subprocesses. Everything else is the package:
 | `display.py` | laying one flow out as a line of text |
 | `sticky.py` | pinning the column header to the top of the window |
 | `statusbar.py` | the two-line bar along the foot of the window |
+| `feed.py` | the events a browser watches, and the bounded queues they wait in |
+| `web.py` | serving those events over HTTP, and taking keys back from a browser |
+| `web.html` | the page itself, shipped as package data |
 | `cli.py` | argument parsing, the receive loop, and the exit summary |
 | `tally.py` | the running totals behind the traffic summary |
 | `keys.py` | reading keypresses, and what each one does |
 
-Dependencies run one way, from `cli` down towards `colour` and `values`, so
-there are no import cycles. `nettail/__init__.py` re-exports the public
+Dependencies run one way, from `cli` down towards `colour` and `values`, with
+`web` above `feed` and both below `cli`, so there are no import cycles. `nettail/__init__.py` re-exports the public
 names, which is what makes `from nettail import SizeScale` work wherever
 the class actually lives. Nothing from either dependency is re-exported: a
 program that wants the decoder should import netflume, and one that wants the
@@ -1381,27 +1626,43 @@ another suite's result.
 | `test_sticky_with_gradient` | the pinned header and the size ramp sharing one screen |
 | `test_services` | the supplemental port names, the parser behind them, the system database keeping precedence, and the ephemeral floor pinned to where netflume actually puts it |
 | `test_endpoints`, `test_top_talkers` | one definition of a flow's ends, both directions counted |
+| `test_web_feed` | the event bus: what it publishes, what it drops when a browser falls behind, and the greeting a late arrival gets |
+| `test_web_server` | the stream against a real server: the greeting, the events, the watcher cap, and the exit summary reaching a browser that is still open |
+| `test_web_security` | everything the web interface refuses: forged tokens, forged `Host` and `Origin` headers, paths that try to reach the filesystem, and keys the collector does not answer |
+| `test_web_keys` | browser keys driven through the real receive loop, including the two `--json` interactions nobody would notice going wrong |
 | `test_version` | `--version`, and the package, pyproject and changelog agreeing about the number |
 
 Nothing reaches the network except `test_size_end_to_end`, which starts a real
 collector on the loopback interface, waits to be told the socket is bound, and
-sends it NetFlow v5 datagrams. Everything else drives the code in process with
-synthetic packets, which is also the honest limitation: the exporters are
-imaginary, and how the colours actually look still needs a human and a terminal.
+sends it NetFlow v5 datagrams, and the two web suites, which bind a server on a
+port the operating system picks and talk to it over loopback. Nothing leaves the
+machine. Everything else drives the code in process with synthetic packets,
+which is also the honest limitation: the exporters are imaginary, and how the
+colours actually look still needs a human and a terminal. The page is checked
+for what it must not contain rather than rendered, so the browser half wants a
+human too.
 
 ---
 
 ## Limitations
 
 - **No sFlow.** Different protocol, different wire format.
-- **No IPv6 transport.** The collector socket is `AF_INET`. IPv6 addresses *inside*
-  flow records are decoded fine, but the exporter has to reach the collector over
-  IPv4.
-- **Single-threaded receive.** Fine for a home or small office link. Under heavy load
-  the right change is to move the socket read into its own thread feeding a bounded
-  queue.
+- **No IPv6 transport.** The collector socket is `AF_INET`, and so is the web
+  interface. IPv6 addresses *inside* flow records are decoded fine, but the
+  exporter has to reach the collector over IPv4.
+- **Single-threaded receive.** One thread reads the socket, decodes, renders and
+  answers keys. Fine for a home or small office link; under heavy load the right
+  change is to move the socket read into its own thread feeding a bounded queue.
+  `--web` adds threads, but none of them go near the socket or change any
+  collector state: they read a queue and serve it, which is what keeps this
+  claim true of the part that matters.
 - **No persistence.** Everything is in memory and lost on exit. Use `--json` and
-  redirect if you want history.
+  redirect if you want history. The web interface is a live view and keeps no
+  history of its own: a browser opened late is shown the banner and the current
+  figures, not the flows it missed.
+- **The web interface has no TLS and no login.** A token in the URL over plain
+  HTTP is enough for something bound to loopback and nowhere near enough for
+  anything else. See [The web interface](#the-web-interface).
 - **No IOC matching.** By design. See below.
 - **Options data is read for sampling only.** Other exporter metadata carried in
   options records, such as interface names and application ID mappings, is
