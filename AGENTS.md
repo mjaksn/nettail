@@ -18,11 +18,17 @@ A change about parsing a datagram or resolving a name almost certainly belongs
 in one of those repositories rather than this one. What belongs here is
 layout, colour, keys, the status bar and the exit summary.
 
+Since 0.2.0 there is a second place the same display can appear: `--web`
+serves it to a browser. That is a mirror rather than a second program. It
+decides nothing about what a flow looks like; it is handed the cells the
+terminal row was built from and lays them out in a table.
+
 ## Commands
 
 ```bash
 nettail                          # once installed
 python -m nettail                # from a checkout
+nettail --web                    # and mirror it to a browser on 127.0.0.1
 
 python tests/run.py              # every suite
 python tests/run.py tally keys   # only suites whose name contains either
@@ -65,6 +71,21 @@ test:
 - **`EPHEMERAL_FLOOR` in `services.py`** repeats a number netflume writes
   inline and exports no constant for. `test_services` finds where netflume
   actually stops naming ports and pins ours to it.
+- **`COLUMNS` in `display.py`** is every column, its width, its alignment and
+  the gap in front of it. `HEADER_LINE` is built from it, so is
+  `ENDPOINT_INDENT`, and so is the table head the browser draws, which arrives
+  over the wire in the `hello` event rather than being written down again in
+  `web.html`. The same goes for the buttons, which come from `KEYS` by the same
+  route. **The page hardcodes nothing the terminal already names**, and that is
+  the rule to hold: a second list of columns or keys living in the HTML is a
+  second thing to go stale, and nothing in the page would fail loudly when it
+  did.
+- **`row_cells` in `display.py`** builds one flow's cells once, plain and
+  painted, and both views use them. A browser must never work a cell out for
+  itself. It could not do it correctly in any case, since a service name is
+  whatever this machine's services database calls that port, and reimplementing
+  the protocol names, the size ramp or the arrow in JavaScript would be two
+  implementations to keep in step.
 - **The version** appears in `pyproject.toml`, `nettail/__init__.py` and
   `CHANGELOG.md`. `release.yml` refuses to publish unless the tag agrees with
   the first two, and the release notes it posts are the changelog's section
@@ -84,6 +105,152 @@ The data file has to stay listed in `[tool.setuptools.package-data]`. Left
 out, the wheel ships without it and every supplemental name silently becomes a
 bare port number.
 
+## The web interface
+
+`feed.py` is the bus and knows nothing about HTTP; `web.py` is the server and
+touches no collector state. Between them sits one rule that everything else is
+arranged around: **a request thread may read a feed queue and put a key on a
+queue, and that is the whole of its authority.** Everything that changes what
+the collector is doing happens on the receive thread, which drains the key
+queue between datagrams and hands each one to the same `Controls.handle` the
+terminal uses.
+
+Three things about it are easy to break and quiet when broken.
+
+- **Nothing on an HTTP thread may print.** `sticky.py` and `statusbar.py` are
+  managing a scroll region, and a line written from another thread lands inside
+  it and corrupts both. This is why `log_message` is silenced outright rather
+  than quietened: the problem is the writing, not the volume. `handle_error` on
+  the server is silenced for the same reason and is the more important of the
+  two, because it covers what escapes a handler rather than what a handler
+  chooses to say. A traceback is several pages, and one arrived from an
+  unauthenticated request until a review found it. Fix the raise; keep the
+  guard for the next one.
+- **A connection must be able to stall only for so long.** `MAX_CLIENTS`
+  bounds the stream and nothing else, and `ThreadingHTTPServer` starts a
+  thread per connection with no limit of its own, so `REQUEST_TIMEOUT` on
+  the handler is what stops a client that promises a body and sends none
+  from parking threads. The stream lifts it again once it starts writing,
+  because a watcher on a quiet network legitimately says nothing for
+  minutes and being cut off for it would be worse than no timeout at all.
+- **Nothing that a request can influence may reach `hmac.compare_digest` as a
+  `str` without an `isascii()` check first.** That includes `--web-token`,
+  which is why `web_token_arg` refuses one that is non-ascii or holds a
+  slash: both make the interface answer nothing at all, silently. It refuses a non-ascii `str` by
+  raising, not by returning False, and `http.server` decodes the request line
+  as latin-1, so any byte at all arrives. That is the raise the guard above was
+  added for.
+- **A subscription and the `finally` that gives it back belong in the same
+  `try`.** `wfile` is unbuffered, so writing the response headers can raise if
+  the browser has already gone, and a subscription taken before that `try`
+  leaks a client the feed keeps publishing to and nothing drains.
+- **Publishing must cost nothing when nobody is watching.** Every publish site
+  asks `bus.active` first, and a record or a snapshot is built only then. The
+  display path builds neither today, so a publish that assembled one
+  speculatively would be real work per flow on a busy link.
+- **The escape key does not cross.** `WEB_EXCLUDED` in `keys.py` keeps it back,
+  because ending the process for everybody, this terminal included, is not
+  something that should arrive as a side effect of mirroring a keyboard.
+
+The `--json` interactions are worth knowing because each of them is
+unreachable from a terminal, so none of them existed as a question before this
+did. Anything that draws on stdout has to ask whether there is a terminal to
+draw on: the `x` key writes its clear escapes only when there is one, and so
+does the `b` key, which otherwise puts a scroll region and two rows of status
+bar into the middle of somebody's data and then repaints them twice a second.
+Pause is the other way round, holding the browser view while stdout keeps
+flowing, because `--json` is the part of the interface documented as parseable.
+`test_web_keys` pins all three.
+
+Whether a key may be pressed and whether it deserves a button are two
+questions, so `keys.py` keeps two tables. `WEB_EXCLUDED` is what a browser may
+not press at all, and holds `esc`. `WEB_UNLISTED` is what it may press but gets
+no button for, and holds `?`: the drawer is already the list that key would
+print, so a button reading "this list" beside the list would be absurd, but
+somebody who knows the program will still reach for the key. `web_keys` is the
+first set and `web_buttons` the second, derived from it, so a key can never
+gain a button it is not allowed to press. The page asks `hello.pressable`, not
+its own buttons, when deciding whether to answer a keystroke.
+
+The `?` listing is the one place the two views are shown different text rather
+than the same characters: the browser's copy leaves out `esc`, which it cannot
+press. `controls.listing` writes to stderr directly rather than through
+`controls.out`, which is a tee and would publish the listing a line at a time
+dressed as replies to keys nobody pressed.
+
+## A hidden tab gives up its stream
+
+`web.html` closes its `EventSource` when the tab goes to the background and
+opens a new one when it comes back. This is the fix for a real crash and not a
+nicety, so it should not be quietly dropped.
+
+A hidden tab is throttled and, after a few minutes, may be frozen. No script of
+ours runs then, but the browser keeps reading the socket and buffering the
+response body, and on a busy link that grows until the tab is killed for
+memory. Everything the page could do about it from the inside is too late: by
+the time a handler runs, the memory has been spent. Not having the connection
+open is the only thing that works, and it works whether the tab was throttled
+or frozen outright.
+
+Three separate things ask for it, and none of them covers the others. Keep all
+three. The visibility flag with its fifteen second grace is the ordinary case,
+and it misses a window that is starved without ever being marked hidden, which
+is what minimising one reliably does. The `freeze` event is the load-bearing
+one, because the buffer is what puts the tab under memory pressure in the first
+place: the browser freezes the tab for it, a frozen tab runs no timers, and the
+grace timer that would have closed the connection therefore never fires. The
+clock watcher covers the rest, parking when a one second interval comes back
+ten seconds late, on the grounds that a page being run that seldom is not
+draining anything whatever the flags say. It cannot cover the freeze itself,
+since it is a timer too.
+
+Four things about that arrangement are easy to get wrong.
+
+- **`park` cancels the grace timer, and has to.** With one caller it did not
+  matter. With three, a pending timeout left to run fires after the tab is back
+  and the stream is live again, and parks a tab somebody is looking at.
+- **`stream === null` is not the same question as parked.** A refused
+  connection and one abandoned after five failures both leave it null, and the
+  clock watcher must not reopen either of those. That is what `parked` is for,
+  and why it is cleared in `connect` rather than at each call site.
+- **Every cause has to note the Follow box, and one return has to restore it.**
+  The visibility path notes it on the way out, before the grace. The other two
+  have no way out to note it on, so `park` takes it when nothing has, and
+  `takeBack` puts it back. Restoring only in the visibility handler leaves the
+  starved-window case, which is the one all this was written for, coming back
+  to a page that has quietly stopped following.
+- **A dead `EventSource` must not stay assigned.** Both branches that stop
+  trying tell the reader to reload, so both close the stream, null it and set
+  `gaveUp`. Left assigned, a refused connection reads as a live one, and the
+  clock watcher parks it, takes the refusal off the indicator and reconnects
+  into the same full cap to be refused again.
+
+The count shown on return comes from `flows_shown` in the status payload,
+counted in the receive loop where `should_show` passes. It has to be counted
+there rather than in `feed.py`, because the feed stops publishing when nobody
+is subscribed, which is exactly the stretch the count is about. It is flows
+shown and not `snap["flows"]`, which counts every flow decoded: under
+`--external-only` those differ by a lot, and the number is meant to say what
+was missed rather than what happened.
+
+The same fact about publishing decides where the page reads it. `feed.hello`
+splices in the last status published, and nothing was published during the
+gap, so a greeting hands a returning tab the figure it noted on its way out:
+subtracting the two is zero every time, and the report says nothing at all.
+The page therefore waits for a `status` frame, which follows within a repaint
+interval. `test_web_keys` pins the greeting as the stale one, deliberately, so
+that reading it there fails rather than going quiet.
+
+## Text off the wire is text
+
+Hostnames come from reverse DNS, mDNS and NetBIOS, every one of which is a
+string a machine on this network chose. They reach the page inside flow cells
+and inside captured prose. `web.html` therefore builds every character through
+`textContent`, and its ANSI converter creates spans and fills them rather than
+assembling markup. `test_web_server` greps the shipped page for `innerHTML =`
+and its relatives, which is a blunt check that has the merit of failing the
+moment somebody reaches for the easy thing.
+
 ## The terminal is shared state
 
 `sticky.py` pins the column header to the top row and `statusbar.py` holds the
@@ -99,9 +266,19 @@ feature means reading both, and their suites.
   ubuntu, and it is easy to break this on a newer interpreter without
   noticing.
 - **ruff line length is 88.** CI fails on 89.
-- **Flow rows go to stdout; everything else goes to stderr** — the banner, the
+- **Flow rows go to stdout; everything else goes to stderr**: the banner, the
   `?` listing, the host list, the summary, and every warning. That is what
-  keeps `--json` and shell redirection usable.
+  keeps `--json` and shell redirection usable. There is now a third
+  destination, the feed, and it takes a copy of both rather than replacing
+  either. `cli.tee` is how prose reaches it, and it works by pointing the
+  existing `out=` parameter at a buffer, which is why none of those functions
+  had to change.
+- **Colour is one global switch, and `--colour` is how a redirected run keeps
+  it.** `C.disable()` blanks the codes for the whole process when stdout is not
+  a terminal, which would otherwise hand the browser colourless prose in
+  exactly the arrangement the web interface is most useful in: a service unit
+  writing `--json` to a file. `--colour always` is the answer; `--no-color` is
+  still `never`.
 - **Every `Resolver(...)` passes an explicit `mode`.** lanname 0.2.0 changed a
   bare `Resolver()` from looking nothing up to querying reverse DNS, with
   nothing raised and nothing warned. Explicit modes are why that release was a

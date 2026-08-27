@@ -51,6 +51,48 @@ KEYS = (
     ("esc", "close the program, printing the exit summary"),
 )
 
+# The keys a browser may not press at all, spelled as the table above spells
+# them.
+#
+# The escape key closes the program. Ending a process is a different kind of act
+# from turning a column on, and it would end it for everybody: the terminal this
+# was started from, and every other browser watching. Mirroring a keyboard is
+# not a good enough reason for that to arrive as a side effect, so it does not
+# cross. If it is ever wanted it should be a control that says it stops the
+# collector, asked for on purpose, rather than one more key in a grid.
+WEB_EXCLUDED = ("esc",)
+
+# The keys a browser may press but is given no button for.
+#
+# Being pressable and being worth a button are two different questions, which is
+# why they are two tables. The help key answers "what are the keys", and a
+# browser already has that answer permanently, as a drawer of labelled buttons.
+# A button that said "this list" beside the list would be absurd. The key itself
+# is another matter: somebody who knows the program will press it out of habit,
+# and it costs nothing to answer.
+WEB_UNLISTED = (HELP_KEY,)
+
+
+def web_keys():
+    """The keys a browser may press, in the order the listing shows them.
+
+    Derived from `KEYS` rather than written out again, so a key added there
+    reaches the browser without anybody remembering to add it twice, and the
+    only way to keep one back is to name it in `WEB_EXCLUDED` and say why.
+    """
+    return tuple((key, doc) for key, doc in KEYS if key not in WEB_EXCLUDED)
+
+
+def web_buttons():
+    """The keys a browser puts a button on: the pressable ones, less the quiet.
+
+    A subset of `web_keys`, never a separate list, so that a key cannot end up
+    with a button it is not allowed to press.
+    """
+    return tuple((key, doc) for key, doc in web_keys()
+                 if key not in WEB_UNLISTED)
+
+
 # The one line printed under the startup banner, which is a pointer and not a
 # list. Naming all fifteen ran to two hundred characters and wrapped on any
 # ordinary terminal, so a banner already three lines long arrived four or five;
@@ -81,8 +123,12 @@ KEY_CHARS = {"space": " ", "esc": "\x1b"}
 KEY_WIDTH = max(len(key) for key, _doc in KEYS)
 
 
-def write_keys(out=None):
+def write_keys(out=None, keys=None):
     """List every key and what it does.
+
+    `keys` narrows the listing to a particular set, which is what the browser's
+    copy asks for: it cannot press the escape key, so a listing offering it
+    there would advertise something the control route then refuses.
 
     What the ? key prints, and what the reminder line under the banner points
     at rather than tries to be. A line has room to name the keys or to explain
@@ -95,7 +141,7 @@ def write_keys(out=None):
     """
     out = out if out is not None else sys.stderr
     print(f"\n{C.BOLD}{C.BLUE}Keyboard controls{C.RESET}", file=out)
-    for key, doc in KEYS:
+    for key, doc in (KEYS if keys is None else keys):
         print(f"  {C.CYAN}{key:>{KEY_WIDTH}}{C.RESET}  {C.GREY}{doc}{C.RESET}",
               file=out)
 
@@ -226,7 +272,7 @@ class Controls:
 
     def __init__(self, args, scale, resolver, sticky, stats, talkers,
                  sequences, started=None, out=None, summary=None, hosts=None,
-                 bar=None):
+                 bar=None, on_clear=None):
         self.args = args
         self.scale = scale
         self.resolver = resolver
@@ -241,6 +287,15 @@ class Controls:
         # resolver to report on.
         self.summary = summary
         self.hosts = hosts
+        # Called when the x key clears the screen, so that a view which is not
+        # this terminal can clear itself too. None when there is no such view,
+        # which is every run without the web interface.
+        self.on_clear = on_clear
+        # What the ? key prints. Unlike the summary and the host list this
+        # needs nothing from the collector, so the default below answers it
+        # here; the hook exists so that whoever has a second view to write the
+        # listing to can arrange for it to go to both.
+        self.listing = None
 
         self.quit = False
         self.paused = False
@@ -326,10 +381,30 @@ class Controls:
         self.held.clear()
         self.dropped = 0
         self.lines = 0
-        print("\033[2J\033[H", end="", flush=True)
+        json_mode = bool(getattr(self.args, "json", False))
+        # The screen being cleared is a thing that happens to a terminal, so it
+        # happens only where there is one to clear. There are two ways for
+        # there not to be, and both of them arrive from a browser.
+        #
+        # Under --json, stdout is a stream something else is parsing. That used
+        # to be unreachable, because --json turns the keyboard off, but the web
+        # interface can press this key with --json running, and one keypress
+        # would put two escape sequences into the middle of somebody's data.
+        #
+        # Redirected without --json, stdout is a file or a pipe, and the escape
+        # would land in it along with the header reprinted after it. A terminal
+        # keyboard could always do that, needing a tty on stdin alone, but a
+        # collector run as a service has no terminal at either end and is the
+        # arrangement --web is most worth having. So the question is asked of
+        # the stream rather than of where the keypress came from.
+        screen = not json_mode and sys.stdout.isatty()
+        if screen:
+            print("\033[2J\033[H", end="", flush=True)
+        if self.on_clear is not None:
+            self.on_clear()
         if self.sticky is not None and self.sticky.active:
             self.sticky.repaint()
-        elif not getattr(self.args, "json", False):
+        elif screen:
             print(C.BOLD + HEADER_LINE + C.RESET)
         # The clear took the bar with it. It has nothing new to say yet, so it
         # goes back up saying what it said a moment ago.
@@ -367,9 +442,13 @@ class Controls:
         Like the summary and the host list, the listing is its own
         confirmation and says nothing on top of itself. Unlike those two it
         needs nothing from the collector to print, so it is answered here
-        rather than handed out to whoever holds the counters.
+        rather than handed out to whoever holds the counters, unless somebody
+        has set a hook because the listing has to reach more than one place.
         """
-        write_keys(self.out)
+        if self.listing is not None:
+            self.listing()
+        else:
+            write_keys(self.out)
         return None
 
     def _status_bar(self):
@@ -378,8 +457,15 @@ class Controls:
         Nothing happens where there was never a bar to toggle, which is
         the case under --json and when output is redirected into a file. It is
         the same silence those runs get from every other key needing a screen.
+
+        Under --json that used to be true by accident rather than by rule: the
+        keyboard is off there, so this could not be reached. A browser can
+        reach it, and the bar draws itself on stdout, so one press would put a
+        scroll region and two rows of status bar into the middle of somebody's
+        data and then repaint them every half second. The bar belongs to a
+        terminal, so like the x key it does nothing where there is not one.
         """
-        if self.bar is None:
+        if self.bar is None or getattr(self.args, "json", False):
             return None
         if self.bar.active:
             self.bar.stop()

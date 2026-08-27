@@ -86,8 +86,9 @@ jobs:
         # against the source tree, which is the code being reviewed.
         run: pip install "lanname>=0.2.0,<0.3" "netflume>=0.1.0,<0.2"
       - name: run the suite
-        # One suite reaches the network, and only over loopback: it starts a
-        # real collector on 127.0.0.1 and sends it NetFlow v5 datagrams.
+        # Some suites reach the network, and only over loopback: they start
+        # a real collector on 127.0.0.1 and send it NetFlow v5 datagrams,
+        # and the web suites bind a port there and fetch over HTTP from it.
         # Nothing here leaves the runner.
         run: python tests/run.py
 
@@ -116,12 +117,18 @@ jobs:
           /tmp/probe/bin/python - <<'PY'
           import pathlib
           import nettail
-          from nettail import services
+          from nettail import services, web
           here = pathlib.Path(nettail.__file__).parent
           data = here / "supplemental-services"
           assert data.exists(), "supplemental-services missing from the wheel"
           assert services.load() is None, "the shipped list did not load"
           assert services.service_name(5353, 17) == "mdns", "5353 was not named"
+          # The other file that has to be listed as package data. Left out, a
+          # collector started with --web prints a URL that serves an error, so
+          # it is checked here rather than discovered by somebody using it.
+          page = here / "web.html"
+          assert page.exists(), "web.html missing from the wheel"
+          assert "<title>nettail</title>" in web.load_page(), "the page did not load"
           print("ran", nettail.__version__, "from", here)
           PY
 

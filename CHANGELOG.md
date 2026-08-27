@@ -11,6 +11,95 @@ but it is a program rather than a library, and the names inside it may move
 without that being a breaking change. `--json` output is the part meant to be
 parsed, and it is treated as public.
 
+## [0.2.0] - 2026-08-26
+
+### Added
+
+- An opt-in web interface. `--web` mirrors the display into a browser: the same
+  flows in the same colours, the decoder notices, the summary and the host list
+  as they are printed, a live status footer, and every keyboard control as both
+  a button and a key. It is a second view of one collector rather than a second
+  collector, so a key pressed anywhere moves the terminal too.
+
+  The keys live in a drawer, shut by default so the flows have the window, and
+  laid out as a grid of labelled buttons when it is open. The flow table sizes
+  its columns to what is in them, and the two endpoint columns wrap rather than
+  widen, so a long hostname cannot push the table past the window.
+
+  A tab in the background gives up its connection and takes it back on return,
+  saying how many flows went past while it was away. A backgrounded tab is
+  throttled or frozen by the browser, which goes on buffering the connection
+  with nothing running to drain it, and on a busy link that grows until the tab
+  is killed for memory. Three things ask for the connection to go: the tab
+  being marked hidden, after about fifteen seconds so that switching away and
+  straight back costs nothing; the browser saying it is about to freeze the
+  tab, which it does under the memory pressure the buffer itself creates; and
+  the page's own clock running ten seconds late, which is what a minimised
+  window looks like from the inside. A **Follow** box
+  beside the connection indicator decides whether new flows pull the view down;
+  scrolling up clears it and scrolling back to the bottom fills it again, and a
+  tab that was following when it went to the background is put back at the
+  bottom the moment it returns rather than waiting for the next flow to carry
+  it there. The scrollbars are drawn in the page's own colours.
+
+  It is off unless asked for and binds `127.0.0.1`. The URL printed at startup
+  carries a random token, without which every request is a 404, and the `Host`
+  header is checked on every request so that a page open in another tab cannot
+  reach it by pointing a name at the loopback address. `--web-bind` will put it
+  elsewhere and says in as many words what that exposes, cleartext included.
+  `--web-token` pins the token so a bookmark survives a restart, and
+  `--web-readonly` serves the display while accepting nothing back. A token
+  that could not work, because it is empty, not ascii, or holds a character
+  a URL path would split on, is refused when the flag is read rather than
+  leaving the collector printing a URL that answers nothing.
+
+  Standard library only. There is still no dependency beyond netflume and
+  lanname, and no test dependency at all.
+
+- `--colour always|auto|never`, with `--color` accepted as a spelling and
+  `--no-color` kept as `--colour never`. `auto` is what the program has always
+  done. `always` exists because colour was decided by whether stdout is a
+  terminal, which hands the web interface the colourless version in exactly the
+  arrangement it is most useful in: a service unit writing `--json` to a file
+  while a browser watches.
+
+### Changed
+
+- Two keys are treated differently in the browser. `esc` closes the program,
+  which would end it for everybody including the terminal, and that should not
+  arrive as a side effect of mirroring a keyboard, so it does not cross at all.
+  `?` prints the list of keys, and the browser already has that list as
+  labelled buttons, so it gets no button of its own; the key still works, and
+  prints the keys a browser can press. The terminal keeps both.
+
+- Under `--json`, the `x` and `b` keys no longer draw on stdout. Neither could
+  be reached before, because `--json` turns the keyboard off, but a browser can
+  press both: `x` would have put two escape sequences into the middle of a
+  stream something else was parsing, and `b` would have put a scroll region and
+  two rows of status bar there and repainted them twice a second. Drawing on a
+  screen is a thing that happens to a terminal, so it now happens only where
+  there is one.
+
+- Under `--json`, the space key pauses the browser view and leaves stdout
+  alone. `--json` is the part of the interface meant to be parsed, and holds
+  and drops do not belong in it.
+
+- `HEADER_LINE` and the continuation indent are now built from a `COLUMNS`
+  table rather than written out beside it, and one flow's cells are built once
+  by `row_cells` and used by both views. What a row looks like is unchanged;
+  what changed is that it is now described in one place, which is what lets a
+  browser draw the same table without a second copy of the column list.
+
+### Fixed
+
+- The `x` key wrote its clear escapes to stdout whenever `--json` was off, a
+  redirected stdout included, and the header it reprints afterwards went with
+  them. Clearing a screen is something that happens to a terminal, so the key
+  now asks whether there is one. The keyboard has only ever needed a tty on
+  stdin, so a redirected run could always do this; `--web` widens it to a
+  collector with no terminal at either end, which is the arrangement the
+  browser view is most worth having.
+
 ## [0.1.2] - 2026-08-26
 
 ### Documentation
@@ -60,6 +149,7 @@ console: the part that decides what a flow should look like on a terminal.
   reminder line under the startup banner can be a pointer rather than a
   two-hundred-character list that wrapped and then scrolled away.
 
+[0.2.0]: https://github.com/mjaksn/nettail/releases/tag/v0.2.0
 [0.1.2]: https://github.com/mjaksn/nettail/releases/tag/v0.1.2
 [0.1.1]: https://github.com/mjaksn/nettail/releases/tag/v0.1.1
 [0.1.0]: https://github.com/mjaksn/nettail/releases/tag/v0.1.0

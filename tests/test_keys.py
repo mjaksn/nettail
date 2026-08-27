@@ -73,7 +73,7 @@ c.resolver.shutdown()
 # --- x clears ---------------------------------------------------------------
 c, out = build()
 c.lines = 37
-screen = io.StringIO()
+screen = FakeTTY()
 real, sys.stdout = sys.stdout, screen
 try:
     message = c.handle("x")
