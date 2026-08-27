@@ -382,20 +382,29 @@ class Controls:
         self.dropped = 0
         self.lines = 0
         json_mode = bool(getattr(self.args, "json", False))
-        # The escape goes to stdout, which under --json is a stream something
-        # else is parsing. That used to be unreachable, because --json turns the
-        # keyboard off, but the web interface can press this key from a browser
-        # with --json running, and one keypress would put two escape sequences
-        # into the middle of somebody's data. The screen being cleared is a
-        # thing that happens to a terminal, so it happens only where there is
-        # one to clear.
-        if not json_mode:
+        # The screen being cleared is a thing that happens to a terminal, so it
+        # happens only where there is one to clear. There are two ways for
+        # there not to be, and both of them arrive from a browser.
+        #
+        # Under --json, stdout is a stream something else is parsing. That used
+        # to be unreachable, because --json turns the keyboard off, but the web
+        # interface can press this key with --json running, and one keypress
+        # would put two escape sequences into the middle of somebody's data.
+        #
+        # Redirected without --json, stdout is a file or a pipe, and the escape
+        # would land in it along with the header reprinted after it. A terminal
+        # keyboard could always do that, needing a tty on stdin alone, but a
+        # collector run as a service has no terminal at either end and is the
+        # arrangement --web is most worth having. So the question is asked of
+        # the stream rather than of where the keypress came from.
+        screen = not json_mode and sys.stdout.isatty()
+        if screen:
             print("\033[2J\033[H", end="", flush=True)
         if self.on_clear is not None:
             self.on_clear()
         if self.sticky is not None and self.sticky.active:
             self.sticky.repaint()
-        elif not json_mode:
+        elif screen:
             print(C.BOLD + HEADER_LINE + C.RESET)
         # The clear took the bar with it. It has nothing new to say yet, so it
         # goes back up saying what it said a moment ago.

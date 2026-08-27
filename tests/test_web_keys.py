@@ -249,9 +249,14 @@ check("and stdout is nothing but flows",
       all(line.startswith("{") for line in result["out"].splitlines()
           if line.strip()))
 
-# Without --json it is a terminal, and clearing one is what the key is for.
+# Without --json either, because stdout here is a pipe rather than a terminal,
+# which is what a collector run as a service has and what the browser reaches.
+# Clearing a screen that is not there only puts the escapes in the capture. The
+# terminal case, where the key does clear, is test_keys and test_keys_end_to_end.
 result = run([(2, "x", None)], [v5_packet(0)])
-check("without --json the screen is still cleared", "\033[2J" in result["out"])
+check("nor into a redirected stdout without --json",
+      "\033[2J" not in result["out"] and "\033[H" not in result["out"],
+      repr(result["out"][:80]))
 
 # -- the greeting is in place before anything can ask for it -------------
 #

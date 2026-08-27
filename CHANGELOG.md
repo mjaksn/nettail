@@ -90,6 +90,16 @@ parsed, and it is treated as public.
   what changed is that it is now described in one place, which is what lets a
   browser draw the same table without a second copy of the column list.
 
+### Fixed
+
+- The `x` key wrote its clear escapes to stdout whenever `--json` was off, a
+  redirected stdout included, and the header it reprints afterwards went with
+  them. Clearing a screen is something that happens to a terminal, so the key
+  now asks whether there is one. The keyboard has only ever needed a tty on
+  stdin, so a redirected run could always do this; `--web` widens it to a
+  collector with no terminal at either end, which is the arrangement the
+  browser view is most worth having.
+
 ## [0.1.2] - 2026-08-26
 
 ### Documentation
