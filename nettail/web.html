@@ -363,7 +363,7 @@ footer span i { color: var(--ink-3); font-style: normal; }
   // the page through textContent, and the converter below builds spans and puts
   // text in them rather than assembling any markup at all.
 
-  var SGR = /\[([0-9;]*)m/g;
+  var SGR = /\x1b\[([0-9;]*)m/g;
 
   function cube(n) {
     // The 256 colour cube and its grey tail, which is what the size ramp uses.
