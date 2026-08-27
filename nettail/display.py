@@ -88,18 +88,46 @@ PKTS_WIDTH = 7
 BYTES_WIDTH = 8
 DUR_WIDTH = 7
 
+# Every column, in the order a row prints them: the heading, how wide it is,
+# which way its contents sit in that width, and how many spaces come before it.
+#
+# The only place the columns are written down. `HEADER_LINE` is built from this
+# rather than typed out beside it, and so is the indent a continuation line
+# needs, so that widening a column cannot leave either one place out. The web
+# interface asks for the headings and the alignments over the wire and builds
+# its own table head from them, which is why the alignment is recorded here as
+# data rather than left implicit in a format string: a browser cannot read an
+# f-string, and a second list of column names is a second thing to go stale.
+#
+# FLAGS has no width because it is last and its contents are short; nothing is
+# padded against it. The two spaces in front of it are the one irregular gap in
+# the row, which is why the gap is part of the table instead of assumed to be
+# one space everywhere.
+COLUMNS = (
+    ("TIME", TIME_WIDTH, "<", 0),
+    ("EXPORTER", EXPORTER_WIDTH, "<", 1),
+    ("PROTO", PROTO_WIDTH, "<", 1),
+    ("SOURCE", ENDPOINT_WIDTH, "<", 1),
+    ("", WAY_WIDTH, "<", 1),
+    ("DESTINATION", ENDPOINT_WIDTH, "<", 1),
+    ("PKTS", PKTS_WIDTH, ">", 1),
+    ("BYTES", BYTES_WIDTH, ">", 1),
+    ("DUR", DUR_WIDTH, ">", 1),
+    ("FLAGS", 0, "<", 2),
+)
+
+HEADER_LINE = "".join(
+    " " * gap + format(name, "%s%d" % (align, width))
+    for name, width, align, gap in COLUMNS
+)
+
 # Where the SOURCE column begins, which is where a continuation line has to
 # start to sit under it. Counted rather than written down, so that widening a
 # column above cannot leave the line beneath it one place out.
-ENDPOINT_INDENT = TIME_WIDTH + 1 + EXPORTER_WIDTH + 1 + PROTO_WIDTH + 1
-
-HEADER_LINE = (
-    f"{'TIME':<{TIME_WIDTH}} {'EXPORTER':<{EXPORTER_WIDTH}} "
-    f"{'PROTO':<{PROTO_WIDTH}} "
-    f"{'SOURCE':<{ENDPOINT_WIDTH}} {'':<{WAY_WIDTH}} "
-    f"{'DESTINATION':<{ENDPOINT_WIDTH}} "
-    f"{'PKTS':>{PKTS_WIDTH}} {'BYTES':>{BYTES_WIDTH}} {'DUR':>{DUR_WIDTH}}  FLAGS"
-)
+ENDPOINT_INDENT = sum(
+    width + gap
+    for name, width, _align, gap in COLUMNS[:[c[0] for c in COLUMNS].index("SOURCE")]
+) + 1
 
 # Multicast and link-local count as being on this side of the router. A flow to
 # 224.0.0.251 never went anywhere near the internet, whatever else is true of
@@ -159,7 +187,29 @@ def flow_macs(rec):
     return src, dst
 
 
-def render(rec, hdr, args, resolver, scale):
+def row_cells(rec, hdr, args, resolver, scale, endpoint_width=None):
+    """One flow as its cells, each of them plain and painted.
+
+    The plain half is the text a reader sees, padded to its column's width. The
+    painted half is that same text with the escape codes around it. Both are
+    handed back because a column is padded to what is seen and escape codes are
+    not seen, which is the arithmetic every caller would otherwise have to
+    repeat.
+
+    Split out of `render` because the browser needs these cells too, and
+    because it must not compute them for itself. A service name comes from the
+    system services database, and no amount of care in a page could reproduce
+    what a particular machine calls port 5353. The same goes, less dramatically,
+    for the protocol names, the size ramp and the arrow: two implementations of
+    those would be two things to drift apart. So there is one, and it is here.
+
+    `endpoint_width` widens the two endpoint columns for a caller that is not
+    a terminal. Forty characters is what fits beside everything else on an
+    eighty column window, and it is why a long name arrives trimmed with an
+    ellipsis. A browser has no such limit and should not inherit the trim, so
+    it asks for more room and lays the result out itself.
+    """
+    width = ENDPOINT_WIDTH if endpoint_width is None else endpoint_width
     proto = rec.get("proto")
     proto_name = PROTO_NAMES.get(proto, str(proto) if proto is not None else "?")
 
@@ -175,7 +225,8 @@ def render(rec, hdr, args, resolver, scale):
 
     # The width has to be applied before the colour: escape codes are not
     # printable, but str.format counts them.
-    bytes_cell = scale.paint(f"{human_bytes(octets):>{BYTES_WIDTH}}", octets)
+    bytes_plain = f"{human_bytes(octets):>{BYTES_WIDTH}}"
+    bytes_cell = scale.paint(bytes_plain, octets)
 
     dur = flow_duration(rec, hdr)
     dur_str = f"{dur:.2f}s" if dur is not None else "-"
@@ -194,18 +245,37 @@ def render(rec, hdr, args, resolver, scale):
     named = bool(getattr(args, "named_hosts", False))
     arrow, arrow_col = way(src, dst)
 
-    line = (
-        f"{C.GREY}{tstr:<{TIME_WIDTH}}{C.RESET} "
-        f"{C.GREY}{hdr['exporter']:<{EXPORTER_WIDTH}}{C.RESET} "
-        f"{proto_col}{proto_name:<{PROTO_WIDTH}}{C.RESET} "
-        f"{endpoint(src, sport, proto, ENDPOINT_WIDTH, resolver, named)} "
-        f"{arrow_col}{arrow}{C.RESET} "
-        f"{dst_col}{endpoint(dst, dport, proto, ENDPOINT_WIDTH, resolver, named)}"
-        f"{C.RESET} "
-        f"{human_count(pkts):>{PKTS_WIDTH}} {bytes_cell} {dur_str:>{DUR_WIDTH}}  "
-        f"{C.DIM}{flags}{C.RESET}"
-    )
-    print(line)
+    time_plain = f"{tstr:<{TIME_WIDTH}}"
+    exporter_plain = f"{hdr['exporter']:<{EXPORTER_WIDTH}}"
+    proto_plain = f"{proto_name:<{PROTO_WIDTH}}"
+    src_plain = endpoint(src, sport, proto, width, resolver, named)
+    dst_plain = endpoint(dst, dport, proto, width, resolver, named)
+    pkts_plain = f"{human_count(pkts):>{PKTS_WIDTH}}"
+    dur_plain = f"{dur_str:>{DUR_WIDTH}}"
+
+    # In COLUMNS order. The source column is deliberately uncoloured: it is the
+    # end a reader already knows something about, and colouring both ends would
+    # leave neither of them standing out.
+    return [
+        (time_plain, f"{C.GREY}{time_plain}{C.RESET}"),
+        (exporter_plain, f"{C.GREY}{exporter_plain}{C.RESET}"),
+        (proto_plain, f"{proto_col}{proto_plain}{C.RESET}"),
+        (src_plain, src_plain),
+        (arrow, f"{arrow_col}{arrow}{C.RESET}"),
+        (dst_plain, f"{dst_col}{dst_plain}{C.RESET}"),
+        (pkts_plain, pkts_plain),
+        (bytes_plain, bytes_cell),
+        (dur_plain, dur_plain),
+        (flags, f"{C.DIM}{flags}{C.RESET}"),
+    ]
+
+
+def render(rec, hdr, args, resolver, scale):
+    cells = row_cells(rec, hdr, args, resolver, scale)
+    # Every cell arrives padded to its own column, so the row is the painted
+    # halves with the gaps from the table between them and nothing else.
+    print("".join(" " * column[3] + painted
+                  for column, (_plain, painted) in zip(COLUMNS, cells)))
 
     if getattr(args, "show_macs", False):
         src_mac, dst_mac = flow_macs(rec)
