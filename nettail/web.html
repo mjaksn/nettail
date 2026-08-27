@@ -1,0 +1,996 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>nettail</title>
+<style>
+:root {
+  --ground: #0b1014;
+  --panel: #121a20;
+  --panel-2: #0e161b;
+  --rule: #1f2c34;
+  --ink: #d8e4ea;
+  --ink-2: #93a7b2;
+  --ink-3: #5f7481;
+  --accent: #46c6de;
+  --good: #57d68a;
+  --warn: #e5b547;
+  --bad: #f08585;
+  --row-hover: #16222a;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --ground: #f7f9fa;
+    --panel: #ffffff;
+    --panel-2: #eef3f5;
+    --rule: #d5e0e5;
+    --ink: #10191e;
+    --ink-2: #4a5c66;
+    --ink-3: #778a94;
+    --accent: #0b6f8a;
+    --good: #16773c;
+    --warn: #8a5a08;
+    --bad: #ae2323;
+    --row-hover: #eaf2f5;
+  }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font: 13px/1.5 ui-monospace, "SFMono-Regular", "Cascadia Mono", Menlo,
+        Consolas, "DejaVu Sans Mono", monospace;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+header {
+  flex: none;
+  border-bottom: 1px solid var(--rule);
+  background: var(--panel);
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.brand { font-weight: 700; color: var(--accent); letter-spacing: .04em; }
+.where { color: var(--ink-2); }
+.spacer { flex: 1 1 auto; }
+.state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--ink-3); flex: none;
+}
+.state[data-live="yes"] .dot { background: var(--good); }
+.state[data-live="retry"] .dot { background: var(--warn); }
+.state[data-live="gone"] .dot { background: var(--bad); }
+button {
+  font: inherit;
+  color: var(--ink-2);
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+button:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
+button:disabled { opacity: .45; cursor: default; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* the key drawer */
+
+#drawerToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+#drawerToggle .caret {
+  display: inline-block;
+  transition: transform .12s ease;
+  color: var(--ink-3);
+}
+#drawerToggle[aria-expanded="true"] {
+  color: var(--ink);
+  border-color: var(--accent);
+}
+#drawerToggle[aria-expanded="true"] .caret {
+  transform: rotate(90deg);
+  color: var(--accent);
+}
+#keys {
+  flex: none;
+  display: grid;
+  /* Regular columns rather than a wrapped row, so the keys line up down the
+     page and the eye can run along one column instead of hunting a ragged
+     edge. The tracks stretch to fill whatever width there is. */
+  grid-template-columns: repeat(auto-fill, minmax(272px, 1fr));
+  gap: 4px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--panel-2);
+  /* Wrapped descriptions make taller buttons, and a narrow window stacks them
+     into more rows as well, so on a short screen the drawer could take most of
+     it and leave the flows a sliver. It gets at most this much and scrolls,
+     which is what the scrollbar rules below are for. */
+  max-height: 40vh;
+  overflow-y: auto;
+}
+#keys[hidden] { display: none; }
+#keys button {
+  /* Two tracks inside each button as well: every key glyph sits in a column of
+     its own, so they line up with each other and not merely with their own
+     descriptions.
+
+     The first track is measured in ch rather than em because what goes in it
+     is characters, and in this font em is narrower than one of them. Five is
+     the longest key name the collector has, which is "space", plus the chip's
+     own padding and borders. A name longer than that would push its chip past
+     the track and knock the descriptions out of line, which is worth seeing;
+     the alternative was cutting the word in half and saying nothing. */
+  display: grid;
+  grid-template-columns: calc(5ch + 14px) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px;
+  text-align: left;
+  padding: 5px 9px;
+  min-width: 0;
+}
+#keys button .k {
+  color: var(--accent);
+  font-weight: 700;
+  text-align: center;
+  background: var(--ground);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: 0 4px;
+  white-space: nowrap;
+}
+#keys button .d {
+  /* Wrapped rather than trimmed. These are whole sentences and most of them
+     are longer than a column, so an ellipsis was hiding the half that said
+     what the key does. A taller button costs nothing here: the grid gives
+     every button in a row the height of the tallest, so the rows stay even. */
+  color: var(--ink-2);
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+#keys button:hover .d { color: var(--ink); }
+#keys button[data-on="1"] {
+  border-color: var(--accent);
+  background: var(--row-hover);
+}
+#keys button[data-on="1"] .d { color: var(--ink); }
+#keys button[data-on="1"] .k { background: var(--accent); color: var(--ground); }
+
+/* the follow toggle */
+
+.follow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-2);
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+.follow input {
+  accent-color: var(--accent);
+  margin: 0;
+  cursor: pointer;
+}
+main { flex: 1 1 auto; overflow: auto; }
+table { border-collapse: collapse; width: 100%; }
+thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--panel);
+  border-bottom: 1px solid var(--rule);
+  color: var(--ink-3);
+  font-weight: 700;
+  text-align: left;
+  letter-spacing: .08em;
+  padding: 6px 8px;
+  white-space: nowrap;
+}
+thead th.r { text-align: right; }
+tbody td {
+  padding: 1px 8px;
+  white-space: pre;
+  vertical-align: top;
+  border-bottom: 1px solid transparent;
+}
+tbody td.r { text-align: right; }
+/* The endpoint columns, which are the only ones that can hold something
+   long. They wrap rather than widen, so a hostname nobody expected cannot
+   push the table past the window and put a scrollbar under it. Table
+   layout tries the full width first, so this costs nothing until it is
+   the difference between wrapping and scrolling. */
+tbody td.w { white-space: pre-wrap; overflow-wrap: anywhere; }
+tbody tr.flow:hover td { background: var(--row-hover); }
+tbody tr.prose td {
+  white-space: pre-wrap;
+  padding: 6px 8px;
+  color: var(--ink-2);
+  border-left: 2px solid var(--rule);
+  background: var(--panel-2);
+}
+tbody tr.prose[data-kind="summary"] td,
+tbody tr.prose[data-kind="hosts"] td,
+tbody tr.prose[data-kind="keys"] td { border-left-color: var(--accent); }
+tbody tr.prose[data-kind="notice"] td { border-left-color: var(--warn); }
+tbody tr.prose[data-kind="gap"] td { border-left-color: var(--bad); color: var(--bad); }
+footer {
+  flex: none;
+  border-top: 1px solid var(--rule);
+  background: var(--panel);
+  padding: 6px 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  color: var(--ink-2);
+}
+footer span b { color: var(--ink); font-weight: 400; }
+footer span i { color: var(--ink-3); font-style: normal; }
+.paused { color: var(--warn); }
+/* The eight ANSI colours this program uses, plus the 256 colour ramp behind
+   the BYTES column. Named by code so the converter can map straight onto them. */
+.a1 { font-weight: 700; }
+.a2 { opacity: .6; }
+.a31 { color: var(--bad); }
+.a32 { color: var(--good); }
+.a33 { color: var(--warn); }
+.a34 { color: #6fa5f5; }
+.a35 { color: #c98ae0; }
+.a36 { color: var(--accent); }
+.a37 { color: var(--ink); }
+.a90 { color: var(--ink-3); }
+
+/* Scrollbars, in the page's own colours rather than the browser's. The two
+   syntaxes are not alternatives: the standard properties are what Firefox and
+   recent Chrome read, the ::-webkit- rules are what everything built on older
+   Blink and WebKit reads, and between them they cover what a person is likely
+   to be looking at this in. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--rule) transparent;
+}
+::-webkit-scrollbar { width: 11px; height: 11px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--rule);
+  border-radius: 6px;
+  /* A transparent border with the track showing through it is how a thumb is
+     inset without giving the track a colour of its own. */
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--ink-3); background-clip: content-box; }
+</style>
+</head>
+<body>
+<header>
+  <span class="brand">nettail</span>
+  <span class="where" id="where"></span>
+  <button type="button" id="drawerToggle" aria-expanded="false" aria-controls="keys" hidden>
+    <span class="caret" aria-hidden="true">&#9656;</span><span>Keys</span>
+  </button>
+  <span class="spacer"></span>
+  <label class="follow" id="followBox" hidden>
+    <input type="checkbox" id="follow" checked>
+    <span>Follow</span>
+  </label>
+  <span class="state" id="state" data-live="no"><span class="dot"></span><span id="stateText">connecting</span></span>
+</header>
+<div id="keys" hidden></div>
+<main id="scroll">
+  <table>
+    <thead><tr id="head"></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+</main>
+<footer id="status"><span><i>waiting for the collector</i></span></footer>
+<script>
+(function () {
+  "use strict";
+
+  // Everything is addressed relative to the token already in the path, so the
+  // token is never written down here and never leaves the URL bar.
+  var BASE = location.pathname.replace(/\/+$/, "");
+
+  // How many rows to keep. A busy link produces thousands a minute and a tab
+  // left open for an hour would otherwise become unusable, so the oldest go and
+  // the count of what went is shown rather than quietly dropped.
+  var MAX_ROWS = 4000;
+  var TRIM_TO = 3000;
+
+  var rows = document.getElementById("rows");
+  var head = document.getElementById("head");
+  var keysBar = document.getElementById("keys");
+  var statusBar = document.getElementById("status");
+  var stateBox = document.getElementById("state");
+  var stateText = document.getElementById("stateText");
+  var whereBox = document.getElementById("where");
+  var scroller = document.getElementById("scroll");
+  var drawerToggle = document.getElementById("drawerToggle");
+
+  var columns = [];
+  var trimmed = 0;
+  var readonly = true;
+  var failures = 0;
+  var greeted = false;
+  // The live stream, or null when the tab has given it up.
+  var stream = null;
+  // The collector's count of flows shown, from the last status
+  // that arrived. What `park` remembers and `reportMissed` uses.
+  var lastFlowsShown = null;
+  // Every key the collector will take from a browser, as characters. A
+  // superset of the buttons, and the only thing the keydown handler asks.
+  var pressable = [];
+
+  // Whether new rows pull the view down with them. It used to be worked out
+  // from the scroll position alone, which meant the only way to stop the page
+  // moving under you was to keep hold of the scrollbar. It is a checkbox now,
+  // and the scroll position sets it rather than being it: scroll up and the
+  // box clears, scroll back to the bottom and it fills again. Either way what
+  // the page is about to do is written down where it can be read and changed.
+  var followBox = document.getElementById("follow");
+  var followLabel = document.getElementById("followBox");
+
+  function following() { return followBox.checked; }
+
+  function toTail() { scroller.scrollTop = scroller.scrollHeight; }
+
+  // ---- text off the wire is text, never markup -------------------------
+  //
+  // Hostnames come from reverse DNS, mDNS and NetBIOS. All three are things a
+  // machine on this network can answer, which makes every one of them a string
+  // somebody else chose. They arrive inside flow cells and inside the captured
+  // prose, so nothing here ever assigns to innerHTML: every character reaches
+  // the page through textContent, and the converter below builds spans and puts
+  // text in them rather than assembling any markup at all.
+
+  var SGR = /\[([0-9;]*)m/g;
+
+  function cube(n) {
+    // The 256 colour cube and its grey tail, which is what the size ramp uses.
+    if (n < 16) { return null; }
+    if (n < 232) {
+      var i = n - 16;
+      var f = [0, 95, 135, 175, 215, 255];
+      return "rgb(" + f[Math.floor(i / 36) % 6] + "," +
+             f[Math.floor(i / 6) % 6] + "," + f[i % 6] + ")";
+    }
+    var g = 8 + (n - 232) * 10;
+    return "rgb(" + g + "," + g + "," + g + ")";
+  }
+
+  function ansi(text) {
+    // A fragment of spans carrying the same colours the terminal was sent.
+    var frag = document.createDocumentFragment();
+    var classes = [];
+    var colour = null;
+    var at = 0;
+    var match;
+    SGR.lastIndex = 0;
+    function emit(chunk) {
+      if (!chunk) { return; }
+      if (!classes.length && !colour) {
+        frag.appendChild(document.createTextNode(chunk));
+        return;
+      }
+      var span = document.createElement("span");
+      if (classes.length) { span.className = classes.join(" "); }
+      if (colour) { span.style.color = colour; }
+      span.textContent = chunk;
+      frag.appendChild(span);
+    }
+    while ((match = SGR.exec(text)) !== null) {
+      emit(text.slice(at, match.index));
+      at = match.index + match[0].length;
+      var codes = match[1].split(";");
+      for (var i = 0; i < codes.length; i++) {
+        var code = parseInt(codes[i] || "0", 10);
+        if (code === 38 && codes[i + 1] === "5") {
+          colour = cube(parseInt(codes[i + 2], 10));
+          i += 2;
+        } else if (code === 0) {
+          classes = [];
+          colour = null;
+        } else if (code === 39) {
+          colour = null;
+        } else if (code === 22) {
+          classes = classes.filter(function (c) { return c !== "a1" && c !== "a2"; });
+        } else if ((code >= 30 && code <= 37) || code === 90 ||
+                   code === 1 || code === 2) {
+          if (code >= 30) {
+            classes = classes.filter(function (c) { return !/^a(3[0-7]|90)$/.test(c); });
+          }
+          classes.push("a" + code);
+        }
+      }
+    }
+    emit(text.slice(at));
+    return frag;
+  }
+
+  // ---- the table -------------------------------------------------------
+
+  function buildHead(cols) {
+    columns = cols;
+    head.textContent = "";
+    cols.forEach(function (col) {
+      var th = document.createElement("th");
+      th.textContent = col.name;
+      if (col.align === ">") { th.className = "r"; }
+      head.appendChild(th);
+    });
+  }
+
+  function atTail() {
+    return scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 24;
+  }
+
+  function append(tr) {
+    rows.appendChild(tr);
+    if (rows.childElementCount > MAX_ROWS) {
+      while (rows.childElementCount > TRIM_TO) {
+        rows.removeChild(rows.firstElementChild);
+        trimmed += 1;
+      }
+      note("gap", trimmed.toLocaleString() +
+           " earlier rows have been dropped to keep this page usable. " +
+           "The collector still has them all in its totals.");
+    }
+    if (following()) { toTail(); }
+  }
+
+  function addFlow(cells) {
+    var tr = document.createElement("tr");
+    tr.className = "flow";
+    for (var i = 0; i < columns.length; i++) {
+      var td = document.createElement("td");
+      var classes = [];
+      if (columns[i].align === ">") { classes.push("r"); }
+      if (columns[i].wrap) { classes.push("w"); }
+      if (classes.length) { td.className = classes.join(" "); }
+      // Already unpadded by the collector, which is the side that can tell
+      // padding from an escape sequence. Anything trimmed here would be a
+      // second opinion about the same thing.
+      td.appendChild(ansi(String(cells[i] === undefined ? "" : cells[i])));
+      tr.appendChild(td);
+    }
+    append(tr);
+  }
+
+  function addProse(kind, text) {
+    var tr = document.createElement("tr");
+    tr.className = "prose";
+    tr.setAttribute("data-kind", kind);
+    var td = document.createElement("td");
+    td.colSpan = Math.max(columns.length, 1);
+    td.appendChild(ansi(text.replace(/\n+$/, "")));
+    tr.appendChild(td);
+    append(tr);
+  }
+
+  function note(kind, text) {
+    var tr = document.createElement("tr");
+    tr.className = "prose";
+    tr.setAttribute("data-kind", kind);
+    var td = document.createElement("td");
+    td.colSpan = Math.max(columns.length, 1);
+    td.textContent = text;
+    tr.appendChild(td);
+    rows.appendChild(tr);
+    if (following()) { toTail(); }
+  }
+
+  // ---- the footer ------------------------------------------------------
+
+  function field(label, value, extra) {
+    var span = document.createElement("span");
+    var i = document.createElement("i");
+    i.textContent = label + " ";
+    var b = document.createElement("b");
+    b.textContent = value;
+    if (extra) { b.className = extra; }
+    span.appendChild(i);
+    span.appendChild(b);
+    return span;
+  }
+
+  function showStatus(payload) {
+    if (!payload) { return; }
+    if (typeof payload.flows_shown === "number") {
+      lastFlowsShown = payload.flows_shown;
+    }
+    var s = payload.snap || {};
+    var t = payload.shown || {};
+    statusBar.textContent = "";
+    statusBar.appendChild(field("up", t.elapsed || "-"));
+    statusBar.appendChild(field("flows", t.flows || "0"));
+    statusBar.appendChild(field("packets", t.packets || "0"));
+    statusBar.appendChild(field("received", t.bytes_rx || "0"));
+    statusBar.appendChild(field("rate", t.bit_rate || "0"));
+    if (t.peak) { statusBar.appendChild(field("peak", t.peak)); }
+    statusBar.appendChild(field("in/out", (t.inbound || "0") + " / " + (t.outbound || "0")));
+    if (t.talker) { statusBar.appendChild(field("top", t.talker)); }
+    statusBar.appendChild(field("names", t.resolve || "-"));
+    if (s.sampling > 1) {
+      statusBar.appendChild(field("sampling", "1-in-" + s.sampling, "paused"));
+    }
+    if (s.gaps) { statusBar.appendChild(field("gaps", String(s.gaps), "paused")); }
+    if (s.parse_errors) {
+      statusBar.appendChild(field("bad datagrams", String(s.parse_errors), "paused"));
+    }
+    if (s.external_only) { statusBar.appendChild(field("showing", "public only")); }
+    if (s.paused) {
+      statusBar.appendChild(field("paused", s.held + " held", "paused"));
+    }
+    if (trimmed) { statusBar.appendChild(field("rows dropped", trimmed.toLocaleString())); }
+    setToggles(s);
+  }
+
+  // Buttons that mirror a setting show whether it is on. Read off the status
+  // rather than tracked here, so a key pressed at the terminal or in another
+  // browser moves this one too: there is one collector and these are views of
+  // it, not four independent programs.
+  function setToggles(s) {
+    var on = {
+      " ": !!s.paused,
+      e: !!s.external_only,
+      f: !!s.fqdn,
+      d: !!s.scale_dynamic
+    };
+    Array.prototype.forEach.call(keysBar.children, function (button) {
+      var key = button.getAttribute("data-key");
+      if (key in on) { button.setAttribute("data-on", on[key] ? "1" : "0"); }
+    });
+  }
+
+  // ---- keys ------------------------------------------------------------
+
+  function press(key, value) {
+    if (readonly) { return; }
+    var body = value === undefined || value === null
+      ? JSON.stringify({ key: key })
+      : JSON.stringify({ key: key, value: value });
+    fetch(BASE + "/key", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: body
+    }).then(function (response) {
+      if (!response.ok) {
+        note("gap", "the collector refused that key (" + response.status + ")");
+      }
+    }).catch(function () {
+      note("gap", "could not reach the collector to send that key");
+    });
+  }
+
+  // The one key that asks a question. The terminal answers it by typing a
+  // line; here it is a prompt, and the answer travels with the key.
+  var ASKS = { m: "New top of the size scale. K, M and G are accepted:" };
+
+  function send(key) {
+    if (key in ASKS) {
+      var typed = window.prompt(ASKS[key]);
+      if (typed === null || typed === "") { return; }
+      press(key, typed);
+      return;
+    }
+    press(key);
+  }
+
+  // The drawer. Shut to begin with, because the flows are what the page is
+  // for and a reader who wants the keys can ask. What it holds is the same
+  // table the terminal's ? key prints, which is why the browser is not sent
+  // that listing: it would be describing the buttons next to the buttons.
+  var DRAWER_KEY = "nettail.keys.open";
+
+  function setDrawer(open) {
+    keysBar.hidden = !open;
+    drawerToggle.setAttribute("aria-expanded", open ? "true" : "false");
+    try {
+      window.localStorage.setItem(DRAWER_KEY, open ? "1" : "0");
+    } catch (err) {
+      // Private windows and blocked site data both throw here. Remembering
+      // whether the drawer was open is a convenience and not worth a broken
+      // page, so the preference is simply not kept.
+    }
+    // Opening the drawer takes height from the flows, so a page that was
+    // following the tail has to be put back on it.
+    if (following()) { toTail(); }
+  }
+
+  function drawerWasOpen() {
+    try {
+      return window.localStorage.getItem(DRAWER_KEY) === "1";
+    } catch (err) {
+      return false;
+    }
+  }
+
+  drawerToggle.addEventListener("click", function () {
+    setDrawer(keysBar.hidden);
+  });
+
+  function buildKeys(keys) {
+    keysBar.textContent = "";
+    if (readonly) {
+      drawerToggle.hidden = true;
+      setDrawer(false);
+      return;
+    }
+    keys.forEach(function (entry) {
+      var button = document.createElement("button");
+      button.type = "button";
+      button.setAttribute("data-key", entry.key === "space" ? " " : entry.key);
+      button.title = entry.doc;
+      var glyph = document.createElement("span");
+      glyph.className = "k";
+      glyph.textContent = entry.key;
+      var doc = document.createElement("span");
+      doc.className = "d";
+      doc.textContent = entry.doc;
+      button.appendChild(glyph);
+      button.appendChild(doc);
+      button.addEventListener("click", function () {
+        send(button.getAttribute("data-key"));
+      });
+      keysBar.appendChild(button);
+    });
+    drawerToggle.hidden = false;
+    setDrawer(drawerWasOpen());
+  }
+
+  document.addEventListener("keydown", function (event) {
+    if (readonly) { return; }
+    if (event.ctrlKey || event.metaKey || event.altKey) { return; }
+    var target = event.target;
+    if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) {
+      return;
+    }
+    var key = event.key === " " ? " " : event.key.toLowerCase();
+    // Against what the collector says it accepts, not against what has a
+    // button. The two are not the same list: the help key is pressable and has
+    // no button, because the drawer is already the answer it would print. A
+    // plain membership test also cannot throw the way building a selector out
+    // of a keystroke could.
+    if (pressable.indexOf(key) < 0) { return; }
+    event.preventDefault();
+    send(key);
+  });
+
+  // ---- the stream ------------------------------------------------------
+
+  function setState(live, text) {
+    stateBox.setAttribute("data-live", live);
+    stateText.textContent = text;
+  }
+
+  // ---- being in the background ----------------------------------------
+  //
+  // A hidden tab is throttled and, after a few minutes, may be frozen outright.
+  // No script of ours runs then, but the browser goes on reading the socket and
+  // buffering what arrives, and on a busy link that buffer grows without limit
+  // until the tab is killed for memory. Nothing the page does while it is
+  // running can help, because by then the memory has already been spent: the
+  // only thing that stops it is not having the connection open.
+  //
+  // So a tab that goes to the background gives up its stream, and takes it back
+  // when it returns. The collector gets its watcher slot back at the same time.
+  //
+  // Three things ask for it, because no one of them covers the others. The
+  // visibility flag is the quick and ordinary one. The freeze event is the
+  // load-bearing one: the buffer is itself what puts the tab under memory
+  // pressure, and a tab frozen for it stops running the very timer that would
+  // have closed the connection, so the buffering that caused the freeze then
+  // survives it. And the page watches its own clock, because a window that is
+  // merely starved, which minimising one reliably does, may never be marked
+  // hidden and never be frozen, and is still a tab not running often enough to
+  // drain a stream. All three go through `park`, so the count on the way back
+  // works the same whichever of them noticed.
+  //
+  // Not immediately, though. Switching to another tab and straight back is the
+  // common case and should cost nothing, and the collector needs a moment to
+  // notice a closed connection before it will accept a new one, so a quick
+  // return could otherwise be turned away by the watcher cap. The grace period
+  // covers both. It is measured in what a hidden tab's timers do, which is
+  // approximate: this may fire late, and that is fine, since a few extra
+  // seconds of buffering is not what kills anything.
+  var HIDE_GRACE = 15000;
+  var hideTimer = 0;
+  // Whether the page gave the stream up itself. Not the same question as
+  // whether there is one: a refused connection and one abandoned after five
+  // failures both leave `stream` null, and neither should be quietly
+  // reopened by the clock watcher below.
+  var parked = false;
+  // Set when the page has stopped trying: refused outright, or given up after
+  // five failures. Both tell the reader to reload, and neither should be
+  // undone by a tab switch or by the clock watcher.
+  var gaveUp = false;
+  // The flow count when the stream was given up, or null when it is live. The
+  // page cannot count what it missed, because nothing reached it, so it asks
+  // the collector: this is subtracted from the same figure on the way back.
+  //
+  // The figure has to come from a status frame and not from the greeting. The
+  // collector publishes nothing while nobody is watching, which is exactly the
+  // stretch this is about, so the status spliced into a greeting is the one
+  // from before the stream was given up: subtracting it from itself is always
+  // zero. A real status follows within a repaint interval and carries the
+  // figure as it is now, so the report waits for that.
+  var parkedAt = null;
+  // Whether the page was following the tail when the tab was hidden,
+  // or null while it is in front.
+  var hiddenFollowing = null;
+
+  function flowsShown(status) {
+    return status && typeof status.flows_shown === "number"
+      ? status.flows_shown : null;
+  }
+
+  function park() {
+    // Whichever cause arrived first, a grace timer still pending must not
+    // outlive it. Left to run, it fires after the tab is back and the stream
+    // is live again, and parks a tab somebody is looking at.
+    if (hideTimer) { window.clearTimeout(hideTimer); }
+    hideTimer = 0;
+    if (!stream) { return; }
+    // The visibility path notes this on its way out, before the grace runs.
+    // The other two have no way out to note it on, so they take it here.
+    if (hiddenFollowing === null) { hiddenFollowing = following(); }
+    parked = true;
+    parkedAt = lastFlowsShown;
+    stream.close();
+    stream = null;
+    // The clock watcher can reach a tab that is plainly in front of somebody,
+    // after a laptop wake or any long stall, and telling them it is in the
+    // background would be telling them something they can see is untrue.
+    setState("no", document.hidden ? "paused in the background"
+                                   : "paused, this tab was not being run");
+  }
+
+  function restoreFollowing() {
+    if (hiddenFollowing === null) { return; }
+    // Following means the tail is where the reader wants to be, so that is
+    // where they are put, without waiting for the next flow to arrive and
+    // carry them there. A tab that comes back to a quiet network would
+    // otherwise sit wherever it happened to be until something turned up.
+    followBox.checked = hiddenFollowing;
+    hiddenFollowing = null;
+    if (following()) { toTail(); }
+  }
+
+  function takeBack() {
+    // Both of the branches that give up for good say to reload, so retrying
+    // behind the reader's back would be the page contradicting its own notice.
+    if (gaveUp) { return; }
+    failures = 0;
+    setState("retry", "reconnecting");
+    connect();
+    restoreFollowing();
+  }
+
+  function reportMissed(status) {
+    var now = flowsShown(status);
+    var then = parkedAt;
+    parkedAt = null;
+    if (now === null || then === null) { return; }
+    var missed = now - then;
+    if (missed > 0) {
+      note("gap", missed.toLocaleString() + " flow" + (missed === 1 ? "" : "s") +
+           " arrived while this tab was in the background. The collector has " +
+           "them in its totals; they were not kept for the page.");
+    } else if (missed < 0) {
+      // The c key clears the statistics and the counter with them, so a
+      // negative difference is not a miscount, it is a different session.
+      note("gap", "The collector's statistics were cleared while this tab " +
+           "was in the background.");
+    }
+  }
+
+  document.addEventListener("visibilitychange", function () {
+    if (document.hidden) {
+      // Remembered on the way out rather than read on the way back. Nothing
+      // here changes it while the tab is hidden, but a resize or a restored
+      // scroll position can fire a scroll event, and the scroll handler is
+      // what sets the box: coming back to find the page had quietly stopped
+      // following would be the sort of thing nobody could explain.
+      hiddenFollowing = following();
+      if (!hideTimer && stream) {
+        hideTimer = window.setTimeout(park, HIDE_GRACE);
+      }
+      return;
+    }
+    if (hideTimer) {
+      window.clearTimeout(hideTimer);
+      hideTimer = 0;
+    }
+    if (!stream) { takeBack(); }
+    // Also for the tab that came back inside the grace, where nothing was
+    // given up and `takeBack` was never called.
+    restoreFollowing();
+  });
+
+  // Chrome says so just before it freezes a tab, and giving up what is open is
+  // what the event is for. No grace here: there is nowhere to put one, since a
+  // frozen tab runs no timers at all, and a freeze landing inside the fifteen
+  // seconds above is exactly the case where the stream would otherwise be held
+  // open for as long as the tab stayed away.
+  document.addEventListener("freeze", park);
+
+  // How often the page checks that it is still being run, how late a check has
+  // to be before that answer is no, and how many punctual ones it takes to
+  // believe a parked tab is back in front of somebody. Ten seconds is well
+  // past a slow frame or a burst of rows on the main thread, so a foreground
+  // stall is not mistaken for a starved tab; a starved one is scheduled in
+  // bursts, so a single punctual tick is not evidence of anything.
+  var BEAT = 1000;
+  var BEAT_LATE = 10000;
+  var BEAT_STEADY = 3;
+  var beatAt = Date.now();
+  var steady = 0;
+
+  window.setInterval(function () {
+    var now = Date.now();
+    var late = now - beatAt - BEAT;
+    beatAt = now;
+    if (late > BEAT_LATE) {
+      // Whatever the visibility flag says, a page being run this seldom is
+      // not draining anything, and the browser is still filling the buffer.
+      steady = 0;
+      park();
+      return;
+    }
+    if (!parked || document.hidden) { steady = 0; return; }
+    steady += 1;
+    if (steady >= BEAT_STEADY) {
+      steady = 0;
+      takeBack();
+    }
+  }, BEAT);
+
+  function connect() {
+    parked = false;
+    // The clock watcher measures from here too. A tick held back by whatever
+    // the page has just come out of would otherwise be read as the page still
+    // being starved, and would park the connection it has only now opened.
+    beatAt = Date.now();
+    steady = 0;
+    // Held on the closure as well as locally. `park` below has to be able to
+    // close whichever stream is current, and every handler works from its own
+    // `es` so that one left over from a previous connection cannot answer for
+    // the one that replaced it.
+    var es = new EventSource(BASE + "/events");
+    stream = es;
+
+    es.addEventListener("hello", function (event) {
+      var hello = JSON.parse(event.data);
+      failures = 0;
+      setState("yes", "watching");
+      var status = hello.status;
+      if (!greeted) {
+        greeted = true;
+        readonly = !!hello.readonly;
+        buildHead(hello.columns || []);
+        buildKeys(hello.keys || []);
+        pressable = hello.pressable || [];
+        document.title = "nettail " + (hello.nettail || "");
+        followLabel.hidden = false;
+        whereBox.textContent = hello.json
+          ? "mirroring the terminal, with json on stdout"
+          : "mirroring the terminal";
+        if (hello.banner) { addProse("banner", hello.banner); }
+        if (readonly) {
+          note("notice", "This collector is serving the display only. " +
+               "Keys are not taken from the browser.");
+        }
+      } else if (parkedAt === null) {
+        note("notice", "reconnected to the collector");
+      }
+      if (status) { showStatus(status); }
+    });
+
+    es.addEventListener("flow", function (event) {
+      var payload = JSON.parse(event.data);
+      addFlow(payload.cells || []);
+    });
+
+    es.addEventListener("status", function (event) {
+      var payload = JSON.parse(event.data);
+      showStatus(payload);
+      // The first of these after coming back is the first figure that counts
+      // the gap. `reportMissed` clears `parkedAt`, so the ones after it pass
+      // straight through.
+      if (parkedAt !== null) { reportMissed(payload); }
+    });
+
+    es.addEventListener("prose", function (event) {
+      var payload = JSON.parse(event.data);
+      addProse(payload.kind || "notice", payload.text || "");
+    });
+
+    es.addEventListener("clear", function () {
+      rows.textContent = "";
+      trimmed = 0;
+      scroller.scrollTop = 0;
+      followBox.checked = true;
+    });
+
+    es.addEventListener("dropped", function (event) {
+      var payload = JSON.parse(event.data);
+      note("gap", payload.count.toLocaleString() +
+           " events were dropped: this browser fell behind the collector.");
+    });
+
+    es.onerror = function () {
+      if (es.readyState === EventSource.CLOSED) {
+        // The server answered with something that was not a 200, which by the
+        // specification fails the connection for good rather than retrying.
+        // The retry branch below never sees this, so without saying something
+        // here the reader is left on "connecting" for ever while the server's
+        // explanation goes nowhere. The commonest way to arrive is to be the
+        // fifth tab: the collector serves four watchers and refuses the rest.
+        // Left pointing at a dead EventSource, this reads as a live stream to
+        // anything that checks: the clock watcher would park it, take the
+        // refusal off the indicator, and reconnect into the same full cap a
+        // few seconds later to be refused again.
+        es.close();
+        stream = null;
+        gaveUp = true;
+        setState("gone", "refused");
+        note("gap", "The collector refused this connection. It may already " +
+             "have all the watchers it allows open, or it may be shutting " +
+             "down. Close another tab and reload to try again.");
+        return;
+      }
+      if (es.readyState === EventSource.CONNECTING) {
+        failures += 1;
+        setState("retry", "reconnecting");
+        if (failures >= 5) {
+          // The token changes when the collector restarts, so retrying past
+          // this point can only fail. Better to say so than to spin quietly.
+          es.close();
+          stream = null;
+          gaveUp = true;
+          setState("gone", "the collector has closed");
+          note("gap", "The stream has ended. If the collector is still " +
+               "running, reload this page; if it was restarted, it printed a " +
+               "new URL.");
+        }
+      }
+    };
+  }
+
+  // Scrolling away from the bottom is how somebody says they want to read
+  // something, so it clears the box rather than fighting them for the view;
+  // scrolling back to the bottom says they are done, so it fills again. The
+  // programmatic scroll above fires this too, and lands at the tail, so it
+  // leaves the box exactly as it found it.
+  scroller.addEventListener("scroll", function () {
+    followBox.checked = atTail();
+  });
+
+  followBox.addEventListener("change", function () {
+    if (following()) { toTail(); }
+  });
+  connect();
+}());
+</script>
+</body>
+</html>
