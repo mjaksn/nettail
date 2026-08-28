@@ -24,3 +24,16 @@ updates:
     commit-message:
       prefix: "deps"
     open-pull-requests-limit: 3
+
+  # The base image the container is built on, which is pinned by digest in the
+  # Dockerfile. A digest never moves on its own, so without this the image
+  # would sit on whatever Debian and CPython shipped the day it was written.
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "deps"
+    open-pull-requests-limit: 3
