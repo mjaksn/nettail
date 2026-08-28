@@ -338,6 +338,12 @@ suite exists: a thing exercised only at tag time rots silently, and the first
 anybody hears of it is a failed release. It also asserts that a container start
 prints the container line and not the host warning.
 
+The two registries are separate jobs. GHCR authenticates with the workflow's
+own token, so it cannot fail for want of a secret; Docker Hub needs a stored
+one, and in a job of its own a rotated token or an outage there costs Docker
+Hub and nothing else. The GitHub release waits for GHCR, so a release page
+cannot announce an image that was never pushed.
+
 ## Prose
 
 Comments and docstrings here carry the reasoning, not a restatement of the
