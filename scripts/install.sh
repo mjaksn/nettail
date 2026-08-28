@@ -5,8 +5,9 @@
 # It asks which, then asks the handful of things it cannot work out: the port
 # to listen for flows on, whether to serve the browser view and on which port,
 # and how hard to try at turning addresses into names. Every answer can be
-# given as a flag instead, and --non-interactive refuses to guess rather than
-# hanging on a prompt that nobody is there to answer.
+# given as a flag instead. --non-interactive never prompts: a setting with a
+# documented default takes it, and a choice with no safe default fails
+# rather than being guessed at.
 #
 # Safe to run more than once. Re-running picks up a new version and keeps the
 # web token, so a bookmark that works carries on working.
@@ -40,12 +41,24 @@ Options:
   --web-port PORT      TCP port for the browser view (default 2056)
   --resolve MODE       off, passive, or dns (default passive)
   --external-only      show only flows that touch the internet
-  --non-interactive    never prompt; fail if something needed is missing
+  --non-interactive    never prompt. A setting with a documented default takes
+                       it; a choice with no safe default fails instead
   --no-start           install but do not start it
   --help               show this message
 
 Run it again after pulling a new version. Your settings and web token survive.
 USAGE
+}
+
+say() { printf '  %s\n' "$*"; }
+die() { echo "install.sh: $*" >&2; exit 1; }
+
+# A two-argument flag with nothing after it would otherwise `shift 2` off the
+# end, which returns non-zero and, under `set -e`, ends the script without a
+# word. Checked before shifting so the caller is told which flag it was.
+need() {
+    [ $# -ge 2 ] || die "$1 needs a value"
+    printf '%s' "$2"
 }
 
 MODE=""
@@ -61,13 +74,13 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --systemd) MODE=systemd; shift ;;
         --docker) MODE=docker; shift ;;
-        --flow-port) FLOW_PORT="${2:-}"; shift 2 ;;
+        --flow-port) FLOW_PORT="$(need "$@")"; shift 2 ;;
         --flow-port=*) FLOW_PORT="${1#*=}"; shift ;;
         --web) WEB=1; shift ;;
         --no-web) WEB=0; shift ;;
-        --web-port) WEB_PORT="${2:-}"; shift 2 ;;
+        --web-port) WEB_PORT="$(need "$@")"; shift 2 ;;
         --web-port=*) WEB_PORT="${1#*=}"; shift ;;
-        --resolve) RESOLVE="${2:-}"; shift 2 ;;
+        --resolve) RESOLVE="$(need "$@")"; shift 2 ;;
         --resolve=*) RESOLVE="${1#*=}"; shift ;;
         --external-only) EXTERNAL_ONLY=1; shift ;;
         --non-interactive) INTERACTIVE=0; shift ;;
@@ -82,13 +95,15 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
-say() { printf '  %s\n' "$*"; }
-die() { echo "install.sh: $*" >&2; exit 1; }
 
 # A prompt that takes a default, and that refuses to block when nobody is there
 # to answer. --non-interactive is the explicit form; a run from cron with no
-# terminal is the accidental one, and both should take the default rather than
-# wait for input that is never coming.
+# terminal is the accidental one, and both take the default rather than wait
+# for input that is never coming.
+#
+# Only ever used where a default is documented and safe. A choice that is
+# neither, such as whether to serve the browser view, is guarded above and
+# fails instead.
 ask() {
     local prompt="$1" default="$2" answer=""
     if [ "$INTERACTIVE" -eq 0 ] || [ ! -t 0 ]; then
@@ -155,6 +170,13 @@ if [ -z "$FLOW_PORT" ]; then
     FLOW_PORT="$(ask "UDP port to listen for flows on" "2055")"
 fi
 check_port "$FLOW_PORT" "the flow port"
+
+# The browser view opens a second port, so which way this goes is not
+# something to fall back to a default on when nobody is there to be asked.
+# A port has a documented default and is merely unstated; this is a choice.
+if [ -z "$WEB" ] && [ "$INTERACTIVE" -eq 0 ]; then
+    die "--web or --no-web is required with --non-interactive"
+fi
 
 if [ -z "$WEB" ]; then
     WEB="$(ask_yes_no "Serve the display to a browser" "y")"
@@ -468,8 +490,8 @@ else
     cat <<DOCKNEXT
   Check it came up:
 
-      docker compose --file $COMPOSE_FILE ps
-      docker compose --file $COMPOSE_FILE logs --tail 50
+      sudo docker compose --file $COMPOSE_FILE ps
+      sudo docker compose --file $COMPOSE_FILE logs --tail 50
 
 DOCKNEXT
 fi
