@@ -11,6 +11,37 @@ but it is a program rather than a library, and the names inside it may move
 without that being a breaking change. `--json` output is the part meant to be
 parsed, and it is treated as public.
 
+## [0.2.2] - 2026-08-28
+
+Release plumbing only. Nothing in the command, its options or its output
+changes, and an existing install has no reason to move for it. It is a
+release because most of what changed only happens when a tag does, and
+because a release is the only way to find out whether it works.
+
+### Changed
+
+- **The image is built and pushed by `mjaksn/workflows` now**, called from
+  `release.yml` and pinned by commit. It was the same hundred and forty
+  lines here as in two other repositories, kept in step by hand and already
+  drifting. Two calls rather than one, so that a Docker Hub outage still
+  cannot hold up the GHCR image or the release page behind it, which is the
+  arrangement 0.2.1 introduced and this preserves. The Dockerfile stays
+  here. Nothing about the published image changes: same base digest, same
+  three platforms, same tags.
+- **CI rehearses the publishing path on every pull request**, building for
+  one platform and pushing nothing. A release workflow cannot be tried
+  without releasing, and a shared file is one point of failure for three of
+  them, so the `rehearsal` job is what keeps it honest between tags.
+
+### Fixed
+
+- **A tag that is not on `main` is refused rather than published.** A squash
+  merge writes a commit of its own, so a tag put on the release branch
+  beforehand names a commit that never reaches `main`, and `git describe`
+  there then answers with the release before it. `v0.1.1` was tagged that
+  way and has since been moved onto `main`; the release workflow now refuses
+  the mistake instead of recording it.
+
 ## [0.2.1] - 2026-08-28
 
 ### Added
@@ -185,6 +216,7 @@ console: the part that decides what a flow should look like on a terminal.
   reminder line under the startup banner can be a pointer rather than a
   two-hundred-character list that wrapped and then scrolled away.
 
+[0.2.2]: https://github.com/mjaksn/nettail/releases/tag/v0.2.2
 [0.2.1]: https://github.com/mjaksn/nettail/releases/tag/v0.2.1
 [0.2.0]: https://github.com/mjaksn/nettail/releases/tag/v0.2.0
 [0.1.2]: https://github.com/mjaksn/nettail/releases/tag/v0.1.2
