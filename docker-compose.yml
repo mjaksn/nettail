@@ -1,0 +1,75 @@
+# nettail under Docker Compose, serving the browser view.
+#
+#   docker compose up --detach
+#   docker compose logs --follow        the console display, as it scrolls
+#
+# The URL with the token in it is printed at startup, so read the logs once
+# after the first start. Set NETTAIL_WEB_TOKEN below to pin it and a bookmark
+# will survive a restart.
+
+name: nettail
+
+services:
+  nettail:
+    image: ghcr.io/mjaksn/nettail:latest
+    container_name: nettail
+    restart: unless-stopped
+
+    # Host networking, and this is the setting that matters most here.
+    #
+    # A flow collector cares who sent the datagram: the EXPORTER column is the
+    # address the packet came from. Behind Docker's bridge that address is
+    # rewritten to the gateway, so every exporter on the network shows up as
+    # 172.17.0.1 and they become impossible to tell apart. Host networking
+    # keeps the real one.
+    #
+    # It also keeps the userland proxy out of the datagram path, which matters
+    # on a busy network: the collector asks for a 4 MB receive buffer because
+    # flow bursts are lossy, and a hop in front of that socket undoes some of
+    # what the buffer is for.
+    #
+    # The cost is that this is a Linux arrangement. Docker Desktop on Windows
+    # and macOS does not give a container the host's interfaces, so there the
+    # ports section below has to be used instead, with the exporter address
+    # wrong. See the README.
+    network_mode: host
+
+    # With host networking the container is already on the host's ports, so
+    # nothing is published and nothing needs to be.
+    #
+    # Bridge networking is not simply a slower alternative here. As well as
+    # losing the exporter address, the browser view becomes unreachable: the
+    # server checks the Host header against the address the connection arrived
+    # on, which is what stops DNS rebinding, and behind the bridge that is the
+    # container's own 172.17.0.x. A browser asking for 127.0.0.1 is refused.
+    # Flows are still collected, so this is usable for --json and nothing else.
+    #ports:
+    #  - "2055:2055/udp"
+
+    command:
+      - --web
+      # Loopback, not 0.0.0.0, because host networking means the host's own
+      # loopback. This is the same guarantee the program gives outside a
+      # container, and it needs no publish to keep it. The image's default
+      # command asks for 0.0.0.0 instead, which is what a bridged run needs to
+      # be reachable at all; here that would put the view on every interface.
+      - --web-bind
+      - 127.0.0.1
+      # Pin the token so a bookmark survives a restart. Leave it out and a
+      # fresh random one is printed at every start.
+      #- --web-token
+      #- ${NETTAIL_WEB_TOKEN}
+      # Serve the display but accept no keys from the browser.
+      #- --web-readonly
+      # Only flows that touch the internet, which is usually what is wanted.
+      #- --external-only
+
+    # Nothing is mounted by default. The collector keeps no state: it holds
+    # what it is showing in memory and writes nothing, so there is no volume to
+    # lose and a restart simply starts counting again.
+    #
+    # The one thing worth mounting is your own static name mappings, if you
+    # keep any. Read-only, because it is only ever read, and paired with
+    # `--hosts /etc/nettail/lan-hosts` in the command above.
+    #volumes:
+    #  - ./lan-hosts:/etc/nettail/lan-hosts:ro

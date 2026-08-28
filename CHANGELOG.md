@@ -11,6 +11,42 @@ but it is a program rather than a library, and the names inside it may move
 without that being a breaking change. `--json` output is the part meant to be
 parsed, and it is treated as public.
 
+## [0.2.1] - 2026-08-28
+
+### Added
+
+- **A container image**, published to `ghcr.io/mjaksn/nettail` and
+  `docker.io/mjaksn/nettail` on every release, for `linux/amd64`,
+  `linux/arm64` and `linux/arm/v7`. It is built for `--web`: the console
+  display wants a real terminal, which a detached container does not have, and
+  the browser view is the mode that works properly without one.
+  `docker-compose.yml` is a worked example.
+- **`scripts/install.sh`**, which sets nettail up as either a systemd service
+  or a Docker container, asking which and asking for the flow port, the web
+  port and the resolver mode. Every answer has a flag, and `--non-interactive`
+  fails rather than hanging when nobody is there to answer. It generates a web
+  token, keeps it in `/etc/nettail/nettail.env` mode 0640, and reuses it on a
+  reinstall so that a bookmarked URL survives an upgrade. Until now the README
+  asked you to write the systemd unit by hand.
+- `requirements.lock` and `requirements-build.lock`, pinning what the image
+  installs by version and by the hash of every file the index publishes, with
+  `scripts/lock_hashes.py` to refresh them from the index's own digests.
+
+### Changed
+
+- **The routable web bind warning now says something different in a
+  container.** On a host it is unchanged, and it should be: a bind to anything
+  but loopback puts a map of the network on an address others can reach, over
+  plain HTTP. In a container it was misleading. Loopback there belongs to the
+  container's namespace, so the image passes `--web-bind 0.0.0.0` on every
+  start and the warning fired every time, which teaches a reader to skip the
+  line that matters. What a container cannot see is how the port was published,
+  and that is where the exposure is really settled, so it now says that
+  instead, pointing at `-p 127.0.0.1:2056:2056` and at `-p 2056:2056`.
+
+  Nothing about what is bound changed. The detection decides which sentence is
+  printed and nothing else.
+
 ## [0.2.0] - 2026-08-26
 
 ### Added
@@ -149,6 +185,7 @@ console: the part that decides what a flow should look like on a terminal.
   reminder line under the startup banner can be a pointer rather than a
   two-hundred-character list that wrapped and then scrolled away.
 
+[0.2.1]: https://github.com/mjaksn/nettail/releases/tag/v0.2.1
 [0.2.0]: https://github.com/mjaksn/nettail/releases/tag/v0.2.0
 [0.1.2]: https://github.com/mjaksn/nettail/releases/tag/v0.1.2
 [0.1.1]: https://github.com/mjaksn/nettail/releases/tag/v0.1.1

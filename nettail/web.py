@@ -262,6 +262,24 @@ def is_loopback(addr):
         return False
 
 
+def in_container():
+    """Whether this process is running inside a container.
+
+    Three markers, because three runtimes leave different ones behind: Docker
+    writes /.dockerenv, Podman writes /run/.containerenv, and both podman and
+    systemd-nspawn set $container. None is guaranteed and none is a standard,
+    so this answers "almost certainly yes" or "as far as anything here can
+    tell, no".
+
+    It decides which advice gets printed and nothing else. A wrong answer
+    changes a sentence; it never changes what is bound. That is what makes a
+    guess acceptable here when it would not be elsewhere.
+    """
+    if os.environ.get("container"):
+        return True
+    return any(os.path.exists(path) for path in ("/.dockerenv", "/run/.containerenv"))
+
+
 def web_token_arg(text):
     """A token given on the command line, checked for the two ways it fails.
 

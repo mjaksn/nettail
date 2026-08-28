@@ -3,6 +3,8 @@
 [![CI](https://github.com/mjaksn/nettail/actions/workflows/ci.yml/badge.svg)](https://github.com/mjaksn/nettail/actions/workflows/ci.yml)
 [![Release](https://github.com/mjaksn/nettail/actions/workflows/release.yml/badge.svg)](https://github.com/mjaksn/nettail/actions/workflows/release.yml)
 [![PyPI](https://img.shields.io/pypi/v/nettail)](https://pypi.org/project/nettail/)
+[![GHCR](https://img.shields.io/badge/ghcr.io-nettail-blue)](https://github.com/mjaksn/nettail/pkgs/container/nettail)
+[![Docker Hub](https://img.shields.io/docker/v/mjaksn/nettail?label=docker%20hub&sort=semver)](https://hub.docker.com/r/mjaksn/nettail)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/mjaksn/nettail/blob/main/LICENSE)
 
 A NetFlow and IPFIX collector that prints flow records to the console in a
@@ -42,7 +44,9 @@ TIME         EXPORTER        PROTO  SOURCE                                     D
 - [Output format](#output-format)
 - [Hostname resolution](#hostname-resolution)
 - [JSON output](#json-output)
+- [Installing it](#installing-it)
 - [Running as a service](#running-as-a-service)
+- [Running in Docker](#running-in-docker)
 - [How it works](#how-it-works)
 - [Troubleshooting](#troubleshooting)
 - [Tests](#tests)
@@ -1331,6 +1335,38 @@ elements appear as `e<enterprise>.<id>`.
 
 ---
 
+## Installing it
+
+`scripts/install.sh` sets nettail up either as a systemd service or as a Docker
+container. It asks which, then asks for the ports and the resolver mode:
+
+```
+sudo scripts/install.sh
+```
+
+Every answer can be given as a flag instead, and `--non-interactive` refuses to
+guess rather than hanging on a prompt nobody is there to answer:
+
+```
+sudo scripts/install.sh --systemd --non-interactive     --flow-port 2055 --web --web-port 2056 --resolve dns
+```
+
+Either way it generates a web token and keeps it in `/etc/nettail/nettail.env`,
+mode 0640. That file is the whole of the web interface's authentication, and it
+is why the installer is safe to run again: an upgrade keeps the token, so a URL
+you bookmarked carries on working. The token is passed through the environment
+rather than on the command line, so it does not appear in `ps` output.
+
+The systemd install builds a virtual environment in `/opt/nettail` from
+`requirements.lock`, verifying the hash of every file, creates a `nettail`
+system user and group, and writes a hardened unit. The Docker install writes
+`/etc/nettail/docker-compose.yml` using host networking, for the reasons in
+[Running in Docker](#running-in-docker), and brings it up.
+
+Neither puts the browser view on the network. `--web-bind` stays at its
+loopback default in both, because that is a decision worth making deliberately
+rather than one an installer should quietly make for you.
+
 ## Running as a service
 
 `SIGTERM` is handled the same as `Ctrl-C`, so the exit summary still prints when
@@ -1413,6 +1449,118 @@ Rotate the output with logrotate using `copytruncate`, since the script holds th
 file descriptor open.
 
 ---
+
+## Running in Docker
+
+An image is published on every release, to both
+[GHCR](https://github.com/mjaksn/nettail/pkgs/container/nettail) and
+[Docker Hub](https://hub.docker.com/r/mjaksn/nettail), for `linux/amd64`,
+`linux/arm64` and `linux/arm/v7`.
+
+The image is for the web interface. nettail is a console program first, and its
+display wants a real terminal, so a detached container has nothing to show. The
+browser view is the mode that works properly without one, and it is what the
+image runs by default.
+
+```
+docker run -d --name nettail --restart unless-stopped     --network host     ghcr.io/mjaksn/nettail:latest --web --web-bind 0.0.0.0
+docker logs nettail        # the URL, with its token, is printed at startup
+```
+
+`docker-compose.yml` in this repository is the same thing as a Compose file,
+with the options worth knowing about written out beside it.
+
+### Use host networking
+
+This is the setting that matters, and it is not a performance nicety.
+
+A flow collector cares who sent the datagram. Behind Docker's bridge that
+address is rewritten to the gateway, so **every exporter on your network shows
+up as `172.17.0.1`** and they cannot be told apart. The EXPORTER column becomes
+a constant. Host networking keeps the real address.
+
+It also keeps Docker's userland proxy out of the datagram path. The collector
+asks the kernel for a 4 MB receive buffer because flow bursts are lossy, and a
+hop in front of that socket undoes part of what the buffer is for.
+
+Host networking is a Linux arrangement, and on Linux it is the only one in
+which this image is fully usable. Docker Desktop on Windows and macOS does not
+give a container the host's interfaces, and there the two costs stack up:
+
+- Every exporter shows as the gateway address, as above.
+- **The browser view cannot be reached at all.** The server checks the `Host`
+  header against the address the connection arrived on, which is what stops DNS
+  rebinding. Behind the bridge that address is the container's own
+  `172.17.0.x`, so a browser asking for `127.0.0.1:2056` is turned away with the
+  same 404 a wrong token gets. Nothing a browser would send matches.
+
+So on Docker Desktop, run the collector locally rather than in a container, or
+run it in a Linux VM with host networking. Publishing ports is not a workaround
+for `--web`; it only looks like one until you open the page.
+
+### Why the image binds 0.0.0.0
+
+`--web-bind` defaults to `127.0.0.1`, and that default is right on a host.
+Inside a container it is unreachable: loopback there belongs to the container's
+own network namespace, not to yours, so a published port would answer nothing.
+The image therefore passes `--web-bind 0.0.0.0`.
+
+That moves the loopback guarantee rather than dropping it. **Publish the web
+port to `127.0.0.1` and it is exactly as private as the default was:**
+
+```
+-p 127.0.0.1:2056:2056        only this machine can reach the view
+-p 2056:2056                  every interface the host has, over plain HTTP
+```
+
+The collector notices it is in a container and says this at startup, in place
+of the warning it prints for a routable bind on a host. That warning still
+appears everywhere else, unchanged; what would be useless is printing it on
+every single container start, when the image asks for `0.0.0.0` every time and
+the thing it should be warning about cannot be seen from inside.
+
+With host networking none of this applies. The namespace is the host's, so
+`--web-bind 127.0.0.1` works exactly as it does outside a container, the `Host`
+check matches, and the startup line is the ordinary one. That is the arrangement
+to prefer, and the compose file uses it:
+
+```
+docker run -d --name nettail --network host     ghcr.io/mjaksn/nettail:latest --web --web-bind 127.0.0.1
+```
+
+### What it does and does not carry
+
+The collector keeps no state. It holds what it is showing in memory and writes
+nothing, so there is no volume to mount and nothing to lose. A restart starts
+counting again, which is the same thing `Ctrl-C` and a fresh run do.
+
+The one thing worth mounting is your own static name mappings:
+
+```
+-v ./lan-hosts:/etc/nettail/lan-hosts:ro
+```
+
+and then `--hosts /etc/nettail/lan-hosts`.
+
+It runs as an unprivileged user, UID and GID 10001. The default port is 2055,
+which is above 1024 and so needs no privilege to bind.
+
+### The console display, if you want it
+
+```
+docker run -it --rm --network host ghcr.io/mjaksn/nettail:latest
+```
+
+`-it` is not optional. Without a terminal the keyboard controls turn themselves
+off and the sticky header has nothing to stick to. For anything longer than a
+look, install it locally instead: this is a console program, and a container is
+a poor terminal.
+
+For a machine readable stream, `--json` needs no terminal and pipes as usual:
+
+```
+docker run --rm --network host ghcr.io/mjaksn/nettail:latest --json > flows.jsonl
+```
 
 ## How it works
 

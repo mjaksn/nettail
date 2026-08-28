@@ -66,6 +66,7 @@ from .web import (
     KEY_QUEUE_MAX,
     WEB_ENDPOINT_WIDTH,
     WebInterface,
+    in_container,
     is_loopback,
     unpad,
     web_token_arg,
@@ -473,6 +474,42 @@ def write_summary(stats, tally, resolver, sequences, sampling, args,
                   f"{ramp.paint(f'{human_bytes(nbytes):>10}', nbytes)}", file=out)
 
 
+def web_bind_warning(bind, port, contained=None):
+    """What to say when the web interface binds something other than loopback.
+
+    On a host that bind is worth being loud about. It puts a live map of who
+    on this network talked to whom on an address other machines can reach, over
+    plain HTTP, guarded by a token that travels in the clear beside it.
+
+    In a container the same bind means something else entirely. Loopback inside
+    the container's own namespace is unreachable from a published port, so the
+    image asks for 0.0.0.0 every time it starts, and the alarming version of
+    this line would then be printed on every single start. A reader who learns
+    to skip it there skips it on a host too, which is the case it exists for.
+
+    What the container cannot see is how the port was published, and that is
+    where the exposure is really decided. So it says that instead: quietly,
+    without colour, and pointing at the thing the reader can actually check.
+
+    `contained` is for the tests. Left as None it asks the environment.
+    """
+    if contained is None:
+        contained = in_container()
+    if contained:
+        return (f"the web interface is bound to {bind}, which is how a "
+                f"published port reaches it from outside this container. What "
+                f"that exposes is settled by the publish, which cannot be seen "
+                f"from in here: -p 127.0.0.1:{port}:{port} keeps it to the "
+                f"host, while -p {port}:{port} puts this network's traffic on "
+                f"every interface the host has, over plain HTTP.")
+    return (f"{C.YELLOW}the web interface is bound to {bind}, not to "
+            f"loopback. Anyone who can reach that address and guess nothing "
+            f"worse than the token can read which machines on this network "
+            f"talked to which, and the hostnames behind them. This is plain "
+            f"HTTP, so the token in the URL travels in the clear and so does "
+            f"everything it fetches.{C.RESET}")
+
+
 def main():
     # Named rather than taken from argv[0], which is the console script's full
     # path when installed and "__main__.py" under `python -m`. Neither is what
@@ -832,13 +869,7 @@ def main():
             # warned about as though it were a routable one.
             if not is_loopback(web.bound_addr):
                 web_warnings.append(
-                    f"{C.YELLOW}the web interface is bound to "
-                    f"{args.web_bind}, not to loopback. Anyone who can reach "
-                    f"that address and guess nothing worse than the token can "
-                    f"read which machines on this network talked to which, "
-                    f"and the hostnames behind them. This is plain HTTP, so "
-                    f"the token in the URL travels in the clear and so does "
-                    f"everything it fetches.{C.RESET}")
+                    web_bind_warning(args.web_bind, args.web_port))
 
     def write_banner(out):
         """What a session opens with: where it is listening, and how it is set.

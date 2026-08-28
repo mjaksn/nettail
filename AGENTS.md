@@ -286,6 +286,64 @@ feature means reading both, and their suites.
 - **Dependency direction runs one way**, from `cli` down towards `colour` and
   `values`. There are no import cycles and there should not be.
 
+## The installer
+
+`scripts/install.sh` covers both deployments, systemd and Docker, and asks
+which. Three things in it are deliberate:
+
+- **The web token lives in `/etc/nettail/nettail.env` and is never
+  regenerated.** Re-running the installer to pick up a new version must not
+  invalidate a URL somebody has bookmarked. It is passed through the
+  environment rather than on the command line so that it stays out of `ps`.
+- **`--web-bind` is left at its loopback default in both paths.** Putting the
+  view on the network is a decision to make by editing the unit or the compose
+  file, not one an installer makes quietly on somebody's behalf.
+- **`useradd --user-group`, explicitly.** The unit says `Group=nettail`, and
+  whether a bare `useradd` creates a matching group depends on `USERGROUPS_ENAB`
+  and so on the distribution.
+
+It is safe to run twice, and that is worth keeping: an existing user, virtual
+environment and token are all reused rather than replaced.
+
+## The container image
+
+The image is built for `--web`. The console display wants a real terminal and a
+detached container has none, so the browser view is the only mode that works
+properly there. That is why `CMD` is `--web --web-bind 0.0.0.0` and not a bare
+collector.
+
+Three things about it are easy to get wrong later:
+
+- **`--web-bind 0.0.0.0` is not a lowered guard.** Loopback inside a container
+  belongs to the container's namespace, so the program's own default would
+  answer nothing through a published port. The guarantee moves to the publish,
+  where `-p 127.0.0.1:2056:2056` is exactly as private as the default was.
+- **`in_container()` in `web.py` may only choose prose.** It guesses, from
+  markers no runtime promises, and a guess is acceptable precisely because a
+  wrong answer changes a sentence rather than an address. If it ever decides
+  what gets bound, that trade stops holding.
+- **Host networking is not a nicety.** Behind the bridge, the address a
+  datagram came from is rewritten to the gateway, so every exporter shows up as
+  `172.17.0.1` and the EXPORTER column stops distinguishing anything. That is
+  measured, not feared. `docker-compose.yml` uses `network_mode: host` for it,
+  and the README says why.
+
+Everything the image installs is pinned by version and by hash in
+`requirements.lock`, with `requirements-build.lock` doing the same for the one
+package needed to build the wheel. `scripts/lock_hashes.py` refreshes both from
+the index's own digests; `--check` fails if either has drifted.
+
+CI builds the image for amd64 and starts it, for the reason the rest of the
+suite exists: a thing exercised only at tag time rots silently, and the first
+anybody hears of it is a failed release. It also asserts that a container start
+prints the container line and not the host warning.
+
+The two registries are separate jobs. GHCR authenticates with the workflow's
+own token, so it cannot fail for want of a secret; Docker Hub needs a stored
+one, and in a job of its own a rotated token or an outage there costs Docker
+Hub and nothing else. The GitHub release waits for GHCR, so a release page
+cannot announce an image that was never pushed.
+
 ## Prose
 
 Comments and docstrings here carry the reasoning, not a restatement of the

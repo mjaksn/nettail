@@ -132,13 +132,93 @@ jobs:
           print("ran", nettail.__version__, "from", here)
           PY
 
+  docker:
+    name: the image builds and starts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - name: build it
+        # amd64 only, and no push. The point is that the Dockerfile still
+        # builds and the image still starts. Whether emulation works is the
+        # release workflow's problem, and it takes minutes rather than seconds
+        # to answer.
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: nettail:ci
+      - name: start it and fetch the page it serves
+        # A known token, so the URL can be built here rather than scraped out
+        # of the banner. There is no unauthenticated route to ask instead:
+        # everything the web interface serves is behind the token, which is
+        # the point of it.
+        #
+        # The Host header is sent explicitly because the server checks it. That
+        # rule is what stops DNS rebinding, and a request that skipped it would
+        # be testing a weaker server than the one that ships.
+        #
+        # Host networking, because it is the only arrangement in which the web
+        # view is reachable at all, and so the only one worth testing. The Host
+        # rule compares against the address the connection arrived on; behind
+        # the bridge that is the container's own 172.17.0.x, so a browser
+        # asking for 127.0.0.1 is refused with the same 404 a bad token gets.
+        # With host networking the local address is the host's and it matches.
+        # The README says the same thing at more length.
+        run: |
+          docker run --detach --name probe --network host             nettail:ci --web --web-bind 127.0.0.1 --web-token ci-token
+          for attempt in $(seq 1 30); do
+            if curl --silent --fail --header 'Host: 127.0.0.1:2056'                  http://127.0.0.1:2056/t/ci-token/ > page.html; then
+              break
+            fi
+            sleep 1
+          done
+          docker logs probe
+          test -s page.html || {
+            echo "::error::the container never served its page"
+            exit 1
+          }
+      - name: a routable bind must say the container thing, not the host warning
+        # The default CMD binds 0.0.0.0, which on a host would print the loud
+        # warning about putting the network on a reachable address. In a
+        # container that would fire on every single start and teach the reader
+        # to skip the line that matters. This is the check that it does not.
+        #
+        # A second container, bridged, because this is about what is printed
+        # rather than what is reachable, and the default CMD is what an
+        # ordinary `docker run` gets.
+        run: |
+          docker run --detach --name warned nettail:ci
+          sleep 5
+          logs="$(docker logs warned 2>&1)"
+          echo "$logs"
+          echo "$logs" | grep -q "published port reaches it" || {
+            echo "::error::the container did not print the container advice"
+            exit 1
+          }
+          echo "$logs" | grep -q "travels in the clear" && {
+            echo "::error::the container printed the host warning"
+            exit 1
+          }
+          echo "the container printed the right line"
+      - name: it must be running as the unprivileged user
+        run: |
+          who="$(docker exec probe id --user --name)"
+          echo "running as $who"
+          [ "$who" = "nettail" ] || {
+            echo "::error::the container is running as $who, not nettail"
+            exit 1
+          }
+
   gate:
     name: gate
     # The single check for branch protection to require. Runs whatever the
     # others did, so a failure upstream is reported here rather than leaving
     # the gate skipped and the requirement satisfied by default.
     if: always()
-    needs: [lint, test, build]
+    needs: [lint, test, build, docker]
     runs-on: ubuntu-latest
     steps:
       - name: every job must have succeeded
@@ -146,6 +226,8 @@ jobs:
           echo "lint  ${{ needs.lint.result }}"
           echo "test  ${{ needs.test.result }}"
           echo "build ${{ needs.build.result }}"
+          echo "docker ${{ needs.docker.result }}"
           [ "${{ needs.lint.result }}"  = "success" ] || exit 1
           [ "${{ needs.test.result }}"  = "success" ] || exit 1
           [ "${{ needs.build.result }}" = "success" ] || exit 1
+          [ "${{ needs.docker.result }}" = "success" ] || exit 1

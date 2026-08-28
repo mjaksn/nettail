@@ -1,0 +1,31 @@
+# Exact runtime pins for the container image.
+#
+# pyproject.toml carries floors and ceilings, which is the right thing for
+# anyone installing this beside other packages. This file is what the image
+# installs, so that a rebuild of a released tag gets the same two packages it
+# got the first time and an upstream release cannot change what the image does
+# without somebody deciding it should.
+#
+# Both are halves of this program that grew up and left, both are published
+# from repositories of mine, and neither has a dependency of its own. That is
+# the whole runtime: two pure Python packages and the standard library.
+#
+# Each pin carries the sha256 of every file the index publishes for that
+# version, and the image installs with --require-hashes. A version pin says
+# what to install; the hashes say what the bytes must be.
+#
+# Every file is listed rather than only the one a given machine would pick.
+# Both of these are pure Python and ship one wheel each, so today that is a
+# short list, but a package that grew a compiled extension would need the rest
+# and this way the file does not have to learn a new trick to cope.
+#
+# To refresh: edit the version pins below, then run scripts/lock_hashes.py to
+# bring the hashes with them. It reads the index's own digests and downloads
+# nothing.
+
+lanname==0.2.0 \
+    --hash=sha256:a9744982d7032dfc1c151ad9551af1bdfbeea3421bfae6b20fffbc3c21ba9493 \
+    --hash=sha256:bba88d58d0d683bacfce4417047693c3d28b308922f1973fda9b6ff59ec91d42
+netflume==0.1.0 \
+    --hash=sha256:7cd66e6ad9e4b4e79f52ec042407ba2583565c22d1266489f7e4c45c9e3582b6 \
+    --hash=sha256:8de6dc49782073017b9d8580d8f11be1a82f3b67f4a4f6675457ba37b2f749ef
