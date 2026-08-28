@@ -92,7 +92,11 @@ test:
   for that tag, so a tag the changelog says nothing about fails the release
   rather than putting up an empty page. `cli.py` imports `__version__` from
   the package, which works because `__init__.py` assigns it above its
-  submodule imports; keep that order.
+  submodule imports; keep that order. Tag the merge commit on `main` once the
+  pull request has landed, and not the branch it came from: a squash merge
+  replaces a branch's commits with one of its own, so a tag left behind on the
+  branch names a commit that never reaches `main`, and `git describe` there
+  then answers with the release before it.
 
 ## Service names
 
