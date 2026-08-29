@@ -1,11 +1,11 @@
 """Sizes, rates and durations, written for a column.
 
 What a field *is* is netflume's question, and `addr_kind` and `tcp_flags_str`
-are imported from there. A service name is netflume's answer too, with a
-shipped list behind it for the ports a system database happens not to know,
-which is `services.py`. What is left here is the part that only a console needs: turning
-a number into something narrow enough to sit in a fixed width column and still
-be read at a glance.
+are imported from there by the modules that need them. A service name is
+netflume's answer too, with a shipped list behind it for the ports a system
+database happens not to know, which is `services.py`. What is left here is the
+part that only a console needs: turning a number into something narrow enough
+to sit in a fixed width column and still be read at a glance.
 """
 
 

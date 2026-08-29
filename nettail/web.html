@@ -708,8 +708,9 @@ footer span i { color: var(--ink-3); font-style: normal; }
 
   // The drawer. Shut to begin with, because the flows are what the page is
   // for and a reader who wants the keys can ask. What it holds is the same
-  // table the terminal's ? key prints, which is why the browser is not sent
-  // that listing: it would be describing the buttons next to the buttons.
+  // table the terminal's ? key prints, which is why that key gets no button
+  // of its own: it would be describing the buttons next to the buttons. The
+  // key still works, and the listing it prints still arrives as prose.
   var DRAWER_KEY = "nettail.keys.open";
 
   function setDrawer(open) {
