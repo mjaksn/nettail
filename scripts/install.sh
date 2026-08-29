@@ -39,7 +39,7 @@ Options:
   --web                serve the browser view
   --no-web             do not serve the browser view
   --web-port PORT      TCP port for the browser view (default 2056)
-  --resolve MODE       off, passive, or dns (default passive)
+  --resolve MODE       off, dns, or all (default dns)
   --external-only      show only flows that touch the internet
   --non-interactive    never prompt. A setting with a documented default takes
                        it; a choice with no safe default fails instead
@@ -195,11 +195,11 @@ else
 fi
 
 if [ -z "$RESOLVE" ]; then
-    RESOLVE="$(ask "Hostname resolution: off, passive or dns" "passive")"
+    RESOLVE="$(ask "Hostname resolution: off, dns or all" "dns")"
 fi
 case "$RESOLVE" in
-    off|passive|dns) ;;
-    *) die "unknown --resolve '$RESOLVE'; it is off, passive or dns" ;;
+    off|dns|all) ;;
+    *) die "unknown --resolve '$RESOLVE'; it is off, dns or all" ;;
 esac
 
 echo
@@ -384,10 +384,9 @@ else
     # Host networking, and not as a preference. Behind the bridge the address a
     # datagram came from is rewritten to the gateway, so every exporter shows
     # up as the same address and the EXPORTER column stops distinguishing
-    # anything. The browser view does not work there at all: the Host check
-    # that stops DNS rebinding compares against the address the connection
-    # arrived on, which is the container's own, so a browser asking for
-    # 127.0.0.1 is refused. The README says all of this at more length.
+    # anything. A bridged run can still serve the browser view, through a
+    # publish and a routable --web-bind, but the exporter column is the whole
+    # point of a flow collector. The README says all of this at more length.
     if [ "$(uname -s)" != "Linux" ]; then
         say "warning: host networking is a Linux arrangement, and this is not Linux"
         say "         the collector will run, but the browser view will not be reachable"
