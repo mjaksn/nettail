@@ -444,18 +444,123 @@ footer span i { color: var(--ink-3); font-style: normal; }
     return scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 24;
   }
 
-  function append(tr) {
-    rows.appendChild(tr);
-    if (rows.childElementCount > MAX_ROWS) {
-      while (rows.childElementCount > TRIM_TO) {
-        rows.removeChild(rows.firstElementChild);
-        trimmed += 1;
-      }
-      note("gap", trimmed.toLocaleString() +
-           " earlier rows have been dropped to keep this page usable. " +
-           "The collector still has them all in its totals.");
+  // ---- one frame, one append -------------------------------------------
+  //
+  // Nothing reaches the table as it arrives. A row is built when its event
+  // comes in, held in a fragment, and put on the page once per animation
+  // frame, with one call to `toTail` at the end of it.
+  //
+  // What that avoids is layout rather than the building. `toTail` reads
+  // `scrollHeight`, which makes the browser lay the table out there and then,
+  // and a table lays out whole: with `table-layout: auto` every column is as
+  // wide as the widest cell in it, so laying out after one append is a pass
+  // over every row the page is holding. The cost of showing one flow would
+  // otherwise grow with the history behind it, and the history is thousands of
+  // rows. A reconnect hands over a backlog of up to CLIENT_BACKLOG events in a
+  // single task, and so does letting go of pause. A task that spends itself on
+  // thousands of full-table layouts is, from the outside, a tab that has
+  // frozen.
+  //
+  // Everything that changes the table comes through here: flows, prose, the
+  // notes the page writes itself, and the clear. That is what keeps them in
+  // the order they arrived in, which a queue for some of them and a direct
+  // append for the rest would not. The footer is the exception and is redrawn
+  // as each status arrives, being two lines that no amount of history makes
+  // more expensive, and being what says the collector is still there.
+  var pending = document.createDocumentFragment();
+  var pendingClear = false;
+  var frame = 0;
+  // Whether rows have gone since the gap row last said so. There are two
+  // places they can go now, and the reader is told once, when the frame is
+  // painted.
+  var untold = false;
+
+  function schedule() {
+    if (!frame) { frame = window.requestAnimationFrame(paint); }
+  }
+
+  function queue(tr) {
+    pending.appendChild(tr);
+    // Trimmed here as well as at paint, because animation frames do not run in
+    // a tab that is hidden or merely starved, and such a tab goes on taking
+    // events until `park` closes the stream. Rows waiting to be shown cost
+    // what rows on the page cost, so waiting is no reason to be exempt.
+    keep();
+    schedule();
+  }
+
+  function keep() {
+    // The page and the queue behind it are one history and are bounded as one.
+    // Trimming them separately would take the oldest of what is waiting while
+    // older rows sat on the page untouched, and the gap would then be in the
+    // middle of the history rather than at the top of it, which is not where
+    // the note below says it is. So the oldest goes first, wherever the oldest
+    // happens to be: everything on the page is older than everything queued.
+    // Except while a clear is waiting for its frame, when what is on the page
+    // is not history any more: it is going wholesale, and charging it to the
+    // count would report thousands of rows dropped that the reader asked to be
+    // rid of. It costs what it costs until `wipe` runs, which is no more than
+    // it cost already, and the trim meanwhile takes the oldest of what the
+    // page is about to hold instead.
+    var held = pendingClear ? 0 : rows.childElementCount;
+    var total = held + pending.childElementCount;
+    if (total <= MAX_ROWS) { return; }
+    while (total > TRIM_TO) {
+      var list = held ? rows : pending;
+      list.removeChild(list.firstElementChild);
+      if (held) { held -= 1; }
+      trimmed += 1;
+      total -= 1;
+    }
+    untold = true;
+  }
+
+  function wipe() {
+    rows.textContent = "";
+    scroller.scrollTop = 0;
+    followBox.checked = true;
+  }
+
+  function paint() {
+    frame = 0;
+    // The clear goes first and the fragment holds only what arrived after it,
+    // so a clear followed by flows inside one frame leaves the flows and
+    // nothing else, exactly as it did when each event was applied on its own.
+    if (pendingClear) {
+      pendingClear = false;
+      wipe();
+    }
+    if (pending.firstChild) {
+      // A fragment hands its children over to whatever it is appended to, so
+      // this is the single insertion the frame costs, whatever it is holding.
+      rows.appendChild(pending);
+      keep();
+    }
+    if (untold) {
+      untold = false;
+      // Straight on rather than through the queue: the note is about a trim
+      // that has just happened, and queueing it would hold it back for a frame
+      // that only arrives if something else does.
+      rows.appendChild(noteRow("gap", trimmed.toLocaleString() +
+        " earlier rows have been dropped to keep this page usable. " +
+        "The collector still has them all in its totals."));
     }
     if (following()) { toTail(); }
+  }
+
+  function clearTable() {
+    // Whatever was queued behind a clear goes with everything else. It was on
+    // its way to a table the reader has just emptied, and showing it after the
+    // clear would be the page answering a key with rows from before it.
+    pending = document.createDocumentFragment();
+    pendingClear = true;
+    // The count of what has been dropped restarts here rather than in `wipe`,
+    // which runs a frame later. A trim between the two belongs to the history
+    // after the clear, and zeroing it at paint would drop those rows and say
+    // nothing about them.
+    trimmed = 0;
+    untold = false;
+    schedule();
   }
 
   function addFlow(cells) {
@@ -473,7 +578,7 @@ footer span i { color: var(--ink-3); font-style: normal; }
       td.appendChild(ansi(String(cells[i] === undefined ? "" : cells[i])));
       tr.appendChild(td);
     }
-    append(tr);
+    queue(tr);
   }
 
   function addProse(kind, text) {
@@ -484,10 +589,12 @@ footer span i { color: var(--ink-3); font-style: normal; }
     td.colSpan = Math.max(columns.length, 1);
     td.appendChild(ansi(text.replace(/\n+$/, "")));
     tr.appendChild(td);
-    append(tr);
+    queue(tr);
   }
 
-  function note(kind, text) {
+  // Split from `note` because the trim inside `paint` needs the row without
+  // putting it back on the queue it is already draining.
+  function noteRow(kind, text) {
     var tr = document.createElement("tr");
     tr.className = "prose";
     tr.setAttribute("data-kind", kind);
@@ -495,8 +602,11 @@ footer span i { color: var(--ink-3); font-style: normal; }
     td.colSpan = Math.max(columns.length, 1);
     td.textContent = text;
     tr.appendChild(td);
-    rows.appendChild(tr);
-    if (following()) { toTail(); }
+    return tr;
+  }
+
+  function note(kind, text) {
+    queue(noteRow(kind, text));
   }
 
   // ---- the footer ------------------------------------------------------
@@ -926,10 +1036,7 @@ footer span i { color: var(--ink-3); font-style: normal; }
     });
 
     es.addEventListener("clear", function () {
-      rows.textContent = "";
-      trimmed = 0;
-      scroller.scrollTop = 0;
-      followBox.checked = true;
+      clearTable();
     });
 
     es.addEventListener("dropped", function (event) {
