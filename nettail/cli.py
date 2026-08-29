@@ -25,7 +25,7 @@ from netflume import (
 )
 
 from . import __version__, services
-from .colour import C
+from .colour import C, PlainStream, colour_on, strip_colour
 from .display import (
     COLUMNS,
     ENDPOINT_WIDTH,
@@ -110,7 +110,50 @@ def flow_record(rec, hdr, resolver):
     return out
 
 
-def tee(bus, kind, render, out=None):
+# Whether the browser is to be shown colour. Settled once by main() and read
+# by the publish paths below, rather than threaded through a dozen callers
+# that have no other interest in it. It stays True for a run with no web
+# interface, where nothing reads it.
+_WEB_COLOUR = True
+
+
+def for_web(text):
+    """Prose on its way to the feed, with colour taken out if it was refused.
+
+    The terminal's copy has already been dealt with by then, either at the
+    source or by the stream it was written to, so this is the browser's half
+    of the same question.
+    """
+    return text if _WEB_COLOUR else strip_colour(text)
+
+
+def colour_choice(args, isatty, no_colour_env):
+    """Whether the terminal and the browser each take colour.
+
+    Two answers because there are two readers. `--colour` is the terminal's,
+    and means what it always meant: `auto` gives colour to a terminal and
+    withholds it from a redirected stream, where escape codes are somebody
+    else's problem to strip. `NO_COLOR` is a convention about a terminal, so
+    it is scoped to that one and leaves the browser alone.
+
+    The browser's answer is `--web-colour`, on unless it is turned off,
+    because a browser is a colour-capable reader whatever stdout happens to
+    be. It used to be decided by `--colour`, and a detached container, which
+    has no terminal by definition and is the arrangement the image exists for,
+    therefore served a colourless view unless somebody knew to say
+    `--colour always`.
+    """
+    wanted = "never" if args.no_color else args.colour
+    if wanted == "always":
+        terminal = True
+    elif wanted == "never":
+        terminal = False
+    else:
+        terminal = bool(isatty) and not no_colour_env
+    return terminal, bool(args.web) and args.web_colour == "on"
+
+
+def tee(bus, kind, render, out=None, per_reader=False):
     """Print a block of prose, and hand the same characters to the feed.
 
     `render` is anything that takes an `out=` and prints to it, which is nearly
@@ -122,17 +165,42 @@ def tee(bus, kind, render, out=None):
 
     With nobody watching there is nothing to capture for, so the block is
     rendered straight at the terminal and no buffer is built at all.
+
+    One rendering serves both readers even when they want different colour,
+    because neither is handed the buffer directly: a terminal that is not
+    having colour is behind a stream that takes it out, and a browser that is
+    not having it gets the same treatment from `for_web`. Colour is the only
+    thing that differs, and taking it out of finished text is exactly as good
+    as never painting it.
+
+    `per_reader` is for the one block where that is not true. The host list
+    marks a superseded name with a trailing star when there is no colour to
+    dim it with, so a reader without colour is shown different words rather
+    than the same words undressed, and stripping cannot put the star back.
+    That block is rendered once for each reader when the two disagree. It is
+    a flag rather than the rule because rendering twice means reading live
+    state twice: `write_summary` alone would recompute how long the run has
+    been going and ask the resolver for every top talker's name again, so the
+    two copies could differ by more than colour and the second pass would
+    enqueue a second round of lookups.
     """
     out = out if out is not None else sys.stderr
     if bus is None or not bus.active:
         render(out)
+        return
+    if per_reader and colour_on(out) != _WEB_COLOUR:
+        captured = io.StringIO()
+        render(captured if _WEB_COLOUR else PlainStream(captured))
+        render(out)
+        out.flush()
+        bus.prose(kind, captured.getvalue())
         return
     buffer = io.StringIO()
     render(buffer)
     text = buffer.getvalue()
     out.write(text)
     out.flush()
-    bus.prose(kind, text)
+    bus.prose(kind, for_web(text))
 
 
 class _ProseTee:
@@ -160,7 +228,7 @@ class _ProseTee:
         while "\n" in self._pending:
             line, self._pending = self._pending.split("\n", 1)
             if line and self.bus is not None and self.bus.active:
-                self.bus.prose("reply", line)
+                self.bus.prose("reply", for_web(line))
         return len(text)
 
     def flush(self):
@@ -239,17 +307,23 @@ def report_events(events, args, out=None):
                   f"{event.detail}{C.RESET}", file=out)
 
 
-def write_hosts(resolver, out=None):
+def write_hosts(resolver, out=None, hosts=None):
     """List the local addresses seen this session and the names they answered to.
 
     Everything discovered at any point, not what happens to be cached: names
     expire and the cache evicts, and the useful question hours later is still
     "what did you see". Where an address answered to more than one name the
     most recent leads and the rest follow, dimmed, or marked with a star when
-    there is no colour to dim.
+    there is no colour to dim. That question is asked of the stream being
+    written to rather than of the program, because a run can be showing a
+    browser colour while this terminal is having none.
+
+    `hosts` is for the caller that renders this twice, once for each reader.
+    Taken here it would be read twice, and a name the resolver discovered in
+    between would appear in one copy and not the other.
     """
     out = out if out is not None else sys.stderr
-    hosts = resolver.local_hosts()
+    hosts = resolver.local_hosts() if hosts is None else hosts
     print(f"\n{C.BOLD}{C.BLUE}Local hosts seen{C.RESET}", file=out)
     if not hosts:
         print(f"  {C.GREY}none yet{C.RESET}", file=out)
@@ -258,10 +332,11 @@ def write_hosts(resolver, out=None):
         current, older = names[0], names[1:]
         shown = [f"{C.GREEN}{current}{C.RESET}"]
         for name in older:
-            shown.append(f"{C.DIM}{name}{C.RESET}" if C.enabled() else f"{name}*")
+            shown.append(f"{C.DIM}{name}{C.RESET}"
+                         if colour_on(out) else f"{name}*")
         print(f"  {C.CYAN}{addr:<18}{C.RESET} {'  '.join(shown)}", file=out)
     print(f"  {C.GREY}{len(hosts)} address{'' if len(hosts) == 1 else 'es'}"
-          f"{'' if C.enabled() else ', * marks a name that has been superseded'}"
+          f"{'' if colour_on(out) else ', * marks a name that has been superseded'}"
           f"{C.RESET}", file=out)
 
 
@@ -566,10 +641,10 @@ def main():
                     help="emit one JSON object per flow instead of a table")
     ap.add_argument("--colour", "--color", choices=("auto", "always", "never"),
                     default="auto", metavar="WHEN",
-                    help="when to use ANSI colour: auto (a terminal gets it, "
-                         "a redirected stream does not), always, or never. "
-                         "Use always to keep colour in the web interface "
-                         "when this program's own output is redirected")
+                    help="when to use ANSI colour on this terminal: auto (a "
+                         "terminal gets it, a redirected stream does not), "
+                         "always, or never. The browser view has its own "
+                         "switch and is not decided by this one")
     ap.add_argument("--no-color", action="store_true",
                     help="the same as --colour never")
     ap.add_argument("--header-every", type=int, default=40,
@@ -612,6 +687,12 @@ def main():
                          help="use this token in the URL instead of a fresh "
                               "random one, so that a bookmark survives a "
                               "restart")
+    web_grp.add_argument("--web-colour", "--web-color", choices=("on", "off"),
+                         default="on", metavar="WHEN",
+                         help="colour in the browser view (default on). A "
+                              "browser is a colour-capable reader whatever "
+                              "stdout is, so a redirected run does not take "
+                              "the colour out of it")
     web_grp.add_argument("--web-readonly", action="store_true",
                          help="serve the display but accept no keys from the "
                               "browser")
@@ -682,25 +763,44 @@ def main():
             except (ValueError, OSError):
                 pass
 
-    # Colour is one switch for the whole program, so the question is only when
-    # to throw it. `auto` is what it has always done: colour on a terminal, and
-    # nothing on a redirected stream, where escape codes are somebody else's
-    # problem to strip.
+    # Colour, for each of the two readers there are. This has to come after
+    # the reconfigure above, which wants the real streams, and after nothing
+    # else: it reads stdout to find out whether it is a terminal, and then may
+    # replace both streams with wrappers that take the colour back out.
     #
-    # The other two settings exist because `auto` reads stdout, and there is now
-    # a reader that is not stdout. A collector run as a service writes its flows
-    # into a file or a pipe and serves the display to a browser, and under `auto`
-    # that browser gets the colourless version, decided by the state of a stream
-    # it is not watching. `--colour always` is how that run says the colour is
-    # still wanted. `--no-color` is the old spelling of `never` and goes on
-    # working, as does the NO_COLOR convention, which wins over `auto` and loses
-    # to an explicit `always`.
-    wanted = "never" if args.no_color else args.colour
-    if wanted == "never":
+    # `--colour` is the terminal's switch and means what it always meant.
+    # `--web-colour` is the browser's, on by default, because a browser is a
+    # colour-capable reader however stdout was set up. One switch for both is
+    # what this replaces, and the arrangement it got wrong was the one the
+    # container image exists for: a detached container has no terminal, so
+    # `auto` blanked the codes for the whole process and the browser view,
+    # which is the only thing that image is for, came out white.
+    global _WEB_COLOUR
+    terminal_colour, _WEB_COLOUR = colour_choice(
+        args, sys.stdout.isatty(), os.environ.get("NO_COLOR"))
+
+    if not terminal_colour and not _WEB_COLOUR:
+        # Nobody wants it, so nothing is painted in the first place. This is
+        # the whole of what a run without --web does, which is what keeps such
+        # a run exactly as it was.
         C.disable()
-    elif wanted == "auto" and (not sys.stdout.isatty()
-                               or os.environ.get("NO_COLOR")):
-        C.disable()
+    elif not terminal_colour:
+        # The browser is having colour and this terminal is not, so it is
+        # painted at the source and taken out on the way here. Only the colour
+        # comes out: the sticky header and the status bar write their margins,
+        # their cursor moves and their erases to this same stream, and those
+        # go through untouched.
+        # Guarded so that wrapping is idempotent. Nothing calls main() twice
+        # in one process today except a test, and a stream wrapped twice
+        # would work while saying, to anything that looked, that it had
+        # already been dealt with.
+        if not isinstance(sys.stderr, PlainStream):
+            sys.stderr = PlainStream(sys.stderr)
+        if not args.json and not isinstance(sys.stdout, PlainStream):
+            # Under --json stdout carries json.dumps output, which has never
+            # had a colour code in it, so there is nothing to take out and no
+            # reason to put a substitution in front of every flow.
+            sys.stdout = PlainStream(sys.stdout)
 
     # Treat SIGTERM like Ctrl-C so the summary still prints under systemd.
     def _term(_signum, _frame):
@@ -795,8 +895,16 @@ def main():
         bus, "summary",
         lambda out: write_summary(stats, tally, resolver, sequences, sampling,
                                   args, controls.started, out=out))
-    controls.hosts = lambda: tee(bus, "hosts",
-                                 lambda out: write_hosts(resolver, out=out))
+    def show_hosts():
+        # The list is taken once and rendered from, because this is the block
+        # that may be rendered for each reader separately and the two must be
+        # looking at the same addresses.
+        seen = resolver.local_hosts()
+        tee(bus, "hosts",
+            lambda out: write_hosts(resolver, out=out, hosts=seen),
+            per_reader=True)
+
+    controls.hosts = show_hosts
     def listing():
         """The ? listing, to each view with the keys that view can press.
 
@@ -814,7 +922,7 @@ def main():
         if bus.active:
             buffer = io.StringIO()
             write_keys(buffer, keys=web_keys())
-            bus.prose("keys", buffer.getvalue())
+            bus.prose("keys", for_web(buffer.getvalue()))
 
     controls.listing = listing
     controls.out = _ProseTee(bus, sys.stderr)
@@ -944,7 +1052,7 @@ def main():
     sys.stderr.flush()
     bus.set_hello({
         "nettail": __version__,
-        "banner": banner.getvalue(),
+        "banner": for_web(banner.getvalue()),
         # The columns and the keys as the terminal knows them, so that the page
         # builds its table head and its buttons from what this program actually
         # does rather than from a second list written down in the page and left
@@ -1040,7 +1148,7 @@ def main():
         identical second one made underneath it.
         """
         return {
-            "cells": [unpad(painted) for _plain, painted
+            "cells": [for_web(unpad(painted)) for _plain, painted
                       in row_cells(rec, hdr, args, resolver, scale,
                                    endpoint_width=WEB_ENDPOINT_WIDTH)],
             "record": (record if record is not None
