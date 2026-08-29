@@ -495,11 +495,19 @@ footer span i { color: var(--ink-3); font-style: normal; }
     // middle of the history rather than at the top of it, which is not where
     // the note below says it is. So the oldest goes first, wherever the oldest
     // happens to be: everything on the page is older than everything queued.
-    var total = rows.childElementCount + pending.childElementCount;
+    // Except while a clear is waiting for its frame, when what is on the page
+    // is not history any more: it is going wholesale, and charging it to the
+    // count would report thousands of rows dropped that the reader asked to be
+    // rid of. It costs what it costs until `wipe` runs, which is no more than
+    // it cost already, and the trim meanwhile takes the oldest of what the
+    // page is about to hold instead.
+    var held = pendingClear ? 0 : rows.childElementCount;
+    var total = held + pending.childElementCount;
     if (total <= MAX_ROWS) { return; }
     while (total > TRIM_TO) {
-      var list = rows.childElementCount ? rows : pending;
+      var list = held ? rows : pending;
       list.removeChild(list.firstElementChild);
+      if (held) { held -= 1; }
       trimmed += 1;
       total -= 1;
     }
