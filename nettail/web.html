@@ -480,27 +480,34 @@ footer span i { color: var(--ink-3); font-style: normal; }
 
   function queue(tr) {
     pending.appendChild(tr);
-    // Bounded for the same reason the table is. Animation frames do not run in
+    // Trimmed here as well as at paint, because animation frames do not run in
     // a tab that is hidden or merely starved, and such a tab goes on taking
-    // events until `park` closes the stream, so rows waiting to be shown are
-    // rows the page is holding and cost what the others cost.
-    keep(pending);
+    // events until `park` closes the stream. Rows waiting to be shown cost
+    // what rows on the page cost, so waiting is no reason to be exempt.
+    keep();
     schedule();
   }
 
-  function keep(list) {
-    if (list.childElementCount <= MAX_ROWS) { return; }
-    while (list.childElementCount > TRIM_TO) {
+  function keep() {
+    // The page and the queue behind it are one history and are bounded as one.
+    // Trimming them separately would take the oldest of what is waiting while
+    // older rows sat on the page untouched, and the gap would then be in the
+    // middle of the history rather than at the top of it, which is not where
+    // the note below says it is. So the oldest goes first, wherever the oldest
+    // happens to be: everything on the page is older than everything queued.
+    var total = rows.childElementCount + pending.childElementCount;
+    if (total <= MAX_ROWS) { return; }
+    while (total > TRIM_TO) {
+      var list = rows.childElementCount ? rows : pending;
       list.removeChild(list.firstElementChild);
       trimmed += 1;
+      total -= 1;
     }
     untold = true;
   }
 
   function wipe() {
     rows.textContent = "";
-    trimmed = 0;
-    untold = false;
     scroller.scrollTop = 0;
     followBox.checked = true;
   }
@@ -518,7 +525,7 @@ footer span i { color: var(--ink-3); font-style: normal; }
       // A fragment hands its children over to whatever it is appended to, so
       // this is the single insertion the frame costs, whatever it is holding.
       rows.appendChild(pending);
-      keep(rows);
+      keep();
     }
     if (untold) {
       untold = false;
@@ -538,6 +545,12 @@ footer span i { color: var(--ink-3); font-style: normal; }
     // clear would be the page answering a key with rows from before it.
     pending = document.createDocumentFragment();
     pendingClear = true;
+    // The count of what has been dropped restarts here rather than in `wipe`,
+    // which runs a frame later. A trim between the two belongs to the history
+    // after the clear, and zeroing it at paint would drop those rows and say
+    // nothing about them.
+    trimmed = 0;
+    untold = false;
     schedule();
   }
 

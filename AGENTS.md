@@ -232,11 +232,19 @@ Four things about the arrangement are easy to break.
   about a trim that has just happened, and a queued note waits for a frame that
   only arrives if something else does, which on a link that has just gone quiet
   can be minutes.
-- **The queue is bounded exactly as the table is.** Animation frames do not run
-  in a tab that is hidden or merely starved, and such a tab goes on taking
-  events until `park` closes the stream, so rows waiting to be shown cost what
-  rows on the page cost. `keep` trims either of them, and `untold` is what
-  carries the fact to the gap row whichever of the two the rows went from.
+- **The page and the queue behind it are one history and are bounded as one.**
+  Animation frames do not run in a tab that is hidden or merely starved, and
+  such a tab goes on taking events until `park` closes the stream, so rows
+  waiting to be shown cost what rows on the page cost and are trimmed too.
+  `keep` counts the two together and takes the oldest first wherever the oldest
+  is, which is the page before the queue. Bounding them separately looks
+  reasonable and is not: it drops the newest thousand rows while older ones sit
+  on the page untouched, and leaves the gap in the middle of the history rather
+  than at the top of it, where the note that follows says it is. `untold`
+  carries the fact to that note whichever of the two the rows went from, and
+  the count restarts in `clearTable` rather than in `wipe`, a frame later, so
+  that a trim between the two is still reported rather than forgotten with
+  everything the clear threw away.
 
 There is no browser in the suite, so none of this can be pinned by a test that
 runs it. The manual check is to pause with `space`, let a few thousand flows be
