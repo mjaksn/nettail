@@ -222,11 +222,11 @@ usage: nettail [-h] [--version] [--bind BIND] [--port PORT] [--external-only]
                [--verbose] [--json] [--colour WHEN] [--no-color]
                [--header-every HEADER_EVERY] [--sticky-header] [--hide-status]
                [--no-supplemental-services] [--web] [--web-port PORT]
-               [--web-bind ADDR] [--web-token TOKEN] [--web-readonly]
-               [--size-scale-max BYTES | --size-scale-dynamic]
-               [--size-scale-window FLOWS] [--resolve {off,dns,all}]
-               [--hosts FILE] [--resolve-public] [--fqdn]
-               [--resolve-workers RESOLVE_WORKERS]
+               [--web-bind ADDR] [--web-host NAME] [--web-token TOKEN]
+               [--web-readonly] [--size-scale-max BYTES |
+               --size-scale-dynamic] [--size-scale-window FLOWS]
+               [--resolve {off,dns,all}] [--hosts FILE] [--resolve-public]
+               [--fqdn] [--resolve-workers RESOLVE_WORKERS]
                [--resolve-timeout RESOLVE_TIMEOUT]
 ```
 
@@ -256,6 +256,7 @@ All off unless `--web` is given. See [The web interface](#the-web-interface).
 | `--web` | off | Also serve the display to a browser |
 | `--web-port PORT` | `2056` | Port for the web interface |
 | `--web-bind ADDR` | `127.0.0.1` | Address for the web interface. Anything other than loopback exposes this network's traffic over cleartext HTTP, and is warned about at startup |
+| `--web-host NAME` | none | A name the view answers to. Under the loopback default it is added beside `localhost`; under another `--web-bind`, which otherwise answers to any name, it restricts the view to the names given. May be repeated |
 | `--web-token TOKEN` | random | Use this token in the URL instead of a fresh random one, so a bookmark survives a restart |
 | `--web-readonly` | off | Serve the display but accept no keys from the browser |
 
@@ -728,6 +729,8 @@ resolution to active mDNS and NetBIOS probing. Treat the URL as a password.
 - The URL carries a random token. Without it every request is a 404.
 - The `Host` header is checked on every request, which is what stops a web page
   you happen to have open from reaching it by rebinding a name to `127.0.0.1`.
+  Under this bind the view answers to its address, to `localhost`, and to no
+  other name unless `--web-host` gave it.
 - The page loads nothing from anywhere and is served under a content security
   policy that names the hashes of its own script and style.
 - Hostnames off the wire are shown as text and never as markup, which matters
@@ -743,6 +746,23 @@ this network talked to which, and the hostnames behind them. This is plain
 HTTP, so the token in the URL travels in the clear and so does everything it
 fetches.
 ```
+
+Put it on another address and it answers to any name, so opening it from the
+next machine by this one's name works as you would expect. The `Host` check
+keeps checking the port and stops comparing names, because rebinding is an
+attack on what only loopback can reach: on a LAN address the view is reachable
+directly and the token is what guards it. Jupyter, Syncthing and Ollama each
+settled on the same rule. `--web-host` then narrows it, to the names given and
+the address a connection arrived on:
+
+```
+nettail --web --web-bind 0.0.0.0 --web-host z2m
+```
+
+Under the loopback default the same flag adds a name beside `localhost`. It
+may be repeated, and the URL printed at startup uses the first one. Under a
+wildcard bind with no name the printed URL says `127.0.0.1`, and the banner
+says to put this machine's address or name in its place from elsewhere.
 
 There is no TLS and no login. If you want it reachable from elsewhere, put it
 behind something that provides both, and bind it to loopback so that thing is
@@ -1467,6 +1487,15 @@ docker run -d --name nettail --restart unless-stopped     --network host     ghc
 docker logs nettail        # the URL, with its token, is printed at startup
 ```
 
+Under host networking the container's `0.0.0.0` is the host's, so that puts the
+view on every address the host has, and from another machine it opens by the
+host's address or by its name. `--web-host` narrows it to the names given, and
+the printed URL then carries the first:
+
+```
+docker run -d --name nettail --restart unless-stopped --network host ghcr.io/mjaksn/nettail:latest --web --web-bind 0.0.0.0 --web-host z2m
+```
+
 `docker-compose.yml` in this repository is the same thing as a Compose file,
 with the options worth knowing about written out beside it.
 
@@ -1485,18 +1514,23 @@ hop in front of that socket undoes part of what the buffer is for.
 
 Host networking is a Linux arrangement, and on Linux it is the only one in
 which this image is fully usable. Docker Desktop on Windows and macOS does not
-give a container the host's interfaces, and there the two costs stack up:
+give a container the host's interfaces: `--network host` there puts the
+container in the namespace of the Docker Desktop virtual machine, so a view
+bound inside it is not on your loopback at all, and nothing answers. What works
+on Docker Desktop is the bridge, with both ports published:
 
-- Every exporter shows as the gateway address, as above.
-- **The browser view cannot be reached at all.** The server checks the `Host`
-  header against the address the connection arrived on, which is what stops DNS
-  rebinding. Behind the bridge that address is the container's own
-  `172.17.0.x`, so a browser asking for `127.0.0.1:2056` is turned away with the
-  same 404 a wrong token gets. Nothing a browser would send matches.
+```
+docker run -d --name nettail --restart unless-stopped -p 2055:2055/udp -p 127.0.0.1:2056:2056 ghcr.io/mjaksn/nettail:latest
+```
 
-So on Docker Desktop, run the collector locally rather than in a container, or
-run it in a Linux VM with host networking. Publishing ports is not a workaround
-for `--web`; it only looks like one until you open the page.
+The view is reachable that way, because `0.0.0.0` inside the container is a
+routable bind and the `Host` check does not compare names under one; the
+publish to `127.0.0.1` is what keeps it private. Publish the web port with a
+different number on the host side and the page is a 404, since the port in the
+address bar is checked against `--web-port`. The cost that remains is the
+exporter address: every exporter shows as the gateway, as above. For anything
+beyond a look, run the collector locally or in a Linux VM with host
+networking.
 
 ### Why the image binds 0.0.0.0
 
@@ -1705,6 +1739,17 @@ nmblookup -A 192.168.1.42
 If all three come back empty, the device genuinely does not advertise a name and a
 static `--hosts` entry is the only option. Check the `Name resolution` block in the
 exit summary to see which sources are producing hits.
+
+### The browser view is a 404 from another machine
+
+The token is right and the page is still a 404. A wrong token and a refused
+`Host` header get the same 404 on purpose, so nothing at your end says which
+it was. The `Host` check refuses a request in three cases: the collector is on
+its loopback default, which no other machine reaches anyway; `--web-host` was
+given and the name in the address bar is not on it; or the port in the address
+bar is not `--web-port`, which happens behind a port forward or a Docker
+publish that maps one port to another. Under a routable `--web-bind` with no
+`--web-host`, any name works. See [The web interface](#the-web-interface).
 
 ### `unsupported_version` climbing
 

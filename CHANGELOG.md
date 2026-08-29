@@ -11,6 +11,47 @@ but it is a program rather than a library, and the names inside it may move
 without that being a breaking change. `--json` output is the part meant to be
 parsed, and it is treated as public.
 
+## [0.3.0] - 2026-08-28
+
+### Added
+
+- **`--web-host NAME`**, a name the browser view answers to. Under the
+  loopback default it is added beside `localhost`; under another `--web-bind`
+  it narrows the view to the names given and the address a connection arrived
+  on. It may be repeated, and the first name given is what the printed URL
+  carries. A name that could not work, because it is not ascii, carries a
+  port that belongs to `--web-port`, or is a pattern, is refused when the
+  flag is read rather than left to match nothing.
+- Under a wildcard `--web-bind` with no name given, the banner says to put
+  this machine's address or name in place of the `127.0.0.1` the printed URL
+  shows.
+
+### Changed
+
+- **A routable `--web-bind` answers to any name.** The `Host` check used to
+  accept the address a connection arrived on and nothing else, whatever the
+  bind, so `http://z2m:2056/t/.../` was a 404 with nothing to say why. It
+  still checks the port, and under the loopback default it still refuses
+  every name but `localhost` and those given, because that is the case DNS
+  rebinding is about: a routable bind is reachable by the LAN directly and
+  the token is its guard. Jupyter, Syncthing and Ollama each settled on the
+  same rule. The `Origin` check on the control route follows the request's
+  own `Host` in that case, so a page opened by any name can press keys and a
+  page on any other origin cannot.
+- **The image's view is reachable through a bridge publish**, which follows
+  from the above: the container binds `0.0.0.0`, a connection through
+  `-p 127.0.0.1:2056:2056` arrives on the container's own bridge address, and
+  that no longer has to match the `Host` header. Docker Desktop, which offers
+  nothing but the bridge, can therefore show the view, with the exporter
+  address still lost to the gateway. The README and the compose file said the
+  view was unreachable there, and now say this instead.
+
+### Documentation
+
+- The README now says where the `Host` check leaves somebody opening the
+  view from another machine: in the web interface section, in the Docker
+  section beside the host networking example, and as a troubleshooting entry.
+
 ## [0.2.2] - 2026-08-28
 
 Release plumbing only. Nothing in the command, its options or its output
@@ -216,6 +257,7 @@ console: the part that decides what a flow should look like on a terminal.
   reminder line under the startup banner can be a pointer rather than a
   two-hundred-character list that wrapped and then scrolled away.
 
+[0.3.0]: https://github.com/mjaksn/nettail/releases/tag/v0.3.0
 [0.2.2]: https://github.com/mjaksn/nettail/releases/tag/v0.2.2
 [0.2.1]: https://github.com/mjaksn/nettail/releases/tag/v0.2.1
 [0.2.0]: https://github.com/mjaksn/nettail/releases/tag/v0.2.0

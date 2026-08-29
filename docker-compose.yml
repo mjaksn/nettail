@@ -37,14 +37,16 @@ services:
     # With host networking the container is already on the host's ports, so
     # nothing is published and nothing needs to be.
     #
-    # Bridge networking is not simply a slower alternative here. As well as
-    # losing the exporter address, the browser view becomes unreachable: the
-    # server checks the Host header against the address the connection arrived
-    # on, which is what stops DNS rebinding, and behind the bridge that is the
-    # container's own 172.17.0.x. A browser asking for 127.0.0.1 is refused.
-    # Flows are still collected, so this is usable for --json and nothing else.
+    # Bridge networking loses the exporter address, as above, and it is the
+    # only arrangement Docker Desktop offers. To use it, comment out
+    # network_mode, publish both ports, and change --web-bind below to
+    # 0.0.0.0: loopback inside the container's own namespace is unreachable
+    # from a published port. The publish to 127.0.0.1 is then what keeps the
+    # view private, and the same port number on both sides is what keeps the
+    # Host check satisfied.
     #ports:
     #  - "2055:2055/udp"
+    #  - "127.0.0.1:2056:2056"
 
     command:
       - --web
@@ -55,6 +57,11 @@ services:
       # be reachable at all; here that would put the view on every interface.
       - --web-bind
       - 127.0.0.1
+      # Only meaningful with a routable --web-bind above, which answers to
+      # any name on its own: the names listed here become the only ones it
+      # answers to, and the printed URL carries the first.
+      #- --web-host
+      #- z2m
       # Pin the token so a bookmark survives a restart. Leave it out and a
       # fresh random one is printed at every start.
       #- --web-token

@@ -13,6 +13,8 @@ import argparse
 import json
 import queue
 import socket
+import subprocess
+import sys
 import threading
 import time
 import urllib.error
@@ -27,8 +29,10 @@ from nettail.web import (
     _Handler,
     content_policy,
     host_allowed,
+    hosts_restricted,
     is_loopback,
     origin_allowed,
+    web_host_arg,
     web_token_arg,
 )
 
@@ -62,6 +66,56 @@ check("a wildcard bind answers on the address the connection arrived on",
 check("and does not answer to localhost off loopback",
       host_allowed("localhost:2056", "192.0.2.10", 2056) is False)
 
+# A name given with --web-host is accepted whichever address the connection
+# arrived on. It cannot be rebound into: the attack needs a name the attacker
+# controls, and one the operator typed is not that. Everything not on the list
+# is refused exactly as before, and the port is still checked first.
+NAMES = ("z2m", "collector.lan")
+check("a name given with --web-host is accepted",
+      host_allowed("z2m:2056", "192.0.2.10", 2056, NAMES) is True)
+check("whichever address the connection arrived on",
+      host_allowed("z2m:2056", "127.0.0.1", 2056, NAMES) is True)
+check("in whatever case the browser writes it",
+      host_allowed("Z2M:2056", "192.0.2.10", 2056, NAMES) is True)
+check("and so is the second name",
+      host_allowed("collector.lan:2056", "192.0.2.10", 2056, NAMES) is True)
+check("a name not on the list is refused as before",
+      host_allowed("other.lan:2056", "192.0.2.10", 2056, NAMES) is False)
+check("a listed name on the wrong port is refused",
+      host_allowed("z2m:9999", "192.0.2.10", 2056, NAMES) is False)
+check("and a listed name does not let localhost in off loopback",
+      host_allowed("localhost:2056", "192.0.2.10", 2056, NAMES) is False)
+check("an IPv6 name meets a bracketed header",
+      host_allowed("[fd00::1]:2056", "192.0.2.10", 2056, ("fd00::1",)) is True)
+
+# Under a routable bind with no names, names are not compared at all: the LAN
+# reaches the view directly and the token is its guard, which is the rule
+# Jupyter, Syncthing and Ollama each settled on. Loopback is what rebinding
+# is about, so it stays restricted, and names narrow a routable bind rather
+# than widening it. The decision is made from the bound address, once.
+check("loopback with no names is restricted",
+      hosts_restricted("127.0.0.1", ()) is True)
+check("loopback with names is restricted",
+      hosts_restricted("127.0.0.1", ("z2m",)) is True)
+check("a wildcard bind with no names is open",
+      hosts_restricted("0.0.0.0", ()) is False)
+check("so is a routable address with none",
+      hosts_restricted("192.0.2.10", ()) is False)
+check("and names narrow a wildcard bind",
+      hosts_restricted("0.0.0.0", ("z2m",)) is True)
+
+# Open, the port is still what it was and every name passes it.
+check("open, any name is accepted",
+      host_allowed("anything.example:2056", "192.0.2.10", 2056, (), False)
+      is True)
+check("open, the wrong port is still refused",
+      host_allowed("anything.example:9999", "192.0.2.10", 2056, (), False)
+      is False)
+check("open, a bare host on a non-default port is still refused",
+      host_allowed("anything.example", "192.0.2.10", 2056, (), False) is False)
+check("open, a missing Host is still refused",
+      host_allowed("", "192.0.2.10", 2056, (), False) is False)
+
 # -- the Origin rule, on its own -----------------------------------------
 
 check("an origin naming this server is allowed",
@@ -92,6 +146,46 @@ check("and a portless origin is refused anywhere else",
 check("a non-ascii origin is refused rather than raised",
       origin_allowed("http://caf\xe9.example.com", "127.0.0.1", 2056) is False)
 
+# The names are origins too, or a browser that reached the page by name could
+# open it and press nothing.
+check("an origin naming a --web-host name is allowed",
+      origin_allowed("http://z2m:2056", "192.0.2.10", 2056, NAMES) is True)
+check("and refused on another port",
+      origin_allowed("http://z2m:9999", "192.0.2.10", 2056, NAMES) is False)
+check("an unlisted name is still refused",
+      origin_allowed("http://other.lan:2056", "192.0.2.10", 2056, NAMES)
+      is False)
+check("on port 80 the portless form of a name is allowed too",
+      origin_allowed("http://z2m", "192.0.2.10", 80, NAMES) is True)
+check("an IPv6 name is bracketed the way a browser writes it",
+      origin_allowed("http://[fd00::1]:2056", "192.0.2.10", 2056, ("fd00::1",))
+      is True)
+
+# In the open case the origin has to be the name the request itself carried,
+# so a page opened by any name can press keys and any other origin cannot.
+ANY = "anything.example:2056"
+check("open, an origin matching the Host is allowed",
+      origin_allowed("http://anything.example:2056", "192.0.2.10", 2056, (),
+                     ANY) is True)
+check("and one naming another host is refused",
+      origin_allowed("http://other.example:2056", "192.0.2.10", 2056, (),
+                     ANY) is False)
+check("the listed names do not apply in the open case",
+      origin_allowed("http://z2m:2056", "192.0.2.10", 2056, NAMES, ANY)
+      is False)
+check("nor does the arrival address",
+      origin_allowed("http://192.0.2.10:2056", "192.0.2.10", 2056, (), ANY)
+      is False)
+check("on port 80 a portless origin matches a portless Host",
+      origin_allowed("http://anything.example", "192.0.2.10", 80, (),
+                     "anything.example") is True)
+check("and a Host that spells the port out",
+      origin_allowed("http://anything.example", "192.0.2.10", 80, (),
+                     "anything.example:80") is True)
+check("a non-ascii Host is refused rather than raised",
+      origin_allowed("http://caf\xe9.example:2056", "192.0.2.10", 2056, (),
+                     "caf\xe9.example:2056") is False)
+
 # -- the token given on the command line ---------------------------------
 #
 # Both bad shapes fail silently, which is why they are refused when the flag is
@@ -114,6 +208,51 @@ for bad, why in (("", "empty"), ("   ", "only space"),
     except argparse.ArgumentTypeError:
         refused = True
     check("a token is refused for %s" % why, refused, repr(bad))
+
+# -- the name given on the command line ------------------------------------
+#
+# Stored lowercased, without brackets and without a port, because that is the
+# form the Host header is reduced to before the comparison. A port is the thing
+# people will include, since the URL they are copying has one, and stored with
+# it the name would match nothing for ever; so it is refused with the reason.
+
+check("a name is accepted lowercased", web_host_arg(" Z2M ") == "z2m")
+check("a bracketed IPv6 address loses its brackets",
+      web_host_arg("[fd00::1]") == "fd00::1")
+check("and a bare one is accepted as it is",
+      web_host_arg("fd00::1") == "fd00::1")
+for bad, why in (("", "empty"), ("  ", "only space"),
+                 ("z2m:2056", "a port"), ("caf\xe9.lan", "non-ascii"),
+                 ("z2m/view", "a slash"), ("a b", "an inner space"),
+                 ("user@z2m", "a userinfo mark"), ("*", "a wildcard"),
+                 ("*.lan", "a pattern")):
+    try:
+        web_host_arg(bad)
+        refused = False
+    except argparse.ArgumentTypeError:
+        refused = True
+    check("a name is refused for %s" % why, refused, repr(bad))
+
+# The refusal of a wildcard has to say where any-name lives, or the next
+# thing tried is a pattern that happens to pass.
+try:
+    web_host_arg("*")
+    reason = ""
+except argparse.ArgumentTypeError as exc:
+    reason = str(exc)
+check("and a wildcard is pointed at --web-bind", "--web-bind" in reason, reason)
+
+# The flag is wired to the parser: it is in the help, and a bad value stops
+# the program before it binds anything, with the reason on stderr.
+helped = subprocess.run([sys.executable, "-m", "nettail", "--help"],
+                        capture_output=True, text=True)
+check("--web-host is in the help", "--web-host" in helped.stdout)
+bad_flag = subprocess.run([sys.executable, "-m", "nettail", "--web-host",
+                           "z2m:2056"], capture_output=True, text=True)
+check("a --web-host with a port stops the program at parse",
+      bad_flag.returncode == 2, "exit %d" % bad_flag.returncode)
+check("and says which flag the port belongs to",
+      "--web-port" in bad_flag.stderr, bad_flag.stderr[-200:])
 
 # -- the address a request is judged against ------------------------------
 #
@@ -412,6 +551,76 @@ try:
                     body=body) == 403)
     finally:
         quiet.stop(timeout=1.0)
+
+    # -- open to any name -------------------------------------------------
+    #
+    # A routable bind with no names. The suites bind loopback only, so the
+    # decision is overridden on the server rather than bound for real; the
+    # derivation itself is pinned above. Set after start(), because bind()
+    # is where it is derived.
+    open_keys = queue.Queue(maxsize=8)
+    opened = WebInterface(Feed(), open_keys, {"e"}, bind="127.0.0.1", port=0)
+    opened.start()
+    opened.restricted = False
+    any_host = "anything.example:%d" % opened.port
+    opened_url = "http://127.0.0.1:%d/t/%s/" % (opened.port, opened.token)
+    try:
+        check("open, the page is served under any name",
+              fetch(opened_url, host_header=any_host) == 200)
+        check("but not under the wrong port",
+              fetch(opened_url, host_header="anything.example:1") == 404)
+        check("nor without a token", fetch(opened_url.replace(
+            "/t/%s/" % opened.token, "/"), host_header=any_host) == 404)
+        body = json.dumps({"key": "e"}).encode("utf-8")
+        check("a key press from a page opened by that name is accepted",
+              fetch(opened_url + "key", host_header=any_host, method="POST",
+                    body=body, origin="http://" + any_host) == 200)
+        check("and one from an origin that is not the Host is refused",
+              fetch(opened_url + "key", host_header=any_host, method="POST",
+                    body=body, origin="http://other.example:%d" % opened.port)
+              == 403)
+        check("so exactly one key was queued", open_keys.qsize() == 1)
+    finally:
+        opened.stop(timeout=1.0)
+
+    # -- reached by name --------------------------------------------------
+    #
+    # The case --web-host exists for: a browser on another machine asks for
+    # this one by name, and the connection's own address is not what the Host
+    # header says. Only loopback is reachable from a suite, so the arrival
+    # address is 127.0.0.1 throughout and the names stand in for the
+    # difference.
+    named_keys = queue.Queue(maxsize=8)
+    named = WebInterface(Feed(), named_keys, {"e"}, bind="127.0.0.1", port=0,
+                         hosts=("Z2M", "collector.lan"))
+    named.start()
+    named_host = "z2m:%d" % named.port
+    named_url = "http://127.0.0.1:%d/t/%s/" % (named.port, named.token)
+    try:
+        check("a loopback bind with names stays restricted",
+              named.restricted is True)
+        check("the printed url carries the first name given",
+              named.url.startswith("http://z2m:%d/" % named.port), named.url)
+        check("the page is served under that name",
+              fetch(named_url, host_header=named_host) == 200)
+        check("and under the second",
+              fetch(named_url, host_header="collector.lan:%d" % named.port)
+              == 200)
+        check("and still under its address",
+              fetch(named_url, host_header="127.0.0.1:%d" % named.port) == 200)
+        check("a name it was not given is refused",
+              fetch(named_url, host_header="other.lan:%d" % named.port) == 404)
+        body = json.dumps({"key": "e"}).encode("utf-8")
+        check("a key press from a page opened by name is accepted",
+              fetch(named_url + "key", host_header=named_host, method="POST",
+                    body=body, origin="http://" + named_host) == 200)
+        check("and one from an unlisted origin is not",
+              fetch(named_url + "key", host_header=named_host, method="POST",
+                    body=body, origin="http://other.lan:%d" % named.port)
+              == 403)
+        check("so exactly one key was queued", named_keys.qsize() == 1)
+    finally:
+        named.stop(timeout=1.0)
 
     # -- the token --------------------------------------------------------
 

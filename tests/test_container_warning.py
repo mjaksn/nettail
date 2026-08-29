@@ -19,7 +19,7 @@ import queue
 
 from harness import check, finish, plain
 
-from nettail.cli import web_bind_warning
+from nettail.cli import web_bind_warning, web_reach_note
 from nettail.feed import Feed
 from nettail.web import WebInterface, in_container, is_loopback
 
@@ -70,6 +70,28 @@ check("and does not repeat the host warning's alarm",
 check("the port is taken from the argument, not hardcoded",
       "-p 127.0.0.1:9999:9999" in plain(
           web_bind_warning("0.0.0.0", 9999, contained=True)))
+
+# -- the note about reaching the view from elsewhere -----------------------
+#
+# Under a wildcard bind the printed URL says 127.0.0.1, which is right here and
+# wrong everywhere else, so the banner says what to put in its place. It has
+# nothing to add when the URL already names something reachable: a specific
+# routable address prints itself, a --web-host name is carried in the URL, and
+# a loopback bind is reachable from nowhere else.
+
+note = web_reach_note("0.0.0.0", [])
+check("a wildcard bind with no name gets the note", note is not None)
+check("which says what to put in place of the loopback address",
+      "127.0.0.1" in note and "name" in note, note)
+check("a specific routable address does not, its URL names it",
+      web_reach_note("192.0.2.10", []) is None)
+check("a loopback bind gets none", web_reach_note("127.0.0.1", []) is None)
+check("and neither does a wildcard bind with a name given",
+      web_reach_note("0.0.0.0", ["z2m"]) is None)
+check("nor a container, where the published 127.0.0.1 is right as printed",
+      web_reach_note("0.0.0.0", [], contained=True) is None)
+check("while a host with the same bind still gets it",
+      web_reach_note("0.0.0.0", [], contained=False) is not None)
 
 # -- what the detection is not allowed to affect ---------------------------
 

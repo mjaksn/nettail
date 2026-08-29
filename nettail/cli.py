@@ -69,6 +69,7 @@ from .web import (
     in_container,
     is_loopback,
     unpad,
+    web_host_arg,
     web_token_arg,
 )
 
@@ -510,6 +511,29 @@ def web_bind_warning(bind, port, contained=None):
             f"everything it fetches.{C.RESET}")
 
 
+def web_reach_note(bound_addr, hosts, contained=None):
+    """What to say about reaching the view from another machine, or None.
+
+    Under a wildcard bind the printed URL names 127.0.0.1, which is right for
+    this machine and wrong for every other, and the reader has to know to
+    substitute. This says so once, on the way in. A specific routable bind
+    prints its own address, a name given with --web-host is what the URL
+    carries, and a loopback bind is reachable from nowhere else, so none of
+    those needs it.
+
+    Nor does a container, where the image binds 0.0.0.0 on every start and
+    the printed 127.0.0.1 is exactly right through a published port. The
+    container line printed beside it already says what a publish decides.
+    `contained` is for the tests, as it is for `web_bind_warning`.
+    """
+    if contained is None:
+        contained = in_container()
+    if bound_addr not in ("0.0.0.0", "", "::") or hosts or contained:
+        return None
+    return ("From another machine, put this machine's address or name in "
+            "place of 127.0.0.1.")
+
+
 def main():
     # Named rather than taken from argv[0], which is the console script's full
     # path when installed and "__main__.py" under `python -m`. Neither is what
@@ -576,6 +600,13 @@ def main():
                          help="address for the web interface (default "
                               "127.0.0.1, and anything else exposes this "
                               "network's traffic over cleartext HTTP)")
+    web_grp.add_argument("--web-host", type=web_host_arg, action="append",
+                         default=[], metavar="NAME",
+                         help="a name the view answers to. Under the loopback "
+                              "default it is added beside localhost; under "
+                              "another --web-bind, which otherwise answers to "
+                              "any name, it restricts the view to the names "
+                              "given. May be repeated")
     web_grp.add_argument("--web-token", type=web_token_arg, default=None,
                          metavar="TOKEN",
                          help="use this token in the URL instead of a fresh "
@@ -851,7 +882,7 @@ def main():
             } & set(controls.actions())
         web = WebInterface(bus, key_queue, web_keyset, bind=args.web_bind,
                            port=args.web_port, token=args.web_token,
-                           readonly=args.web_readonly)
+                           readonly=args.web_readonly, hosts=args.web_host)
         try:
             # Bound but not yet answering. The greeting a browser is met with
             # has to be in place before the first one can arrive, and it cannot
@@ -892,6 +923,9 @@ def main():
               f"{C.RESET}", file=out)
         if web_url:
             print(f"{C.BOLD}Web interface: {web_url}{C.RESET}", file=out)
+            reach = web_reach_note(web.bound_addr, args.web_host)
+            if reach:
+                print(f"{C.GREY}{reach}{C.RESET}", file=out)
             if args.web_readonly:
                 print(f"{C.GREY}The browser is watching only; keys are not "
                       f"taken from it.{C.RESET}", file=out)
