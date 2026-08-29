@@ -223,7 +223,7 @@ usage: nettail [-h] [--version] [--bind BIND] [--port PORT] [--external-only]
                [--header-every HEADER_EVERY] [--sticky-header] [--hide-status]
                [--no-supplemental-services] [--web] [--web-port PORT]
                [--web-bind ADDR] [--web-host NAME] [--web-token TOKEN]
-               [--web-readonly] [--size-scale-max BYTES |
+               [--web-colour WHEN] [--web-readonly] [--size-scale-max BYTES |
                --size-scale-dynamic] [--size-scale-window FLOWS]
                [--resolve {off,dns,all}] [--hosts FILE] [--resolve-public]
                [--fqdn] [--resolve-workers RESOLVE_WORKERS]
@@ -240,8 +240,8 @@ usage: nettail [-h] [--version] [--bind BIND] [--port PORT] [--external-only]
 | `--external-only` | off | Only display flows where the source or destination is a public IP. Everything is still counted in the summary |
 | `--verbose` | off | Print every decoded field on an indented line under each flow. Also surfaces parse errors |
 | `--json` | off | Emit one JSON object per flow on stdout instead of the table |
-| `--colour WHEN` | `auto` | When to use ANSI colour: `auto`, `always` or `never`. Under `auto` a terminal gets colour and a redirected stream does not, and `NO_COLOR` in the environment turns it off. `--color` is accepted too |
-| `--no-color` | off | The same as `--colour never` |
+| `--colour WHEN` | `auto` | When to use ANSI colour **on this terminal**: `auto`, `always` or `never`. Under `auto` a terminal gets colour and a redirected stream does not, and `NO_COLOR` in the environment turns it off. The browser view has its own switch, `--web-colour`, and is not decided by this one. `--color` is accepted too |
+| `--no-color` | off | The same as `--colour never`, and like it, about this terminal |
 | `--header-every N` | `40` | Reprint the column header every N lines. `0` disables repeats |
 | `--sticky-header` | off | Pin the column header to the top row of the window. See below |
 | `--hide-status` | off | Turn off the two-line status bar at the foot of the window, which is shown by default whenever output is going to a terminal. The `b` key toggles it while the collector runs. See [The status bar](#the-status-bar) |
@@ -257,6 +257,7 @@ All off unless `--web` is given. See [The web interface](#the-web-interface).
 | `--web-port PORT` | `2056` | Port for the web interface |
 | `--web-bind ADDR` | `127.0.0.1` | Address for the web interface. Anything other than loopback exposes this network's traffic over cleartext HTTP, and is warned about at startup |
 | `--web-host NAME` | none | A name the view answers to. Under the loopback default it is added beside `localhost`; under another `--web-bind`, which otherwise answers to any name, it restricts the view to the names given. May be repeated |
+| `--web-colour WHEN` | `on` | Colour in the browser view: `on` or `off`. A browser is a colour-capable reader whatever stdout is, so a redirected run does not take the colour out of it. `--web-color` is accepted too |
 | `--web-token TOKEN` | random | Use this token in the URL instead of a fresh random one, so a bookmark survives a restart |
 | `--web-readonly` | off | Serve the display but accept no keys from the browser |
 
@@ -520,9 +521,12 @@ Local hosts seen
   192.168.1.20       nas  nas-old
 ```
 
-Under `--no-color` a superseded name is marked with a trailing `*` instead, and
-the footer says so. The list holds 5000 addresses and five names each; past
-that the least recently seen are dropped.
+A reader without colour is given a trailing `*` on a superseded name instead,
+and a footer saying what the star means. That is decided per reader rather
+than per run: a terminal with `--no-color` gets the stars while a browser
+watching the same collector is still shown the dimmed form. The list holds
+5000 addresses and five names each; past that the least recently seen are
+dropped.
 
 `?` prints the whole list, a key and a sentence a line, and changes nothing:
 
@@ -773,7 +777,7 @@ the only way in.
 The two work together, and it is a genuinely useful pairing:
 
 ```bash
-nettail --json --web --colour always > flows.jsonl
+nettail --json --web > flows.jsonl
 ```
 
 stdout stays machine-readable while a browser gets the human view. Two things
@@ -784,9 +788,10 @@ keys can be pressed. And `pause` holds the browser view only: stdout is the
 part of the interface meant to be parsed, so it keeps flowing rather than
 gaining holds and drops that a consumer would have to cope with.
 
-`--colour always` is worth having there. Colour is normally switched off when
-output is redirected, which would otherwise hand the browser the colourless
-version because of the state of a stream it is not watching.
+Colour needs no flag there. `--colour` is about this terminal, and a
+redirected stdout still turns it off, but the browser has its own switch and
+it is on: a reader with a browser open is a colour-capable one whatever became
+of stdout. `--web-colour off` is how a run says otherwise.
 
 ### Limits
 
@@ -970,8 +975,10 @@ that carried nothing should look like. Equal figures share the middle of the
 ramp only when there is something there to be equal about. Counts of flows and
 packets are left alone; the ramp is about volume.
 
-Under `--no-color`, `NO_COLOR`, or a redirected stdout the report contains no
-escapes at all.
+On a terminal with `--no-color`, with `NO_COLOR` set, or with stdout
+redirected, the report arrives with no escapes at all. A browser watching the
+same run still gets the coloured one, because the colour is taken out on the
+way to the reader that refused it rather than never painted.
 
 ---
 
@@ -1174,8 +1181,9 @@ a fixed scale has nothing to re-range.
 The window maximum is maintained in a monotonic deque, so the cost per flow is
 constant regardless of how large N is.
 
-Colour is dropped entirely under `--no-color`, when `NO_COLOR` is set, or when
-stdout is not a TTY. The ramp uses 256-colour escapes, which every current
+Colour is dropped from this terminal under `--no-color`, when `NO_COLOR` is
+set, or when stdout is not a TTY, and from the browser under
+`--web-colour off`. The ramp uses 256-colour escapes, which every current
 terminal supports, Windows Terminal included.
 
 ### Export gaps
@@ -1426,7 +1434,6 @@ ExecStart=/opt/netflow/venv/bin/nettail \
     --resolve dns \
     --hosts /opt/netflow/lan-hosts \
     --json \
-    --colour always \
     --web \
     --web-token ${NETTAIL_TOKEN}
 ```
@@ -1455,9 +1462,10 @@ EnvironmentFile=/etc/netflow/nettail.env    # NETTAIL_TOKEN=...
 Make that file readable only by the service user. The token is the whole of the
 access control.
 
-**Ask for colour.** Output is redirected here, so colour is off by default and
-the browser would get the plain version. `--colour always` is what puts it
-back.
+**Colour needs nothing.** Output is redirected here, so this unit's own
+output has no colour in it, and the browser still does: the two are separate
+switches and the browser's is on. `--web-colour off` turns it off if a plain
+view is wanted.
 
 ```bash
 sudo systemctl daemon-reload
@@ -1646,7 +1654,7 @@ subprocesses. Everything else is the package:
 | Module | What lives there |
 | --- | --- |
 | `__main__.py` | what `python -m nettail` runs |
-| `colour.py` | ANSI codes and the switch that disables them |
+| `colour.py` | ANSI codes, the switch that disables them, and the stream that takes them out for one reader and not the other |
 | `values.py` | sizes, rates and durations, written for a column |
 | `sizescale.py` | the colour ramp behind the BYTES column |
 | `services.py` | port names, the system database first and a shipped list after |

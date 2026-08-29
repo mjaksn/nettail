@@ -293,12 +293,25 @@ feature means reading both, and their suites.
   either. `cli.tee` is how prose reaches it, and it works by pointing the
   existing `out=` parameter at a buffer, which is why none of those functions
   had to change.
-- **Colour is one global switch, and `--colour` is how a redirected run keeps
-  it.** `C.disable()` blanks the codes for the whole process when stdout is not
-  a terminal, which would otherwise hand the browser colourless prose in
-  exactly the arrangement the web interface is most useful in: a service unit
-  writing `--json` to a file. `--colour always` is the answer; `--no-color` is
-  still `never`.
+- **Colour is decided per reader, and painted once.** There are two consumers
+  and they need not agree: `--colour` is the terminal's switch and `NO_COLOR`
+  is scoped to it, `--web-colour` is the browser's and defaults to on, because
+  a browser is colour-capable whatever stdout is. `colour_choice` in `cli.py`
+  answers both. When they agree the codes are blanked at the source with
+  `C.disable()`, exactly as before; when they differ the codes are painted and
+  taken out at the boundary by `PlainStream`, wrapped around stdout and stderr
+  in `main()`. That wrapping must come after the `reconfigure` loop, which
+  wants the real streams, and after the `isatty` that decides the question.
+  **The stripper takes SGR and nothing else.** `sticky.py` and `statusbar.py`
+  write scroll margins, cursor moves and erases to the same stream, and a
+  general ANSI strip would leave the display drawing over itself while looking
+  right in a file. `tee` renders twice when the two disagree, which is the one
+  concession: the host list marks a superseded name with a star when there is
+  no colour to dim it with, so a reader without colour is shown different
+  words and not the same words undressed. `colour_on(stream)` is what that
+  site asks, never `C.enabled()`. One switch for both is what this replaced,
+  and the case it got wrong was the one the image exists for: a detached
+  container has no terminal, so the browser view came out white.
 - **Every `Resolver(...)` passes an explicit `mode`.** lanname 0.2.0 changed a
   bare `Resolver()` from looking nothing up to querying reverse DNS, with
   nothing raised and nothing warned. Explicit modes are why that release was a

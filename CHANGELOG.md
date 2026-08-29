@@ -11,6 +11,41 @@ but it is a program rather than a library, and the names inside it may move
 without that being a breaking change. `--json` output is the part meant to be
 parsed, and it is treated as public.
 
+## [0.4.0] - 2026-08-28
+
+### Fixed
+
+- **The browser view is coloured in a detached container**, which is the
+  arrangement the image exists for and the one where it was white. Colour was
+  one switch for the whole program, thrown by asking whether stdout was a
+  terminal; a detached container has no terminal by definition, so the codes
+  were blanked at the source and the browser was handed the colourless
+  version because of the state of a stream nobody was watching.
+  `--colour always` was the workaround and appeared in none of the container
+  documentation. No flag is needed now.
+
+### Added
+
+- **`--web-colour on|off`**, the browser's own colour switch, on by default.
+  A browser is a colour-capable reader whatever stdout is, so a redirected
+  run no longer takes the colour out of it, and `off` is there for a run that
+  wants the view plain.
+
+### Changed
+
+- **`--colour` is the terminal's switch and no longer the program's.** It
+  means for this terminal exactly what it always meant, `auto` included, and
+  `--no-color` and `NO_COLOR` go on meaning `never` for it. What changes is
+  reach: none of the three blanks the browser's colour any more, which is the
+  point of the fix above. A run with no `--web` behaves exactly as it did.
+- Colour is now painted once and taken out on the way to whichever reader
+  refused it, rather than never painted. Only colour is taken out: the scroll
+  margins, cursor moves and erases the sticky header and the status bar write
+  to the same stream pass through untouched. Where the two readers disagree,
+  the host list still marks a superseded name with a star for the one without
+  colour and dims it for the one with, so neither is shown the other's
+  rendering.
+
 ## [0.3.0] - 2026-08-28
 
 ### Added
@@ -257,6 +292,7 @@ console: the part that decides what a flow should look like on a terminal.
   reminder line under the startup banner can be a pointer rather than a
   two-hundred-character list that wrapped and then scrolled away.
 
+[0.4.0]: https://github.com/mjaksn/nettail/releases/tag/v0.4.0
 [0.3.0]: https://github.com/mjaksn/nettail/releases/tag/v0.3.0
 [0.2.2]: https://github.com/mjaksn/nettail/releases/tag/v0.2.2
 [0.2.1]: https://github.com/mjaksn/nettail/releases/tag/v0.2.1
