@@ -170,7 +170,7 @@ try:
 
     # What arrives on the stream waits for an animation frame and goes on in
     # one append. `toTail` reads `scrollHeight`, which lays the table out, and
-    # a table lays out whole, so a row appended per event cost a pass over the
+    # a table lays out whole, so a row appended per event meant a pass over the
     # whole history; a reconnect, which arrives as a backlog inside a single
     # task, was thousands of those passes and looked from the outside like a
     # frozen tab. Nothing here runs the page, so this is greps again: that the

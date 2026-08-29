@@ -454,11 +454,12 @@ footer span i { color: var(--ink-3); font-style: normal; }
   // `scrollHeight`, which makes the browser lay the table out there and then,
   // and a table lays out whole: with `table-layout: auto` every column is as
   // wide as the widest cell in it, so laying out after one append is a pass
-  // over every row the page is holding. Per event that grows with the history,
-  // and the history is thousands of rows. A reconnect hands over a backlog of
-  // up to CLIENT_BACKLOG events in a single task, and so does letting go of
-  // pause, and thousands of full-table layouts inside one task is precisely
-  // what a frozen tab looks like from the outside.
+  // over every row the page is holding. The cost of showing one flow would
+  // otherwise grow with the history behind it, and the history is thousands of
+  // rows. A reconnect hands over a backlog of up to CLIENT_BACKLOG events in a
+  // single task, and so does letting go of pause. A task that spends itself on
+  // thousands of full-table layouts is, from the outside, a tab that has
+  // frozen.
   //
   // Everything that changes the table comes through here: flows, prose, the
   // notes the page writes itself, and the clear. That is what keeps them in

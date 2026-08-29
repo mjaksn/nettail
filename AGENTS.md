@@ -209,10 +209,10 @@ makes the browser lay the table out there and then, and a table lays out whole:
 under `table-layout: auto` every column is as wide as the widest cell in it, so
 laying out after one append is a pass over every row the page is holding. A
 reconnect hands over a backlog of up to `CLIENT_BACKLOG` events inside a single
-task, and letting go of pause does the same. Thousands of full-table layouts in
-one task is what a frozen tab looks like from the outside. A long session
-seizing up looked at first like the memory the history takes, and the code says
-it is this.
+task, and letting go of pause does the same. A task that spends itself on
+thousands of full-table layouts is, from the outside, a tab that has frozen. A
+long session seizing up looked at first like the memory the history takes, and
+the code says it is this.
 
 Four things about the arrangement are easy to break.
 
