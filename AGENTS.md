@@ -144,6 +144,22 @@ Three things about it are easy to break and quiet when broken.
   raising, not by returning False, and `http.server` decodes the request line
   as latin-1, so any byte at all arrives. That is the raise the guard above was
   added for.
+- **The `Host` check compares names under a loopback bind, and under a
+  routable bind only when `--web-host` gave some.** `hosts_restricted` is
+  where that is decided, once per bind in `bind()` from the address that was
+  bound, and never per connection: a wildcard bind answers the same way on
+  every interface. Jupyter, Syncthing and Ollama each arrived at the same
+  rule, which is why it was chosen over the allow-list-everywhere shape Vite
+  and Transmission use. In the open case `origin_allowed` is handed the
+  request's own `Host` and accepts only an origin naming it, after an
+  `isascii()` check on that header, which is text off the wire and would
+  otherwise reach `compare_digest`. The names are held lowercased, ascii,
+  without brackets or a port, which `web_host_arg` enforces for the reason
+  `web_token_arg` does: a name stored with a port matches nothing for ever,
+  and a non-ascii one raises on every key press. `*` is refused too: a
+  routable bind already answers to any name, and the flag is an allow-list,
+  not a pattern. The names are kept in the order given rather than in a set,
+  because the first one is what the printed URL uses.
 - **A subscription and the `finally` that gives it back belong in the same
   `try`.** `wfile` is unbuffered, so writing the response headers can raise if
   the browser has already gone, and a subscription taken before that `try`
