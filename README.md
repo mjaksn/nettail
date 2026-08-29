@@ -100,7 +100,7 @@ nettail --json > flows.jsonl
 ```
 
 Press `Ctrl-C` to stop. A summary prints on exit with datagram counts, template
-statistics, name resolution hit rates, and the top ten external destinations by
+statistics, name resolution hit rates, and the top ten external addresses by
 volume.
 
 ---
@@ -277,8 +277,10 @@ Two things to know before turning it on:
   write to a file.
 - **It needs a real terminal.** On Windows the script enables virtual terminal
   processing automatically, which covers Windows Terminal and modern conhost.
-  If stdout is redirected to a file or a pipe, or the window has fewer than six
-  rows, the flag prints a notice and falls back to `--header-every`.
+  If stdout is redirected to a file or a pipe, or the window is too short, the
+  flag prints a notice and falls back to `--header-every`. The header alone
+  needs six rows; with the status bar up, which is the default, it needs
+  eight.
 
 The header is redrawn when the window is resized (the size is re-measured every
 16 flow lines), and the scroll region is released on Ctrl-C so the summary and
@@ -483,10 +485,11 @@ keyboard has no reason to press anything, `?` included.
 
 Every key prints one line saying what changed, so there is no guessing about
 which mode you are now in. The exceptions are `s`, `l` and `?`, whose output is
-its own confirmation: it prints exactly what the program prints on the way out, as a
-snapshot of the moment it was asked for, and the collector keeps running. Press
-it as often as you like; press `c` first if you want the next one to cover only
-what happens from now on.
+its own confirmation and needs nothing said on top of it. What `s` prints is
+exactly the report the program prints on the way out, as a snapshot of the
+moment it was asked for, and the collector keeps running. Press it as often as
+you like; press `c` first if you want the next one to cover only what happens
+from now on.
 
 `b` gives the two bottom rows back to the flows and takes them again on the next
 press. Turning it off releases the scroll region; turning it back on scrolls up
@@ -899,9 +902,9 @@ with a wrapped uptime counter.
 same definition `--external-only` uses, down to the same code: the display, the
 filter and the summary all ask one helper where a flow's two ends are, so an
 exporter that reports only post-NAT addresses is treated the same way by all
-three. Inbound is what arrived from a public
-address and outbound is what left for one; a flow between two public addresses
-is counted in both directions rather than assigned to one.
+three. Inbound is what arrived from a public address and outbound is what left
+for one; a flow between two public addresses is counted in both directions
+rather than assigned to one.
 
 ### Minimum link speed, and concurrent demand
 
@@ -1214,8 +1217,8 @@ domain and version are named when an exporter has lost exports on more than one:
 
 ```
 Export gaps
-  10.0.0.1 v9 domain 7   40 data records never arrived
-  10.0.0.1 v9 domain 0   2 export messages never arrived
+  10.0.0.1 v9 domain 7 40 data records never arrived
+  10.0.0.1 v9 domain 0 2 export messages never arrived
 ```
 
 The first gap for an exporter is also reported while running, since the useful time
@@ -1229,8 +1232,8 @@ count records instead. Rather than trust the version, each exporter is watched u
 one reading lands exactly on the next message, and that becomes the rule for that
 exporter. Until one does, nothing is reported. A wrong rule would invent a loss
 on every message, and a collector that cries wolf about dropped flows is worse
-than one that stays quiet. An exporter sending a single record per message is ambiguous and
-is watched without ever being judged.
+than one that stays quiet. An exporter sending a single record per message is
+ambiguous and is watched without ever being judged.
 
 Repeated or reordered datagrams are counted separately and are not losses. So is a
 counter restart, which is what an exporter reboot looks like.
@@ -1376,7 +1379,8 @@ Every answer can be given as a flag instead, and `--non-interactive` refuses to
 guess rather than hanging on a prompt nobody is there to answer:
 
 ```
-sudo scripts/install.sh --systemd --non-interactive     --flow-port 2055 --web --web-port 2056 --resolve dns
+sudo scripts/install.sh --systemd --non-interactive \
+    --flow-port 2055 --web --web-port 2056 --resolve dns
 ```
 
 Either way it generates a web token and keeps it in `/etc/nettail/nettail.env`,
@@ -1491,7 +1495,8 @@ browser view is the mode that works properly without one, and it is what the
 image runs by default.
 
 ```
-docker run -d --name nettail --restart unless-stopped     --network host     ghcr.io/mjaksn/nettail:latest --web --web-bind 0.0.0.0
+docker run -d --name nettail --restart unless-stopped \
+    --network host ghcr.io/mjaksn/nettail:latest --web --web-bind 0.0.0.0
 docker logs nettail        # the URL, with its token, is printed at startup
 ```
 
@@ -1501,7 +1506,9 @@ host's address or by its name. `--web-host` narrows it to the names given, and
 the printed URL then carries the first:
 
 ```
-docker run -d --name nettail --restart unless-stopped --network host ghcr.io/mjaksn/nettail:latest --web --web-bind 0.0.0.0 --web-host z2m
+docker run -d --name nettail --restart unless-stopped \
+    --network host ghcr.io/mjaksn/nettail:latest \
+    --web --web-bind 0.0.0.0 --web-host z2m
 ```
 
 `docker-compose.yml` in this repository is the same thing as a Compose file,
@@ -1528,7 +1535,8 @@ bound inside it is not on your loopback at all, and nothing answers. What works
 on Docker Desktop is the bridge, with both ports published:
 
 ```
-docker run -d --name nettail --restart unless-stopped -p 2055:2055/udp -p 127.0.0.1:2056:2056 ghcr.io/mjaksn/nettail:latest
+docker run -d --name nettail --restart unless-stopped \
+    -p 2055:2055/udp -p 127.0.0.1:2056:2056 ghcr.io/mjaksn/nettail:latest
 ```
 
 The view is reachable that way, because `0.0.0.0` inside the container is a
@@ -1567,7 +1575,8 @@ check matches, and the startup line is the ordinary one. That is the arrangement
 to prefer, and the compose file uses it:
 
 ```
-docker run -d --name nettail --network host     ghcr.io/mjaksn/nettail:latest --web --web-bind 127.0.0.1
+docker run -d --name nettail --network host \
+    ghcr.io/mjaksn/nettail:latest --web --web-bind 127.0.0.1
 ```
 
 ### What it does and does not carry
@@ -1669,12 +1678,13 @@ subprocesses. Everything else is the package:
 | `keys.py` | reading keypresses, and what each one does |
 
 Dependencies run one way, from `cli` down towards `colour` and `values`, with
-`web` above `feed` and both below `cli`, so there are no import cycles. `nettail/__init__.py` re-exports the public
-names, which is what makes `from nettail import SizeScale` work wherever
-the class actually lives. Nothing from either dependency is re-exported: a
-program that wants the decoder should import netflume, and one that wants the
-resolver should import lanname, and get the version it pinned rather than
-whichever one this package happens to be sitting on.
+`web` above `feed` and both below `cli`, so there are no import cycles.
+`nettail/__init__.py` re-exports the public names, which is what makes
+`from nettail import SizeScale` work wherever the class actually lives. Nothing
+from either dependency is re-exported: a program that wants the decoder should
+import netflume, and one that wants the resolver should import lanname, and get
+the version it pinned rather than whichever one this package happens to be
+sitting on.
 
 `cli.py` owns the socket and hands each datagram to a `netflume.Decoder`, which
 returns a message and says nothing. netflume prints nothing at all, by design,
@@ -1780,8 +1790,8 @@ python tests/run.py tally keys    # only suites whose name contains either
 python tests/run.py -v            # print every check, not only failures
 ```
 
-756 checks across 24 suites, in about eight seconds. No test dependencies and no
-test runner to learn: the suites need only netflume and lanname, the same as
+1192 checks across 32 suites, in well under a minute. No test dependencies and
+no test runner to learn: the suites need only netflume and lanname, the same as
 the collector.
 
 They cover this program and not its decoder. How a gap is spotted, how a
@@ -1822,15 +1832,20 @@ another suite's result.
 | `test_sticky_header`, `test_sticky_resize`, `test_sticky_shutdown` | the scroll region, what a resize does to it, and giving the terminal back |
 | `test_status_lines`, `test_status_bar`, `test_status_shutdown` | what the bar says at every width, the rows it claims, and the two features sharing one scroll region |
 | `test_flow_display` | the direction arrow, names in place of addresses, and the mac line sitting under the columns it belongs to |
+| `test_colour` | colour decided per reader, painted once and taken out again for whichever of the two refused it |
+| `test_help_colour` | the help staying plain on 3.14, where argparse settles colour before this program can |
 | `test_hosts_and_gradient` | the local host list, and the report ramp spanning the rows it prints |
 | `test_summary_key` | the traffic summary printed on demand, and the clock it is dated by |
 | `test_sticky_with_gradient` | the pinned header and the size ramp sharing one screen |
 | `test_services` | the supplemental port names, the parser behind them, the system database keeping precedence, and the ephemeral floor pinned to where netflume actually puts it |
+| `test_readme_samples` | the transcripts this README quotes, against what the program prints today |
 | `test_endpoints`, `test_top_talkers` | one definition of a flow's ends, both directions counted |
 | `test_web_feed` | the event bus: what it publishes, what it drops when a browser falls behind, and the greeting a late arrival gets |
 | `test_web_server` | the stream against a real server: the greeting, the events, the watcher cap, and the exit summary reaching a browser that is still open |
 | `test_web_security` | everything the web interface refuses: forged tokens, forged `Host` and `Origin` headers, paths that try to reach the filesystem, and keys the collector does not answer |
 | `test_web_keys` | browser keys driven through the real receive loop, including the two `--json` interactions nobody would notice going wrong |
+| `test_container_warning` | which of the two web bind warnings is printed, and that guessing at a container only ever chooses prose |
+| `test_size_end_to_end` | a real collector on loopback, fed real v5 datagrams, with the scale fixed and re-ranging |
 | `test_version` | `--version`, and the package, pyproject and changelog agreeing about the number |
 
 Nothing reaches the network except `test_size_end_to_end`, which starts a real
