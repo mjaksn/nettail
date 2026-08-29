@@ -11,6 +11,19 @@ but it is a program rather than a library, and the names inside it may move
 without that being a breaking change. `--json` output is the part meant to be
 parsed, and it is treated as public.
 
+## [0.4.1] - 2026-08-29
+
+### Fixed
+
+- **The browser view no longer seizes up when a burst arrives.** Every event
+  went on the page as it landed, and each row appended made the browser lay the
+  whole table out, so the cost of showing one flow grew with the history behind
+  it. A reconnect, which hands over a backlog of up to four thousand events in
+  one go, and letting go of pause, which does the same, were each thousands of
+  full-table layouts inside a single task: from the outside, a tab that had
+  frozen. What arrives is now applied once per animation frame, as one append
+  and one scroll to the tail however much it is holding.
+
 ## [0.4.0] - 2026-08-28
 
 ### Fixed
@@ -292,6 +305,7 @@ console: the part that decides what a flow should look like on a terminal.
   reminder line under the startup banner can be a pointer rather than a
   two-hundred-character list that wrapped and then scrolled away.
 
+[0.4.1]: https://github.com/mjaksn/nettail/releases/tag/v0.4.1
 [0.4.0]: https://github.com/mjaksn/nettail/releases/tag/v0.4.0
 [0.3.0]: https://github.com/mjaksn/nettail/releases/tag/v0.3.0
 [0.2.2]: https://github.com/mjaksn/nettail/releases/tag/v0.2.2

@@ -198,6 +198,50 @@ press. `controls.listing` writes to stderr directly rather than through
 `controls.out`, which is a tee and would publish the listing a line at a time
 dressed as replies to keys nobody pressed.
 
+## One frame, one append
+
+Nothing the stream carries reaches the table as it arrives. A row is built when
+its event comes in, held in a `DocumentFragment`, and put on the page once per
+animation frame, with a single `toTail` at the end of it.
+
+What that removes is layout, not building. `toTail` reads `scrollHeight`, which
+makes the browser lay the table out there and then, and a table lays out whole:
+under `table-layout: auto` every column is as wide as the widest cell in it, so
+laying out after one append is a pass over every row the page is holding. A
+reconnect hands over a backlog of up to `CLIENT_BACKLOG` events inside a single
+task, and letting go of pause does the same. Thousands of full-table layouts in
+one task is what a frozen tab looks like from the outside. A long session
+seizing up looked at first like the memory the history takes, and the code says
+it is this.
+
+Four things about the arrangement are easy to break.
+
+- **Everything that changes the table goes through the queue.** Flows, prose,
+  the notes the page writes itself and the clear, so that the order they
+  arrived in is the order they appear in. A queue for some of them and a direct
+  append for the rest behaves perfectly well on a quiet link and reorders the
+  moment two land in one frame. `test_web_server` greps the page for
+  `rows.appendChild(` outside `paint`, blunt in the way the `innerHTML` check
+  is blunt and for the same reason: an append put back somewhere else fails
+  nothing until the link is busy.
+- **A clear takes the queue with it.** Rows already waiting were on their way
+  to a table the reader has just emptied, so `clearTable` drops the fragment
+  and starts another. A clear followed by flows inside one frame has to leave
+  the flows and nothing else.
+- **The gap row goes on inside `paint` rather than through the queue.** It is
+  about a trim that has just happened, and a queued note waits for a frame that
+  only arrives if something else does, which on a link that has just gone quiet
+  can be minutes.
+- **The queue is bounded exactly as the table is.** Animation frames do not run
+  in a tab that is hidden or merely starved, and such a tab goes on taking
+  events until `park` closes the stream, so rows waiting to be shown cost what
+  rows on the page cost. `keep` trims either of them, and `untold` is what
+  carries the fact to the gap row whichever of the two the rows went from.
+
+There is no browser in the suite, so none of this can be pinned by a test that
+runs it. The manual check is to pause with `space`, let a few thousand flows be
+held, let go, and watch the tab stay responsive.
+
 ## A hidden tab gives up its stream
 
 `web.html` closes its `EventSource` when the tab goes to the background and

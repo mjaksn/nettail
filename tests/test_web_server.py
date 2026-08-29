@@ -168,6 +168,29 @@ try:
     # is a rule that fails nowhere when it is dropped.
     check("the page records having stopped trying", "gaveUp" in body)
 
+    # What arrives on the stream waits for an animation frame and goes on in
+    # one append. `toTail` reads `scrollHeight`, which lays the table out, and
+    # a table lays out whole, so a row appended per event cost a pass over the
+    # whole history; a reconnect, which arrives as a backlog inside a single
+    # task, was thousands of those passes and looked from the outside like a
+    # frozen tab. Nothing here runs the page, so this is greps again: that the
+    # page waits for a frame, and that there is one place a row can reach the
+    # table. The second is the one that rots quietly, because an append put
+    # back anywhere else works perfectly well until the link is busy.
+    check("the page applies what arrives on a frame",
+          "requestAnimationFrame" in body)
+    start = body.find("function paint(")
+    end = body.find("\n  function ", start + 1)
+    check("and paint is where a row goes on", start != -1 and end != -1)
+    inside, outside = body[start:end], body[:start] + body[end:]
+    check("which is the only place one does",
+          "rows.appendChild(" in inside and "rows.appendChild(" not in outside)
+    # A clear has to take the queue behind it with it. Rows already waiting
+    # were on their way to a table the reader has just emptied, and letting
+    # them land afterwards would answer the key with the rows it was pressed
+    # to be rid of.
+    check("a clear empties what is queued behind it", "pendingClear" in body)
+
     # -- the greeting -----------------------------------------------------
 
     bus.set_hello({
