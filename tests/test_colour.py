@@ -90,6 +90,45 @@ check("and True for an ordinary one while the codes are painted",
       colour_on(io.StringIO()) is True)
 
 
+# Standing in for sys.stdout means standing in for all of it. The UTF-8
+# reconfigure runs before any of this is installed, but a second pass through
+# main() in one process would find the wrapper, and finding no reconfigure
+# there would take the Windows code page guard out silently.
+
+class _Console(_Tty):
+    encoding = "utf-8"
+
+    def __init__(self):
+        _Tty.__init__(self)
+        self.reconfigured = False
+
+    def reconfigure(self, **kwargs):
+        self.reconfigured = True
+
+    def writelines(self, lines):
+        for line in lines:
+            self.write(line)
+
+
+console = _Console()
+wrapped = PlainStream(console)
+check("an attribute of the stream underneath is reachable",
+      wrapped.encoding == "utf-8")
+check("and so is reconfigure, which the encoding guard asks for",
+      hasattr(wrapped, "reconfigure"))
+wrapped.reconfigure(encoding="utf-8", errors="replace")
+check("and calling it reaches the real stream", console.reconfigured is True)
+wrapped.writelines(["\033[36ma\033[0m", "b"])
+check("writelines takes the colour out rather than slipping past it",
+      console.text == "ab", repr(console.text))
+try:
+    unknown = PlainStream(console).nothing_like_this
+    reached = unknown is not None
+except AttributeError:
+    reached = False
+check("an attribute neither has is still an error", reached is False)
+
+
 # -- which reader gets what ------------------------------------------------
 
 def choice(colour="auto", no_color=False, web=False, web_colour="on",
@@ -161,7 +200,10 @@ check("and the footer says what the star means",
 # -- the tee, which has two consumers to satisfy ---------------------------
 
 def prose(bus, out):
-    tee(bus, "hosts", lambda stream: write_hosts(_Names(), out=stream), out=out)
+    # per_reader, as the real call site passes for this one block: taking the
+    # colour out of a finished rendering cannot put the star back.
+    tee(bus, "hosts", lambda stream: write_hosts(_Names(), out=stream),
+        out=out, per_reader=True)
 
 
 def published(bus, watcher):
@@ -191,6 +233,66 @@ check("a terminal without colour is starred", "nas-old*" in inner.getvalue(),
 check("and has no escape codes in it", "\033[" not in inner.getvalue())
 check("while the browser is dimmed", "\033[2mnas-old\033[0m" in web_copy)
 check("and is not starred, having colour to say it with", "*" not in web_copy)
+
+
+# Rendering twice is what the star costs, and it is charged only to the block
+# that needs it. Everything else is rendered once and taken apart on the way
+# out, because a second pass reads live state again: the summary would ask
+# the resolver for every top talker a second time and time the run afresh.
+
+def counted(text="a line\n"):
+    calls = []
+
+    def render(out):
+        calls.append(1)
+        print(text, end="", file=out)
+
+    return calls, render
+
+
+for label, out, want in (
+        ("both take colour", io.StringIO(), 1),
+        ("they disagree", PlainStream(io.StringIO()), 1)):
+    bus = Feed()
+    bus.subscribe()
+    calls, render = counted()
+    tee(bus, "summary", render, out=out)
+    check("an ordinary block is rendered once when %s" % label,
+          len(calls) == want, len(calls))
+
+bus = Feed()
+watcher = bus.subscribe()
+calls, render = counted("\033[2mdim\033[0m\n")
+tee(bus, "summary", render, out=PlainStream(io.StringIO()))
+check("and the browser still gets its colour from that one rendering",
+      "\033[2m" in published(bus, watcher))
+
+bus = Feed()
+bus.subscribe()
+calls, render = counted()
+tee(bus, "hosts", render, out=io.StringIO(), per_reader=True)
+check("a per-reader block agreeing is still rendered once", len(calls) == 1,
+      len(calls))
+bus = Feed()
+bus.subscribe()
+calls, render = counted()
+tee(bus, "hosts", render, out=PlainStream(io.StringIO()), per_reader=True)
+check("and twice only when the two readers differ", len(calls) == 2, len(calls))
+
+# The list itself is taken once by the caller and handed to both renderings,
+# so a name the resolver finds in between cannot appear in one and not the
+# other.
+changing = _Names()
+first = write_hosts.__doc__ is not None
+snapshot = [("192.168.1.20", ["nas", "nas-old"])]
+one = io.StringIO()
+write_hosts(changing, out=one, hosts=snapshot)
+check("the host list renders from the list it is given",
+      "nas-old" in one.getvalue() and first)
+empty = io.StringIO()
+write_hosts(changing, out=empty, hosts=[])
+check("and an empty one says so rather than going back to the resolver",
+      "none yet" in empty.getvalue(), empty.getvalue())
 
 # -- what reaches the feed when the browser has refused colour -------------
 

@@ -85,6 +85,15 @@ class PlainStream:
         # would look to a caller like a stream that could not take it all.
         return len(text)
 
+    def writelines(self, lines):
+        # Its own rather than delegated, because a delegated one would reach
+        # the stream underneath without passing what it carries through the
+        # stripping above, and colour would arrive at a reader that refused
+        # it. Nothing here calls it; the wrapper stands in for a real stream
+        # and has to behave like one.
+        for line in lines:
+            self.write(line)
+
     def flush(self):
         self.stream.flush()
 
@@ -96,6 +105,25 @@ class PlainStream:
 
     def fileno(self):
         return self.stream.fileno()
+
+    def __getattr__(self, name):
+        """Everything else a stream has, from the one underneath.
+
+        This stands where `sys.stdout` and `sys.stderr` stood, so anything
+        reaching past the four methods above, for `encoding`, `buffer`,
+        `writelines` or `reconfigure`, should find what it would have found
+        there. Without this the UTF-8 reconfigure that runs before the
+        wrapping is installed would quietly not run at all on a second pass
+        through `main` in one process, and a Windows console page would take
+        the display down on its first arrow.
+
+        Only reached for names this class does not define, so `write` and the
+        rest above still win. `stream` is refused explicitly: it is set in
+        `__init__` and looking it up through here would be a loop.
+        """
+        if name == "stream":
+            raise AttributeError(name)
+        return getattr(self.stream, name)
 
 
 def colour_on(stream):

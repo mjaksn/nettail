@@ -153,7 +153,7 @@ def colour_choice(args, isatty, no_colour_env):
     return terminal, bool(args.web) and args.web_colour == "on"
 
 
-def tee(bus, kind, render, out=None):
+def tee(bus, kind, render, out=None, per_reader=False):
     """Print a block of prose, and hand the same characters to the feed.
 
     `render` is anything that takes an `out=` and prints to it, which is nearly
@@ -166,35 +166,41 @@ def tee(bus, kind, render, out=None):
     With nobody watching there is nothing to capture for, so the block is
     rendered straight at the terminal and no buffer is built at all.
 
-    When the two consumers disagree about colour the block is rendered twice,
-    once for each, and that is deliberate rather than a lapse from the above.
-    Colour is not only escape codes here: the host list marks a superseded
-    name with a trailing star when there is no colour to dim it with, so a
-    reader without colour is shown different words and not merely the same
-    words undressed. Handing one of them the other's rendering would take the
-    marker away from the reader it exists for. The `?` listing is already a
-    place where the two views are shown different text on purpose, for a
-    similar reason, so this is not a new idea in the program. Rendering once
-    is still what happens whenever they agree, which is every run that has not
-    asked for the two to differ.
+    One rendering serves both readers even when they want different colour,
+    because neither is handed the buffer directly: a terminal that is not
+    having colour is behind a stream that takes it out, and a browser that is
+    not having it gets the same treatment from `for_web`. Colour is the only
+    thing that differs, and taking it out of finished text is exactly as good
+    as never painting it.
+
+    `per_reader` is for the one block where that is not true. The host list
+    marks a superseded name with a trailing star when there is no colour to
+    dim it with, so a reader without colour is shown different words rather
+    than the same words undressed, and stripping cannot put the star back.
+    That block is rendered once for each reader when the two disagree. It is
+    a flag rather than the rule because rendering twice means reading live
+    state twice: `write_summary` alone would recompute how long the run has
+    been going and ask the resolver for every top talker's name again, so the
+    two copies could differ by more than colour and the second pass would
+    enqueue a second round of lookups.
     """
     out = out if out is not None else sys.stderr
     if bus is None or not bus.active:
         render(out)
         return
-    if colour_on(out) == _WEB_COLOUR:
-        buffer = io.StringIO()
-        render(buffer)
-        text = buffer.getvalue()
-        out.write(text)
+    if per_reader and colour_on(out) != _WEB_COLOUR:
+        captured = io.StringIO()
+        render(captured if _WEB_COLOUR else PlainStream(captured))
+        render(out)
         out.flush()
-        bus.prose(kind, text)
+        bus.prose(kind, captured.getvalue())
         return
-    captured = io.StringIO()
-    render(captured if _WEB_COLOUR else PlainStream(captured))
-    render(out)
+    buffer = io.StringIO()
+    render(buffer)
+    text = buffer.getvalue()
+    out.write(text)
     out.flush()
-    bus.prose(kind, captured.getvalue())
+    bus.prose(kind, for_web(text))
 
 
 class _ProseTee:
@@ -301,7 +307,7 @@ def report_events(events, args, out=None):
                   f"{event.detail}{C.RESET}", file=out)
 
 
-def write_hosts(resolver, out=None):
+def write_hosts(resolver, out=None, hosts=None):
     """List the local addresses seen this session and the names they answered to.
 
     Everything discovered at any point, not what happens to be cached: names
@@ -311,9 +317,13 @@ def write_hosts(resolver, out=None):
     there is no colour to dim. That question is asked of the stream being
     written to rather than of the program, because a run can be showing a
     browser colour while this terminal is having none.
+
+    `hosts` is for the caller that renders this twice, once for each reader.
+    Taken here it would be read twice, and a name the resolver discovered in
+    between would appear in one copy and not the other.
     """
     out = out if out is not None else sys.stderr
-    hosts = resolver.local_hosts()
+    hosts = resolver.local_hosts() if hosts is None else hosts
     print(f"\n{C.BOLD}{C.BLUE}Local hosts seen{C.RESET}", file=out)
     if not hosts:
         print(f"  {C.GREY}none yet{C.RESET}", file=out)
@@ -780,8 +790,13 @@ def main():
         # comes out: the sticky header and the status bar write their margins,
         # their cursor moves and their erases to this same stream, and those
         # go through untouched.
-        sys.stderr = PlainStream(sys.stderr)
-        if not args.json:
+        # Guarded so that wrapping is idempotent. Nothing calls main() twice
+        # in one process today except a test, and a stream wrapped twice
+        # would work while saying, to anything that looked, that it had
+        # already been dealt with.
+        if not isinstance(sys.stderr, PlainStream):
+            sys.stderr = PlainStream(sys.stderr)
+        if not args.json and not isinstance(sys.stdout, PlainStream):
             # Under --json stdout carries json.dumps output, which has never
             # had a colour code in it, so there is nothing to take out and no
             # reason to put a substitution in front of every flow.
@@ -880,8 +895,16 @@ def main():
         bus, "summary",
         lambda out: write_summary(stats, tally, resolver, sequences, sampling,
                                   args, controls.started, out=out))
-    controls.hosts = lambda: tee(bus, "hosts",
-                                 lambda out: write_hosts(resolver, out=out))
+    def show_hosts():
+        # The list is taken once and rendered from, because this is the block
+        # that may be rendered for each reader separately and the two must be
+        # looking at the same addresses.
+        seen = resolver.local_hosts()
+        tee(bus, "hosts",
+            lambda out: write_hosts(resolver, out=out, hosts=seen),
+            per_reader=True)
+
+    controls.hosts = show_hosts
     def listing():
         """The ? listing, to each view with the keys that view can press.
 
