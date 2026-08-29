@@ -226,25 +226,12 @@ def host_allowed(header, local_addr, port, names=(), restricted=True):
     browser sends. `hosts_restricted` is where the decision is made, once per
     bind and never per connection.
     """
-    if not header:
-        return False
-    name = header.strip()
-    # Split a port off the end, but only when what follows the colon really is
-    # one. A bare `Host: localhost` arrives whenever the port is the default
-    # for the scheme, which is what somebody who bound --web-port 80 will see.
-    if ":" in name:
-        head, _, tail = name.rpartition(":")
-        if tail.isdigit():
-            if tail != str(port):
-                return False
-            name = head
-    elif port not in (80,):
-        # A Host with no port at all, against a server that is not on the port
-        # a browser would have omitted. Not something a browser sends.
+    name = split_host(header, port)
+    if name is None:
         return False
     if not restricted:
         return True
-    name = name.strip("[]").lower()
+    name = name.lower()
     if name == str(local_addr).lower():
         return True
     if name in names:
@@ -255,6 +242,46 @@ def host_allowed(header, local_addr, port, names=(), restricted=True):
         except ValueError:
             return False
     return False
+
+
+def split_host(header, port):
+    """The host part of a `Host` header, or None if it is not one a browser
+    would send to this port.
+
+    A browser writes `name:port`, `[v6]:port`, or the name alone when the
+    port is the default for the scheme, which is what somebody who bound
+    --web-port 80 will see. Anything else is refused here rather than left
+    for the name comparison to reject, because in the open case there is no
+    name comparison: a suffix that is not digits, a port that is not this
+    one, a bare name against a port a browser would not have omitted, or a
+    colon inside an unbracketed name, which an IPv6 literal must not be sent
+    without its brackets, all answer None. The brackets come off the literal
+    on the way out, so that what is returned compares directly with a bound
+    address or a name from --web-host.
+    """
+    if not header:
+        return None
+    name = header.strip()
+    if name.startswith("["):
+        close = name.find("]")
+        if close < 0:
+            return None
+        literal, rest = name[1:close], name[close + 1:]
+        if rest:
+            if not rest.startswith(":") or not rest[1:].isdigit():
+                return None
+            if rest[1:] != str(port):
+                return None
+        elif port != 80:
+            return None
+        return literal or None
+    head, colon, tail = name.partition(":")
+    if colon:
+        if not tail.isdigit() or tail != str(port):
+            return None
+    elif port != 80:
+        return None
+    return head or None
 
 
 def origin_allowed(origin, local_addr, port, names=(), host=None):
@@ -793,9 +820,12 @@ class WebInterface:
         self.port = port
         # The names the view answers to besides its address, in the order they
         # were given, because the first one is the one the printed URL uses.
-        # Lowercased here as well as by the flag, for a caller that is not
-        # the flag.
-        self.hosts = tuple(dict.fromkeys(name.lower() for name in hosts))
+        # Reduced to the form the Host header is reduced to, lowercased and
+        # without brackets, here as well as by the flag, for a caller that is
+        # not the flag: a bracketed literal left as given would match nothing
+        # and be bracketed twice in the URL.
+        self.hosts = tuple(dict.fromkeys(
+            name.strip().strip("[]").lower() for name in hosts))
         # Whether names are compared at all, from the requested bind for now
         # and from the bound address once there is one; see bind().
         self.restricted = hosts_restricted(bind, self.hosts)

@@ -32,6 +32,7 @@ from nettail.web import (
     hosts_restricted,
     is_loopback,
     origin_allowed,
+    split_host,
     web_host_arg,
     web_token_arg,
 )
@@ -115,6 +116,34 @@ check("open, a bare host on a non-default port is still refused",
       host_allowed("anything.example", "192.0.2.10", 2056, (), False) is False)
 check("open, a missing Host is still refused",
       host_allowed("", "192.0.2.10", 2056, (), False) is False)
+
+# Open, the shape is all that is checked, so the shape check has to be a real
+# one rather than a port comparison that a suffix which is not digits slips
+# past. None of these is something a browser sends.
+for header, why in (("foo:bar", "a suffix that is not a port"),
+                    ("a:2056:x", "a second colon"),
+                    ("fd00::1:2056", "an unbracketed IPv6 literal"),
+                    ("[fd00::1]", "a bracketed literal with no port"),
+                    ("[fd00::1]:9999", "a bracketed literal on the wrong port"),
+                    ("[fd00::1", "an unclosed bracket"),
+                    ("[]:2056", "empty brackets"),
+                    (":2056", "no name at all")):
+    check("open, %s is refused" % why,
+          host_allowed(header, "192.0.2.10", 2056, (), False) is False, header)
+check("open, a bracketed literal with the right port is accepted",
+      host_allowed("[fd00::1]:2056", "192.0.2.10", 2056, (), False) is True)
+check("and so is one bare on port 80",
+      host_allowed("[fd00::1]", "192.0.2.10", 80, (), False) is True)
+
+# The same shapes were slipping into the name comparison before, where they
+# happened to fail, except the bracketed literal with no port, which matched
+# a bound address of the same literal on any port at all.
+check("restricted, a bracketed literal with no port is refused off port 80",
+      host_allowed("[::1]", "::1", 2056) is False)
+check("and accepted on port 80", host_allowed("[::1]", "::1", 80) is True)
+check("split_host hands back the literal without its brackets",
+      split_host("[fd00::1]:2056", 2056) == "fd00::1")
+check("and a name without its port", split_host("Z2M:2056", 2056) == "Z2M")
 
 # -- the Origin rule, on its own -----------------------------------------
 
@@ -631,6 +660,16 @@ try:
                           port=0, token="a-pinned-token")
     check("a pinned token is used as given", pinned.token == "a-pinned-token")
     check("and appears in the url", "/t/a-pinned-token/" in pinned.url)
+
+    # A caller that is not the flag gets the flag's normalisation of the two
+    # things that would otherwise match nothing: case, and the brackets a
+    # literal is written with in a URL, which the Host reduction takes off.
+    literal = WebInterface(Feed(), queue.Queue(), set(), bind="127.0.0.1",
+                           port=2056, hosts=(" [FD00::1] ", "fd00::1"))
+    check("a bracketed literal given directly is reduced",
+          literal.hosts == ("fd00::1",), repr(literal.hosts))
+    check("and bracketed once in the url", "http://[fd00::1]:2056/" in literal.url,
+          literal.url)
 finally:
     site.stop(timeout=1.0)
 
