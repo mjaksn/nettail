@@ -39,7 +39,7 @@ Options:
   --web                serve the browser view
   --no-web             do not serve the browser view
   --web-port PORT      TCP port for the browser view (default 2056)
-  --resolve MODE       off, dns, or all (default dns)
+  --resolve MODE       off, dns, or all (default all)
   --external-only      show only flows that touch the internet
   --non-interactive    never prompt. A setting with a documented default takes
                        it; a choice with no safe default fails instead
@@ -195,7 +195,7 @@ else
 fi
 
 if [ -z "$RESOLVE" ]; then
-    RESOLVE="$(ask "Hostname resolution: off, dns or all" "dns")"
+    RESOLVE="$(ask "Hostname resolution: off, dns or all" "all")"
 fi
 case "$RESOLVE" in
     off|dns|all) ;;
