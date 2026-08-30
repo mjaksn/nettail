@@ -10,6 +10,7 @@ going wrong: the clear key must not put escape codes into a machine-readable
 stream, and pause must hold the browser view without holding stdout.
 """
 import io
+import os
 import socket
 import struct
 import sys
@@ -65,7 +66,8 @@ check("the terminal listing still shows every key, browser or not",
       len(KEYS) == len(pressable) + len(WEB_EXCLUDED))
 
 
-def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None):
+def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
+        keyboard=None, presses=(), window=None):
     """Drive main() with keys arriving as if from a browser.
 
     `web_presses` is a list of (after_n_polls, key, value). The queue is filled
@@ -76,6 +78,29 @@ def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None):
     only strikes every REPAINT_INTERVAL, and these runs are over in a few
     milliseconds, so without it the only status a test sees is the one
     published before the first datagram arrived.
+
+    `keyboard` is True or False to say whether the run has a terminal
+    keyboard, which is what decides whether the banner offers the q key, and
+    None to let it work that out for itself as it normally would.
+
+    `presses` are keys arriving from the terminal rather than from a browser,
+    which is the only way to reach a key that a browser is not allowed to
+    press. They are handed over one per pass round the loop, in order.
+
+    `window` is a (columns, lines) pair to run with, set through the two
+    environment variables `shutil.get_terminal_size` reads before it asks the
+    operating system anything. A suite has no terminal, so anything that
+    measures one is otherwise answered with zeros, and a key whose whole job
+    is to decide whether something fits would always decide that it does
+    not.
+
+    Stubbed rather than arranged for real, in both directions. Arranging for
+    one means a stdin that claims to be a terminal, which is enough on Windows
+    and not on a platform where starting the keyboard also wants termios on a
+    real file descriptor. Arranging for none means being sure nothing has left
+    a terminal on stdin, which is not this suite's to be sure of: run.py gives
+    each suite its own process and a terminal can be inherited into it, so a
+    check that read the ambient answer passed alone and failed in the runner.
 
     `gap` is a (drop_after_n_polls, take_back_after_n_polls) pair, timed the
     same way, and stands in for a tab that goes to the background: the client
@@ -183,19 +208,44 @@ def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None):
         def stop(self, timeout=2.0):
             self.stopped = True
 
+    typed = list(presses)
+
+    class FakeKeyboard(main.cli.Keyboard):
+        def start(self):
+            self.enabled = bool(keyboard)
+            return self.enabled
+
+        def stop(self):
+            self.enabled = False
+
+        def poll(self):
+            return typed.pop(0) if typed else None
+
     FakeSocket.calls = 0
     real_socket, real_web = socket.socket, main.cli.WebInterface
+    real_keyboard = main.cli.Keyboard
     real_argv, real_out, real_err = sys.argv, sys.stdout, sys.stderr
     socket.socket = FakeSocket
     main.cli.WebInterface = FakeInterface
+    if keyboard is not None:
+        main.cli.Keyboard = FakeKeyboard
     out, err = io.StringIO(), FakeTTY()
     sys.argv = ["nettail", "--web", "--resolve", "off"] + list(argv)
     sys.stdout, sys.stderr = out, err
+    real_window = {name: os.environ.get(name) for name in ("COLUMNS", "LINES")}
+    if window is not None:
+        os.environ["COLUMNS"], os.environ["LINES"] = (str(n) for n in window)
     try:
         main.cli.main()
     finally:
+        for name, was in real_window.items():
+            if was is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = was
         socket.socket = real_socket
         main.cli.WebInterface = real_web
+        main.cli.Keyboard = real_keyboard
         sys.argv, sys.stdout, sys.stderr = real_argv, real_out, real_err
     seen["out"] = out.getvalue()
     seen["err"] = err.getvalue()
@@ -273,6 +323,53 @@ check("which carries the columns", greeting["columns"][0]["name"] == "TIME")
 check("and the keys", any(k["key"] == "s" for k in greeting["keys"]))
 check("and the banner, so a late arrival still gets one",
       "Listening for NetFlow" in plain(greeting["banner"]))
+
+# -- the one line the two readers are not shown alike --------------------
+#
+# The QR key is kept back from a browser, so the line pointing at it is kept
+# back too: offering it would advertise something the control route then
+# refuses, which is the objection the ? listing already answers for the escape
+# key. The banner is therefore rendered twice, and this is the difference. It
+# is worth pinning in both directions, because the failure that costs anything
+# is the quiet one, where both copies come out the same and nobody notices
+# which.
+
+result = run([], [v5_packet(0)], keyboard=True)
+terminal = plain(result["err"])
+greeting = plain(result["greeting_when_serving"]["banner"])
+check("the terminal is told about the q key", "press q for a QR code" in terminal,
+      repr(terminal[:400]))
+check("the browser is not", "press q for a QR code" not in greeting,
+      repr(greeting[:400]))
+check("and is still given the rest of the banner",
+      "Listening for NetFlow" in greeting and "Web interface" in greeting)
+
+# Without a keyboard there is nothing to press, so neither reader is told.
+result = run([], [v5_packet(0)], keyboard=False)
+check("a run with no keyboard tells nobody about the key",
+      "press q for a QR code" not in plain(result["err"])
+      and "press q for a QR code"
+      not in plain(result["greeting_when_serving"]["banner"]))
+
+# -- and pressing it draws the symbol, on the terminal only --------------
+#
+# The only route to this key is a terminal, since a browser may not press it,
+# so it is the only key here that has to be pressed the other way to be
+# reached at all. What that covers is the wiring between the dispatch and the
+# encoder, which nothing else touches: the URL it is handed, the window it
+# measures, and the stream it writes to.
+
+result = run([], [v5_packet(0)], keyboard=True, presses=["q"],
+             window=(80, 40), argv=["--hide-status"])
+terminal = plain(result["err"])
+check("pressing q draws a symbol on the terminal", "█" in terminal,
+      repr(terminal[-200:]))
+check("with the URL under it, which is the URL the interface printed",
+      "http://127.0.0.1:2056/t/test-token/" in terminal)
+check("and none of it goes to stdout, where the flows are",
+      "█" not in result["out"])
+check("nor to the browser, which may not press the key",
+      not any("█" in text for _kind, text in result["prose"]))
 
 # -- the status bar does not draw itself into a json stream --------------
 #
