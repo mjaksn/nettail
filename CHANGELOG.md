@@ -191,12 +191,12 @@ because a release is the only way to find out whether it works.
   straight back costs nothing; the browser saying it is about to freeze the
   tab, which it does under the memory pressure the buffer itself creates; and
   the page's own clock running ten seconds late, which is what a minimised
-  window looks like from the inside. A **Follow** box
-  beside the connection indicator decides whether new flows pull the view down;
-  scrolling up clears it and scrolling back to the bottom fills it again, and a
-  tab that was following when it went to the background is put back at the
-  bottom the moment it returns rather than waiting for the next flow to carry
-  it there. The scrollbars are drawn in the page's own colours.
+  window looks like from the inside. A **Follow** box beside the connection
+  indicator decides whether new flows pull the view down; scrolling up clears
+  it and scrolling back to the bottom fills it again, and a tab that was
+  following when it went to the background is put back at the bottom the moment
+  it returns rather than waiting for the next flow to carry it there. The
+  scrollbars are drawn in the page's own colours.
 
   It is off unless asked for and binds `127.0.0.1`. The URL printed at startup
   carries a random token, without which every request is a 404, and the `Host`

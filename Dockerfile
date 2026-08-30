@@ -17,7 +17,7 @@
 # time. The digest names a manifest list covering amd64, arm64 and arm/v7, and
 # the daemon picks the right one out of it.
 #
-# A patch tag rather than the rolling 3.13-slim, and that is not fussiness.
+# A patch tag rather than the rolling 3.14-slim, and that is not fussiness.
 # The rolling tags are rebuilt every few days, so whatever digest they point
 # at is always a few days old, and nothing that young may be used here. A
 # patch tag stops moving once the next one ships, so it can be both specific

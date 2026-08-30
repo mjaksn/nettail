@@ -1,4 +1,4 @@
-"""End-to-end: real datagrams through main.py, fixed and dynamic scales."""
+"""End-to-end: real datagrams through the collector, fixed and dynamic scales."""
 import io
 import re
 import socket

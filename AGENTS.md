@@ -140,10 +140,10 @@ Three things about it are easy to break and quiet when broken.
 - **Nothing that a request can influence may reach `hmac.compare_digest` as a
   `str` without an `isascii()` check first.** That includes `--web-token`,
   which is why `web_token_arg` refuses one that is non-ascii or holds a
-  slash: both make the interface answer nothing at all, silently. It refuses a non-ascii `str` by
-  raising, not by returning False, and `http.server` decodes the request line
-  as latin-1, so any byte at all arrives. That is the raise the guard above was
-  added for.
+  slash: both make the interface answer nothing at all, silently.
+  `compare_digest` refuses a non-ascii `str` by raising, not by returning
+  False, and `http.server` decodes the request line as latin-1, so any byte at
+  all arrives. That is the raise the guard above was added for.
 - **The `Host` check compares names under a loopback bind, and under a
   routable bind only when `--web-host` gave some.** `hosts_restricted` is
   where that is decided, once per bind in `bind()` from the address that was
