@@ -21,6 +21,7 @@ exercise the version with no alignment pattern and the four with one, and all
 four penalty rules by way of whichever mask each one settles on.
 """
 import io
+import os
 
 from harness import check, finish, plain
 
@@ -302,8 +303,23 @@ for text in ("n", "http://127.0.0.1:2056/", "x" * 106):
           rest == 0, "remainder %d" % rest)
     check("%d bytes: the format information says level L" % len(text),
           (value >> 13) & 0x3 == 0b01)
-    check("%d bytes: the mask it names is one of the eight" % len(text),
-          0 <= (value >> 10) & 0x7 <= 7)
+    # The mask it names has to be the mask actually applied, which is worth a
+    # round trip rather than a range check: masking with 0x7 and then asserting
+    # the answer is between 0 and 7 is true however wrong the symbol is. Rebuilt
+    # from the payload with that mask, the whole thing has to come back.
+    named = (value >> 10) & 0x7
+    rebuilt, function, edge = qr._skeleton(
+        next(v for v in sorted(qr.CAPACITY)
+             if len(text.encode()) + 2 <= qr.CAPACITY[v][0]))
+    qr._place(rebuilt, function, edge, qr._codewords(text.encode(), (edge - 17) // 4))
+    flip = qr._mask_fn(named)
+    for r in range(edge):
+        for c in range(edge):
+            if not function[r][c] and flip(r, c):
+                rebuilt[r][c] ^= 1
+    qr._apply_format(rebuilt, edge, named)
+    check("%d bytes: the mask it names is the mask that was applied" % len(text),
+          rebuilt == drawn, "format says mask %d" % named)
 
 
 # --- what will not fit ------------------------------------------------------
@@ -340,15 +356,73 @@ check("an odd number of module rows still pairs up",
 
 # --- the guards on drawing one ----------------------------------------------
 
-check("a symbol fits a window with room to spare", qr.fits(matrix, (80, 40)))
-check("41 columns is exactly enough", qr.fits(matrix, (41, 30)))
-check("40 columns is not, so it would wrap", not qr.fits(matrix, (40, 30)))
+check("a symbol fits a window with room to spare",
+      qr.fits(matrix, (80, 40), URL))
+check("41 columns is exactly enough for the symbol",
+      qr.fits(matrix, (41, 30), URL))
+check("40 columns is not, so it would wrap",
+      not qr.fits(matrix, (40, 30), URL))
 check("24 rows holds the symbol and its three lines of prose",
-      qr.fits(matrix, (80, 24)))
+      qr.fits(matrix, (80, 24), URL))
 check("23 rows does not, so its top would scroll away",
-      not qr.fits(matrix, (80, 23)))
+      not qr.fits(matrix, (80, 23), URL))
 check("a window that reports nothing fails, which is what a pipe reports",
-      not qr.fits(matrix, (0, 0)))
+      not qr.fits(matrix, (0, 0), URL))
+
+# The URL is counted along with the symbol, and it can be wider than the
+# symbol is. A name from --web-host makes that easy, and a check that gave the
+# URL one row regardless would say yes to a window the block then scrolled the
+# top off. Fifty-seven characters in a forty-one column window is two rows,
+# not one, so what fitted in twenty-four rows above wants twenty-five here.
+check("a URL that wraps is counted at the rows it really takes",
+      not qr.fits(matrix, (41, 24), URL))
+check("and fits once those rows are there", qr.fits(matrix, (41, 25), URL))
+
+LONG = ("http://nettail.monitoring.internal.example.invalid:2056"
+        "/t/QoYm2ZP4rD8xN1sVbTgKcW7eL9uHjX3f/")
+wide = qr.encode(LONG)
+check("a long name still encodes", wide is not None)
+check("a URL that wraps to two rows is counted at two",
+      not qr.fits(wide, (60, 26), LONG) and qr.fits(wide, (60, 27), LONG))
+
+out = io.StringIO()
+qr.write_qr(LONG, out=out, size=(60, 26))
+cramped = plain(out.getvalue())
+check("so a window that could not hold the block gets no symbol",
+      "█" not in cramped)
+check("and the URL, still whole", LONG in cramped)
+
+
+# --- the window is the one the block is going to ----------------------------
+#
+# shutil.get_terminal_size measures stdout whatever it is handed, and this
+# block goes to stderr. The two need not be the same window or both be one:
+# `nettail --web > flows.txt` leaves a terminal on stderr with the keyboard
+# live on it, and measuring the file would answer zero and refuse to draw a
+# symbol there was room for.
+
+was = {name: os.environ.pop(name, None) for name in ("COLUMNS", "LINES")}
+try:
+    class NoDescriptor(io.StringIO):
+        def fileno(self):
+            raise io.UnsupportedOperation("no fileno")
+
+    check("a stream with no window behind it measures nothing",
+          qr.window(io.StringIO()) == (0, 0))
+    check("and so does one whose fileno raises rather than returns",
+          qr.window(NoDescriptor()) == (0, 0))
+    os.environ["COLUMNS"], os.environ["LINES"] = "100", "50"
+    check("the environment is honoured first, as shutil honours it",
+          qr.window(io.StringIO()) == (100, 50))
+    os.environ["COLUMNS"] = "nonsense"
+    check("and nonsense in it falls back rather than raising",
+          qr.window(io.StringIO()) == (0, 50))
+finally:
+    for name, value in was.items():
+        if value is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = value
 
 
 # --- write_qr prints the URL whatever happens -------------------------------

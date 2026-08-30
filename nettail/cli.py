@@ -6,7 +6,6 @@ import io
 import json
 import os
 import queue
-import shutil
 import signal
 import socket
 import sys
@@ -46,6 +45,7 @@ from .keys import (
     web_keys,
     write_keys,
 )
+from .qr import window as qr_window
 from .qr import write_qr
 from .sizescale import (
     DEFAULT_SIZE_SCALE_MAX,
@@ -1074,16 +1074,18 @@ def main():
             a line at a time and dressed as replies to a key nobody pressed.
 
             The window is measured on every press rather than once at startup,
-            because it can be resized between the two, and it is measured
-            against the scroll region rather than the whole terminal. A sticky
-            header and a status bar have taken rows off either end, and a
-            symbol whose top has scrolled out of the region is exactly as
-            unreadable as one cut off at the side.
+            because it can be resized between the two. It is measured on the
+            stream the block is going to, which is not the one
+            `shutil.get_terminal_size` would have asked about, and against the
+            scroll region rather than the whole terminal: a sticky header and
+            a status bar have taken rows off either end, and a symbol whose
+            top has scrolled out of the region is exactly as unreadable as one
+            cut off at the side.
             """
-            window = shutil.get_terminal_size(fallback=(0, 0))
+            columns, lines = qr_window(sys.stderr)
             reserved = ((HEADER_ROWS if sticky.active else 0)
                         + (STATUS_ROWS if bar.active else 0))
-            write_qr(web_url, size=(window.columns, window.lines - reserved))
+            write_qr(web_url, size=(columns, lines - reserved))
 
         # Set from the URL rather than from `qr_on`, which also asks whether
         # the keyboard is live. The two differ only in a state no keypress can

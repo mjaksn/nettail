@@ -673,12 +673,16 @@ come out as the window's background, which is right on a dark terminal and
 inverted on a light one; scanners have coped with an inverted symbol for
 years, and there is no way for a program to ask what colour the window is.
 
-The symbol is 41 columns wide and 21 rows tall, so it wants a window of 41 by
-24 once the heading and the URL are counted, and it is measured against the
-space between the pinned header and the status bar rather than against the
-whole window. Anything smaller, or a stderr that is not a window at all, gets
-the URL by itself: a code that has wrapped or scrolled is not a degraded code,
-it is an unreadable one, and the URL underneath was the point of it anyway.
+The symbol is 41 columns wide and 21 rows tall. With the heading over it and
+the URL under it that is 24 rows in a window wide enough to print the URL on
+one line, and more in a narrower one, where the URL wraps and is counted at
+the rows it really takes. What it is measured against is the space between the
+pinned header and the status bar rather than the whole window, and the window
+it measures is the one this block is going to, which is stderr and need not be
+the one the flows are going to. Anything smaller, or a stderr that is not a
+window at all, gets the URL by itself: a code that has wrapped or scrolled is
+not a degraded code, it is an unreadable one, and the URL underneath was the
+point of it anyway.
 
 The key does not cross to the browser. Its answer is drawn for a terminal and
 written only there, and what it encodes is the address of the page a browser

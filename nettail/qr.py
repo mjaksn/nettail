@@ -35,7 +35,7 @@ hand, and not a dependency: what the suite holds it to is the result, written
 down as vectors in `tests/test_qr.py`.
 """
 
-import shutil
+import os
 import sys
 
 from .colour import C
@@ -414,13 +414,61 @@ def render(matrix, border=QUIET_ZONE):
             for i in range(0, len(rows), 2)]
 
 
-def fits(matrix, size, border=QUIET_ZONE):
-    """Whether a rendered symbol fits in a window of `size`, columns by lines.
+def window(stream=None):
+    """The size of the window `stream` writes to, columns by lines.
+
+    `shutil.get_terminal_size` would be the obvious thing and is the wrong
+    one, because it measures stdout whatever it is handed and this block goes
+    to stderr. The two are not the same window and need not both be one:
+    `nettail --web > flows.txt` leaves a perfectly good terminal on stderr
+    with the keyboard live on it, and measuring the file instead would answer
+    zero and refuse to draw a symbol there was room for. The mirror image is
+    worse in a quieter way, sizing a block bound for a file against whatever
+    terminal stdout happens to be.
+
+    The two environment variables come first, as they do in shutil, because
+    that is how an operator overrides the answer and how the suite sets one.
+    Zeros when there is no window to measure, which is what a pipe is, and
+    what `fits` refuses on.
+    """
+    stream = stream if stream is not None else sys.stderr
+    try:
+        columns = int(os.environ["COLUMNS"])
+    except (KeyError, ValueError):
+        columns = 0
+    try:
+        lines = int(os.environ["LINES"])
+    except (KeyError, ValueError):
+        lines = 0
+    if columns <= 0 or lines <= 0:
+        try:
+            measured = os.get_terminal_size(stream.fileno())
+        except Exception:
+            # A stream with no descriptor at all, one that is not a terminal,
+            # and one whose fileno() raises are all the same answer here, and
+            # the set of exceptions differs by platform and by what the stream
+            # happens to be. There is nothing to do with any of them but go
+            # without a symbol.
+            measured = (0, 0)
+        columns = columns if columns > 0 else measured[0]
+        lines = lines if lines > 0 else measured[1]
+    return columns, lines
+
+
+def fits(matrix, size, url, border=QUIET_ZONE):
+    """Whether the whole block fits a window of `size`, columns by lines.
 
     A QR code that wrapped is not a degraded QR code, it is an unreadable one,
     and one whose top has scrolled away is no better. Both are worth refusing
     over, because the fallback costs the reader nothing: the URL underneath is
     what they came for and it is still there.
+
+    The URL is measured along with the symbol, and not only because it takes a
+    row. It can be wider than the symbol above it, which a name from
+    `--web-host` makes easy, and then it wraps and takes several. Counting one
+    row for it regardless is how a window that this said yes to could still
+    scroll the top of the symbol away: the check has to be about the block
+    that gets printed rather than about the symbol in it.
 
     A window that reports nothing, which is what a redirected stream does,
     fails this. So does one measured against a scroll region rather than the
@@ -428,10 +476,20 @@ def fits(matrix, size, border=QUIET_ZONE):
     and a status bar have taken rows off the top and bottom.
     """
     columns, lines = size
+    if columns < 1:
+        return False
     drawn = render(matrix, border)
-    # The heading over the symbol, the URL under it, and the blank line the
-    # block opens with.
-    return columns >= len(drawn[0]) and lines >= len(drawn) + 3
+    # The blank line the block opens with and the heading under it, then the
+    # symbol, then however many rows the URL wraps into.
+    #
+    # A block exactly as tall as the window loses its top row, because the
+    # last newline scrolls the region once more to leave the cursor somewhere,
+    # and that row is the blank line, which carries nothing. So this asks for
+    # the block to fit rather than for the block and a spare row, and what it
+    # is really promising is that the heading, the symbol and the URL all
+    # survive. Written down because it reads like an off-by-one and is not.
+    needed = 2 + len(drawn) + max(1, -(-len(url) // columns))
+    return columns >= len(drawn[0]) and lines >= needed
 
 
 def write_qr(url, out=None, size=None, border=QUIET_ZONE):
@@ -448,10 +506,10 @@ def write_qr(url, out=None, size=None, border=QUIET_ZONE):
     """
     out = out if out is not None else sys.stderr
     if size is None:
-        size = tuple(shutil.get_terminal_size(fallback=(0, 0)))
+        size = window(out)
     matrix = encode(url)
     print(f"\n{C.BOLD}{C.BLUE}Web interface{C.RESET}", file=out)
-    if matrix is not None and fits(matrix, size, border):
+    if matrix is not None and fits(matrix, size, url, border):
         for line in render(matrix, border):
             print(line, file=out)
     print(f"{C.CYAN}{url}{C.RESET}", file=out)

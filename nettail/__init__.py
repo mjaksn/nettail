@@ -25,6 +25,7 @@ draws what the terminal draws rather than deciding anything of its own.
     statusbar   the two-line bar along the foot of the window
     tally       the running totals behind the exit summary
     keys        the keyboard and what each key does
+    qr          the web interface URL, encoded and drawn as a QR code
     feed        the events a browser watches, and the queues they wait in
     web         serving those events over HTTP, and taking keys back
     cli         argument parsing, the receive loop, and the exit summary
@@ -38,6 +39,12 @@ which is not netflume's function but this package's wrapper around it.
 Loading and parsing the supplemental service list are left on the module rather
 than lifted out of it: ``services.load()`` says what it loads and a bare
 ``load`` in this namespace would not.
+
+``qr.render`` is the one name below that could not be brought up, because
+``display.render`` is already here and means something else entirely: one lays
+a flow out as a line, the other turns a matrix into rows of half blocks. A
+caller wanting the second asks ``qr.render`` for it. Nothing else in that
+module collides.
 """
 
 __version__ = "0.5.0"
@@ -72,12 +79,14 @@ from .keys import (
     KEY_WIDTH,
     KEYS,
     PAUSE_BUFFER,
+    QR_KEY,
     WEB_EXCLUDED,
     Controls,
     Keyboard,
     web_keys,
     write_keys,
 )
+from .qr import MAX_BYTES, QUIET_ZONE, encode, fits, window, write_qr
 from .services import EPHEMERAL_FLOOR, SUPPLEMENTAL_SERVICES, service_name
 from .sizescale import (
     DEFAULT_SIZE_SCALE_MAX,
@@ -127,8 +136,9 @@ __all__ = [
     "C", "Controls", "DEFAULT_SIZE_SCALE_MAX", "ENDPOINT_INDENT",
     "ENDPOINT_WIDTH", "WAY_WIDTH", "flow_macs", "human_clock", "way",
     "HELP_KEY", "KEY_HELP", "KEY_WIDTH", "KEYS", "Keyboard",
-    "PAUSE_BUFFER",
+    "PAUSE_BUFFER", "QR_KEY",
     "write_keys",
+    "MAX_BYTES", "QUIET_ZONE", "encode", "fits", "window", "write_qr",
     "HEADER_LINE", "HEADER_ROWS", "MIN_DYNAMIC_SCALE_MAX", "MIN_STATUS_ROWS",
     "MIN_STICKY_ROWS", "RATE_WINDOW", "REPAINT_INTERVAL",
     "STATUS_ROWS", "Rates", "StatusBar", "run_line", "scroll_region",

@@ -262,12 +262,18 @@ Four things about it are easy to break and quiet when broken.
   untouched. Dark modules are drawn as the window's background, which is right
   on a dark terminal and inverted on a light one, and there is no way to ask
   which it is.
-- **A symbol that will not fit is not drawn at all.** `fits` asks about
-  columns and about rows, and `cli.main` measures the scroll region rather
-  than the window, because a sticky header and a status bar have taken rows
-  off either end. A wrapped code and a code whose top has scrolled away are
-  both unreadable rather than merely worse, and the URL underneath costs the
-  reader nothing.
+- **A symbol that will not fit is not drawn at all**, and three separate
+  things go into deciding that. `fits` counts the URL at the rows it really
+  wraps into rather than at one, because a name from `--web-host` makes a URL
+  wider than the symbol above it easy and the block then scrolls its own top
+  away. `cli.main` measures the scroll region rather than the window, because
+  a sticky header and a status bar have taken rows off either end. And the
+  window measured is the one the block is going to: `qr.window` asks about the
+  stream it is handed, where `shutil.get_terminal_size` asks about stdout
+  whatever it is handed, so `nettail --web > flows.txt` would otherwise
+  measure the file and refuse to draw on the terminal beside it. A wrapped
+  code and a code whose top has gone are both unreadable rather than merely
+  worse, and the URL underneath costs the reader nothing.
 
 The vectors in `test_qr.py` were taken from segno, once, with a correction
 applied to it: its `write_padding_bits` extends the stream by a whole codeword
