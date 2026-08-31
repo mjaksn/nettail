@@ -11,6 +11,45 @@ but it is a program rather than a library, and the names inside it may move
 without that being a breaking change. `--json` output is the part meant to be
 parsed, and it is treated as public.
 
+## [0.6.0] - 2026-08-31
+
+### Fixed
+
+- **The Docker install could not start the collector at all**, and had not
+  been able to since the installer was written in 0.2.1. The compose file it
+  writes passed `--web-token ${NETTAIL_WEB_TOKEN}`, and a `${...}` there is
+  interpolated by Compose, on the host, from the host's own environment or a
+  file named `.env` beside the compose file. It never reads `env_file`, which
+  is a different mechanism that runs later and inside the container. Nothing
+  exported the variable, so it resolved to the empty string, the container was
+  started with `--web-token ""`, and nettail refused it and stopped. Nothing
+  had ever run the installer, which is why it survived four releases.
+- **The systemd install put the web token in `ps`.** Its unit passed the token
+  the same way, and systemd expands a `${...}` in `ExecStart` into the process
+  arguments, so the token was readable by every user on the machine. Keeping
+  it in a 0640 file was meant to prevent exactly that, and the README and
+  `AGENTS.md` both said it did.
+
+### Added
+
+- **`NETTAIL_WEB_TOKEN` is read from the environment** when `--web-token` is
+  not given. This is what the two fixes above rest on: systemd already puts
+  the token there with `EnvironmentFile` and Compose with `env_file`, and
+  nettail could not read it, which is why both generated files were fetching
+  it back onto a command line. Neither passes it now.
+- **`scripts/install.sh` has a test suite.** It runs the real script with
+  fakes for `useradd`, `systemctl`, `docker` and `python3`, then hands the
+  command line out of the unit and the compose file to nettail's own argument
+  parser. Both bugs above were a command line the program refused, and so was
+  the `--resolve passive` default corrected in 0.5.1, so that is the shape it
+  pins.
+
+### Changed
+
+- **The installer takes its paths from the environment** when they are set,
+  defaulting to exactly what they always were, so the whole script can be run
+  into a temporary directory. An install that sets none of them is unchanged.
+
 ## [0.5.1] - 2026-08-30
 
 ### Fixed
@@ -352,6 +391,7 @@ console: the part that decides what a flow should look like on a terminal.
   reminder line under the startup banner can be a pointer rather than a
   two-hundred-character list that wrapped and then scrolled away.
 
+[0.6.0]: https://github.com/mjaksn/nettail/releases/tag/v0.6.0
 [0.5.1]: https://github.com/mjaksn/nettail/releases/tag/v0.5.1
 [0.5.0]: https://github.com/mjaksn/nettail/releases/tag/v0.5.0
 [0.4.1]: https://github.com/mjaksn/nettail/releases/tag/v0.4.1

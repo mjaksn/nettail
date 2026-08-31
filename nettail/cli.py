@@ -68,6 +68,7 @@ from .web import (
     DEFAULT_WEB_PORT,
     KEY_QUEUE_MAX,
     WEB_ENDPOINT_WIDTH,
+    WEB_TOKEN_ENV,
     WebInterface,
     in_container,
     is_loopback,
@@ -642,7 +643,23 @@ def web_reach_note(bound_addr, hosts, contained=None):
             "place of 127.0.0.1.")
 
 
-def main():
+def build_parser():
+    """The command line, as a parser, built here rather than inside `main`.
+
+    Pulled out so that the set of options this program accepts can be asked
+    about without running it. `scripts/install.sh` assembles a command line
+    for a program it does not import, out of choices it writes down a second
+    time, and the two drifted once already: the installer offered a resolver
+    mode that did not exist and a default install wrote a unit the collector
+    refused to start, which survived from 0.2.1 to 0.5.0 because nothing
+    compared them.
+
+    Asking the program instead is what `test_installer` does with this. It
+    has to be the parser rather than `--help`, because argparse reports an
+    unknown argument only once it has finished parsing, and `--help` exits
+    before that: `nettail --nonsense --help` succeeds, while the invalid
+    choice that actually shipped does not.
+    """
     # Named rather than taken from argv[0], which is the console script's full
     # path when installed and "__main__.py" under `python -m`. Neither is what
     # anyone types, and the usage line is quoted in the README.
@@ -719,7 +736,10 @@ def main():
                          metavar="TOKEN",
                          help="use this token in the URL instead of a fresh "
                               "random one, so that a bookmark survives a "
-                              "restart")
+                              "restart. Taken from %s in the environment when "
+                              "the flag is not given, which is how the "
+                              "installed service receives it without it "
+                              "appearing in ps" % WEB_TOKEN_ENV)
     web_grp.add_argument("--web-colour", "--web-color", choices=("on", "off"),
                          default="on", metavar="WHEN",
                          help="colour in the browser view (default on). A "
@@ -765,7 +785,34 @@ def main():
     # but they live on args like every other display setting, so that one
     # place says what the display is currently doing.
     ap.set_defaults(named_hosts=False, show_macs=False)
+    return ap
+
+
+def main():
+    ap = build_parser()
     args = ap.parse_args()
+
+    # The token, when the flag did not carry it. This is how the installed
+    # service gets one: systemd reads `EnvironmentFile` and compose reads
+    # `env_file`, so by the time this runs the value is already here, and
+    # nothing has to put it on a command line where `ps` would show it.
+    #
+    # Read here rather than as the flag's `default` so that a bad one is
+    # reported against the thing that actually carried it. Somebody whose env
+    # file holds a token with a slash in it is not helped by being told that
+    # `--web-token` is wrong when they never typed it.
+    #
+    # An empty value counts as absent rather than as an error. It is what an
+    # exported-but-unset variable looks like, and the answer to it is the same
+    # as to no variable at all: generate one.
+    if args.web_token is None:
+        carried = os.environ.get(WEB_TOKEN_ENV, "").strip()
+        if carried:
+            try:
+                args.web_token = web_token_arg(carried)
+            except argparse.ArgumentTypeError as exc:
+                ap.error("%s in the environment cannot be used: %s"
+                         % (WEB_TOKEN_ENV, exc))
 
     # Checked here rather than after the socket is up: argparse catches
     # --size-scale-max against --size-scale-dynamic for us, but this pair is

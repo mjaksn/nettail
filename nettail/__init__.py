@@ -47,9 +47,10 @@ caller wanting the second asks ``qr.render`` for it. Nothing else in that
 module collides.
 """
 
-__version__ = "0.5.1"
+__version__ = "0.6.0"
 
 from .cli import (
+    build_parser,
     flow_record,
     main,
     report_events,
@@ -150,6 +151,7 @@ __all__ = [
     "EPHEMERAL_FLOOR", "SUPPLEMENTAL_SERVICES", "service_name",
     "proto_colour", "write_summary", "write_hosts", "SpanScale",
     "enable_windows_vt", "endpoint",
+    "build_parser",
     "human_bytes", "human_count", "main", "render", "report_events",
     "should_show", "size_scale_arg", "size_window_arg",
     "COLUMNS", "row_cells", "tee", "flow_record",

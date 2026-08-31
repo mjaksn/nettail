@@ -14,14 +14,28 @@
 #
 set -euo pipefail
 
-SERVICE_USER=nettail
-INSTALL_DIR=/opt/nettail
-CONFIG_DIR=/etc/nettail
+# Where everything goes. The defaults are the only values a real install ever
+# uses, and are what this file meant when they were written inline.
+#
+# They come from the environment when it offers them so that the whole script
+# can be run somewhere harmless, which is what `tests/test_installer.py` does:
+# it points these at a temporary directory, puts fakes for useradd, systemctl,
+# docker and python3 on the PATH, and then reads what was actually written.
+# Testing the file that comes out beats testing an intermediate, because the
+# unit's ExecStart is the command line the machine really runs, and that is
+# the thing that drifted from what nettail accepts and cost a release.
+#
+# Nothing here changes what an install does. Unset, which is every case that
+# is not a test, each is exactly the path it always was.
+SERVICE_USER="${NETTAIL_SERVICE_USER:-nettail}"
+INSTALL_DIR="${NETTAIL_INSTALL_DIR:-/opt/nettail}"
+CONFIG_DIR="${NETTAIL_CONFIG_DIR:-/etc/nettail}"
+SYSTEMD_DIR="${NETTAIL_SYSTEMD_DIR:-/etc/systemd/system}"
 ENV_FILE="$CONFIG_DIR/nettail.env"
 UNIT_NAME=nettail.service
-UNIT_FILE="/etc/systemd/system/$UNIT_NAME"
+UNIT_FILE="$SYSTEMD_DIR/$UNIT_NAME"
 COMPOSE_FILE="$CONFIG_DIR/docker-compose.yml"
-IMAGE=ghcr.io/mjaksn/nettail:latest
+IMAGE="${NETTAIL_IMAGE:-ghcr.io/mjaksn/nettail:latest}"
 
 SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -309,13 +323,16 @@ if [ "$MODE" = "systemd" ]; then
     # --web-bind is left at its loopback default. Putting the view on the
     # network is a decision to make deliberately by editing the unit, not
     # something an installer should do quietly on somebody's behalf.
+    # The token is not here, and that is the point of EnvironmentFile below.
+    # It used to be fetched back onto this line as ${NETTAIL_WEB_TOKEN}, which
+    # systemd expands into the argv, so the token showed up in ps for every
+    # user on the machine: exactly what keeping it in a 0640 file was meant to
+    # prevent. nettail reads the variable itself now, so the file in front of
+    # the process is the whole of the delivery.
     exec_args=""
     for arg in "${ARGS[@]}"; do
         exec_args="$exec_args $arg"
     done
-    if [ "$WEB" -eq 1 ]; then
-        exec_args="$exec_args --web-token \${NETTAIL_WEB_TOKEN}"
-    fi
 
     cat > "$UNIT_FILE" <<UNIT
 [Unit]
@@ -394,13 +411,20 @@ else
 
     web_lines=""
     if [ "$WEB" -eq 1 ]; then
+        # No token on this line either, and here it was worse than untidy. A
+        # ${...} in a compose file is interpolated by compose, on the host,
+        # from the host's environment or a file named .env beside this one.
+        # It never reads env_file, which is a different mechanism entirely and
+        # runs later, inside the container. Nothing exported the variable, so
+        # it resolved to the empty string and the container was started with
+        # --web-token "", which nettail refuses. The token reaches the program
+        # through env_file below, which had been carrying it correctly all
+        # along with nothing at the other end to read it.
         web_lines="      - --web
       - --web-port
       - \"$WEB_PORT\"
       - --web-bind
-      - 127.0.0.1
-      - --web-token
-      - \${NETTAIL_WEB_TOKEN}"
+      - 127.0.0.1"
     fi
 
     extra=""
