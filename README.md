@@ -1613,10 +1613,10 @@ The view is reachable that way, because `0.0.0.0` inside the container is a
 routable bind and the `Host` check does not compare names under one; the
 publish to `127.0.0.1` is what keeps it private. Publish the web port with a
 different number on the host side and the page is a 404, for the reason and
-with the fix in [Moving the web port](#moving-the-web-port). The cost that remains is the
-exporter address: every exporter shows as the gateway, as above. For anything
-beyond a look, run the collector locally or in a Linux VM with host
-networking.
+with the fix in [Moving the web port](#moving-the-web-port). The cost that
+remains is the exporter address: every exporter shows as the gateway, as
+above. For anything beyond a look, run the collector locally or in a Linux VM
+with host networking.
 
 ### Why the image binds 0.0.0.0
 
@@ -1668,7 +1668,9 @@ scribble over the display.
 To move the port, move both sides and tell the collector:
 
 ```
-docker run -d --name nettail --restart unless-stopped     -p 2055:2055/udp -p 127.0.0.1:9000:9000 ghcr.io/mjaksn/nettail:latest     --web --web-bind 0.0.0.0 --web-port 9000
+docker run -d --name nettail --restart unless-stopped \
+    -p 2055:2055/udp -p 127.0.0.1:9000:9000 ghcr.io/mjaksn/nettail:latest \
+    --web --web-bind 0.0.0.0 --web-port 9000
 ```
 
 Publishing `9000:2056` and leaving the collector on its default does not work

@@ -24,6 +24,14 @@ parsed, and it is treated as public.
   or in `docker logs`, is told which two ports disagreed and that `--web-port`
   is what settles it.
 
+- **The installer no longer offers a resolver mode that does not exist.**
+  `--resolve` accepted `passive` and defaulted to it, but nettail's modes are
+  `off`, `dns` and `all`; a default install wrote a service that would not
+  start, failing with an argparse invalid choice. The accepted set now matches
+  the program, and the default is `all`, as it is for the command itself. The
+  fix itself went in before 0.5.0 and was left out of its notes, which is why
+  it is recorded here.
+
 ### Documentation
 
 - **The README says how to move the web port**, under Running in Docker. Both
