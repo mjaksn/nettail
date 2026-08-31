@@ -124,6 +124,33 @@ def make_fakes(where):
     return binned
 
 
+# Putting the fakes in front of the installer, from inside bash rather than
+# from Python, because both halves of doing it from outside are wrong on
+# Windows and were wrong quietly.
+#
+# The separator is the first half: `os.pathsep` is `;` there, and bash wants
+# `:`, so a PATH joined in Python arrives as one entry or none. The execute
+# bit is the second and the worse: `os.chmod` on Windows sets the read-only
+# flag and nothing else, and a file that MSYS2 does not consider executable is
+# skipped in a PATH search without a word. Both left the installer finding the
+# real `id`, which answers that it is not root, and the whole thing stopped one
+# line in. It passed locally, where the scratch fakes had been made by bash in
+# the first place, and failed on every Windows runner.
+#
+# bash knows its own separator, and its `chmod` is the one that means anything
+# where it is running. `cygpath` is absent off Windows and the path is already
+# a POSIX one there, so the guard covers both.
+WRAPPER = """
+set -eu
+dir="$1"; shift
+if command -v cygpath >/dev/null 2>&1; then dir="$(cygpath -u "$dir")"; fi
+chmod +x "$dir"/* 2>/dev/null || true
+PATH="$dir:$PATH"
+export PATH
+exec bash "$@"
+"""
+
+
 def install(where, *options, **kw):
     """Run the installer into `where`, and hand back what it wrote.
 
@@ -144,7 +171,6 @@ def install(where, *options, **kw):
     # installer does not create it and neither does this pretend otherwise.
     env = dict(os.environ)
     env.update({
-        "PATH": binned + os.pathsep + env.get("PATH", ""),
         "FAKELOG": log,
         "NETTAIL_INSTALL_DIR": paths["install"],
         "NETTAIL_CONFIG_DIR": paths["config"],
@@ -153,7 +179,8 @@ def install(where, *options, **kw):
     # Whatever this run inherited must not decide what the installer writes.
     env.pop(WEB_TOKEN_ENV, None)
     done = subprocess.run(
-        [BASH, INSTALLER, "--non-interactive", "--no-start"] + list(options),
+        [BASH, "-c", WRAPPER, "fakes", binned, INSTALLER,
+         "--non-interactive", "--no-start"] + list(options),
         capture_output=True, text=True, env=env, cwd=ROOT)
     return done.returncode, done.stdout + done.stderr, paths
 
@@ -242,6 +269,16 @@ check("the installer parses as bash", done.returncode == 0,
 
 with tempfile.TemporaryDirectory() as where:
     code, output, paths = install(where, "--systemd", "--web")
+
+    # Asked first, because everything below it depends on the fakes being the
+    # ones the installer found and the answer is otherwise a cascade of seven
+    # failures that all say something else. The real `id` reports that this is
+    # not root and the script stops on its second line; nothing then writes a
+    # unit, and six checks about the unit fail saying only that it is missing.
+    check("the installer found the fakes rather than the real tools",
+          os.path.isfile(os.path.join(paths["log"], "id.argv")),
+          "no id.argv: the PATH the wrapper set did not take. " + output[-200:])
+
     check("a systemd install runs to the end", code == 0, output[-500:])
 
     unit_path = os.path.join(paths["units"], "nettail.service")
