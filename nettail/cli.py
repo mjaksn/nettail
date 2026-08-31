@@ -589,6 +589,36 @@ def web_bind_warning(bind, port, contained=None):
             f"everything it fetches.{C.RESET}")
 
 
+def web_port_note(asked, port, contained=None):
+    """What to say when a request named a port this is not listening on.
+
+    The refusal itself is right and stays as it is: a `Host` naming another
+    port is not something a browser sends by itself, and the answer it gets is
+    the same 404 a bad token gets so that probing tells nobody which of the
+    two they got right. What was missing is that the reader at the terminal
+    could not tell those two apart either, and one of them is their own
+    doing.
+
+    A published port mapped to a different number is how this is nearly always
+    reached, so in a container the line says so in those terms and hands over
+    the flag that fixes it. On a host the same mismatch means a proxy in front,
+    or a tunnel, and the same flag is still the answer, so the difference is
+    only in which arrangement is named.
+
+    `contained` is for the tests. Left as None it asks the environment.
+    """
+    if contained is None:
+        contained = in_container()
+    where = ("a published port mapped to a different number on the host"
+             if contained else "a proxy or a tunnel in front of this")
+    return (f"{C.YELLOW}a request asked for port {asked} and this is "
+            f"listening on {port}, so it was refused, and it was refused with "
+            f"the same 404 a wrong token gets. {where.capitalize()} is the "
+            f"usual reason. The port in the address bar has to be the port "
+            f"this was told to serve, so pass --web-port {asked} to match, or "
+            f"move the other side to {port}. Said once.{C.RESET}")
+
+
 def web_reach_note(bound_addr, hosts, contained=None):
     """What to say about reaching the view from another machine, or None.
 
@@ -934,6 +964,11 @@ def main():
         return snapshot(stats, tally, resolver, sequences, sampling, scale,
                         args, controls, rates)
 
+    # Whether the port mismatch above has been reported. In a one element list
+    # for the reason `shown_flows` below is: the receive loop writes it and it
+    # is read in the same nested scope.
+    port_told = [False]
+
     # Flows that have passed the display filter. In a one element list rather
     # than a bare integer because `web_status` below reads it and the receive
     # loop writes it, and both are nested in this function: a plain name would
@@ -1256,6 +1291,21 @@ def main():
                     break
                 controls.handle(web_key,
                                 ask=lambda _prompt, v=web_value: v)
+            # A request refused because its Host named another port, reported
+            # on this thread for the reason browser keys are answered on it:
+            # a line written from a request thread lands inside the scroll
+            # region and takes the pinned header and the status bar with it.
+            #
+            # Once a run, and the flag is what makes it once. This is a fact
+            # about how the collector was started rather than about the
+            # request, so a second telling says nothing new, and saying it per
+            # request would hand anybody who can reach the port a way to
+            # scribble over the display for as long as they cared to.
+            if web is not None and web.port_notice is not None:
+                asked, web.port_notice = web.port_notice, None
+                if not port_told[0]:
+                    port_told[0] = True
+                    print(web_port_note(asked, web.port), file=sys.stderr)
             if controls.quit:
                 break
             if not controls.paused and controls.held:

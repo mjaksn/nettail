@@ -32,6 +32,7 @@ from nettail.web import (
     hosts_restricted,
     is_loopback,
     origin_allowed,
+    port_named,
     split_host,
     web_host_arg,
     web_token_arg,
@@ -337,6 +338,43 @@ check("a page with no script gets no script permission",
 check("editing the script changes the hash",
       content_policy("<script>a</script>") != content_policy("<script>b</script>"))
 
+# -- the port a Host header names -----------------------------------------
+#
+# Read back only to say something useful about a refusal, never to decide one.
+# What matters is that it agrees with split_host about what counts as a port,
+# so that the two cannot come to disagree and have the diagnostic blame a port
+# the check was perfectly happy with.
+
+for header, expected in (("127.0.0.1:12056", 12056),
+                         ("example.lan:8080", 8080),
+                         ("[::1]:9999", 9999),
+                         ("[::1]", None),
+                         ("localhost", None),
+                         ("127.0.0.1", None),
+                         ("host:notaport", None),
+                         ("host:²", None),
+                         ("a:1:2", None),
+                         ("[bad", None),
+                         ("", None),
+                         (None, None)):
+    check("port_named(%r) is %r" % (header, expected),
+          port_named(header) == expected, repr(port_named(header)))
+
+# The superscript two above is the reason the conversion is allowed to fail
+# rather than trusted: str.isdigit() is true of it and int() will not take it.
+check("a port of superscript digits does not raise", port_named("h:²") is None)
+
+# Agreement with the check itself. Where port_named reads a port that is not
+# ours, split_host has to have refused the header, and where it reads ours,
+# split_host has to have kept it.
+for header in ("127.0.0.1:2056", "127.0.0.1:2057", "localhost:2056",
+               "[::1]:2056", "[::1]:9", "host:80"):
+    named = port_named(header)
+    kept = split_host(header, 2056) is not None
+    check("split_host and port_named agree about %r" % header,
+          kept == (named == 2056), "named %r, kept %s" % (named, kept))
+
+
 # -- against a real server ------------------------------------------------
 
 bus = Feed()
@@ -387,6 +425,48 @@ def raw(request_bytes):
 
 try:
     check("the page is served to a correct request", fetch(good) == 200)
+
+    # -- the port a refused Host named ------------------------------------
+    #
+    # The refusal stays exactly as it was and the browser is still told
+    # nothing, because telling it would tell somebody probing which half of
+    # the check they had got right. What is new is that the reader at the
+    # terminal is left something to go on, out of band, and this is the half
+    # of that which happens on a request thread: note the port and nothing
+    # else. Printing it is the receive loop's job, and test_web_keys pins it.
+
+    site.port_notice = None
+    check("a request on the right port notes nothing",
+          fetch(good) == 200 and site.port_notice is None)
+
+    other = site.port + 1
+    check("one naming another port is still refused",
+          fetch(good, host_header="127.0.0.1:%d" % other) == 404)
+    check("and the port it named is noted for the receive loop",
+          site.port_notice == other, repr(site.port_notice))
+
+    # A wrong token on the right port is the case this must not blame the
+    # port for, since the port was right and saying otherwise sends the
+    # reader after the wrong thing entirely.
+    site.port_notice = None
+    wrong_token = "http://%s/t/%s/" % (host, "x" * len(site.token))
+    check("a wrong token on the right port notes no port",
+          fetch(wrong_token) == 404 and site.port_notice is None,
+          repr(site.port_notice))
+
+    # A Host with no port at all cannot have named the wrong one. It is still
+    # refused, because a browser omits the port only when it is 80.
+    site.port_notice = None
+    check("a Host with no port is refused",
+          fetch(good, host_header="127.0.0.1") == 404)
+    check("and notes nothing, having named no port",
+          site.port_notice is None, repr(site.port_notice))
+
+    site.port_notice = None
+    check("a Host whose port is not a number notes nothing",
+          fetch(good, host_header="127.0.0.1:zzz") == 404
+          and site.port_notice is None)
+    site.port_notice = None
 
     # A wrong token and a wrong Host get the same answer on purpose. Telling
     # them apart would tell somebody probing which half they had right.

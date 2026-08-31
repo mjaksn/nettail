@@ -47,7 +47,7 @@ caller wanting the second asks ``qr.render`` for it. Nothing else in that
 module collides.
 """
 
-__version__ = "0.5.0"
+__version__ = "0.5.1"
 
 from .cli import (
     flow_record,

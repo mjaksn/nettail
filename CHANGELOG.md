@@ -11,6 +11,33 @@ but it is a program rather than a library, and the names inside it may move
 without that being a breaking change. `--json` output is the part meant to be
 parsed, and it is treated as public.
 
+## [0.5.1] - 2026-08-30
+
+### Fixed
+
+- **A request whose `Host` names another port now says so on stderr**, once a
+  run, naming the port asked for and the port being served. Publishing a
+  container's web port onto a different number on the host is the ordinary way
+  to reach this, and the 404 it produced was deliberately the same 404 a wrong
+  token gets, so there was nothing to tell the two apart by. The refusal is
+  unchanged and the browser is still told nothing; the reader at the terminal,
+  or in `docker logs`, is told which two ports disagreed and that `--web-port`
+  is what settles it.
+
+- **The installer no longer offers a resolver mode that does not exist.**
+  `--resolve` accepted `passive` and defaulted to it, but nettail's modes are
+  `off`, `dns` and `all`; a default install wrote a service that would not
+  start, failing with an argparse invalid choice. The accepted set now matches
+  the program, and the default is `all`, as it is for the command itself. The
+  fix itself went in before 0.5.0 and was left out of its notes, which is why
+  it is recorded here.
+
+### Documentation
+
+- **The README says how to move the web port**, under Running in Docker. Both
+  halves of the publish have to name the same number and the collector has to
+  be told it, which one sentence mentioned in passing and nothing explained.
+
 ## [0.5.0] - 2026-08-30
 
 ### Added
@@ -325,6 +352,7 @@ console: the part that decides what a flow should look like on a terminal.
   reminder line under the startup banner can be a pointer rather than a
   two-hundred-character list that wrapped and then scrolled away.
 
+[0.5.1]: https://github.com/mjaksn/nettail/releases/tag/v0.5.1
 [0.5.0]: https://github.com/mjaksn/nettail/releases/tag/v0.5.0
 [0.4.1]: https://github.com/mjaksn/nettail/releases/tag/v0.4.1
 [0.4.0]: https://github.com/mjaksn/nettail/releases/tag/v0.4.0

@@ -284,6 +284,41 @@ def split_host(header, port):
     return head or None
 
 
+def port_named(header):
+    """The port a `Host` header names, or None if it names none this can read.
+
+    Written for the diagnostic rather than for the check. `split_host` already
+    refuses a header naming the wrong port, and refuses it in the same breath
+    as everything else it refuses, so by the time anybody wants to know which
+    port was asked for the answer has been thrown away. This gets it back, and
+    is deliberately no part of deciding anything: a header this reads a port
+    out of is refused exactly as it was before.
+    """
+    if not header:
+        return None
+    name = header.strip()
+    if name.startswith("["):
+        close = name.find("]")
+        if close < 0:
+            return None
+        rest = name[close + 1:]
+        if not rest.startswith(":"):
+            return None
+        tail = rest[1:]
+    else:
+        _name, colon, tail = name.partition(":")
+        if not colon:
+            return None
+    if not tail.isdigit():
+        return None
+    try:
+        # isdigit() is true of characters int() will not take, a superscript
+        # two among them, so the conversion is still allowed to fail.
+        return int(tail)
+    except ValueError:
+        return None
+
+
 def origin_allowed(origin, local_addr, port, names=(), host=None):
     """Whether an `Origin` header names this server.
 
@@ -562,6 +597,19 @@ class _Handler(BaseHTTPRequestHandler):
             # Deliberately the same answer a bad token gets. A response that
             # distinguished them would tell somebody probing which of the two
             # they had got right.
+            #
+            # The reader at the terminal is owed more than the browser is,
+            # though, and gets it out of band. A publish that maps this port
+            # to a different one on the host is the ordinary way to arrive
+            # here: the browser names the host's port, this knows only its
+            # own, and the 404 that follows is indistinguishable from a bad
+            # token. Noting the port is the whole of what happens on this
+            # thread. The receive loop reports it, because a line written
+            # from here lands inside the scroll region and takes the header
+            # and the status bar with it.
+            asked = port_named(self.headers.get("Host"))
+            if asked is not None and asked != self.site.port:
+                self.site.port_notice = asked
             self._refuse(404, "not found")
             return None
         route = self._route()
@@ -838,6 +886,15 @@ class WebInterface:
         self.page = load_page()
         self.policy = content_policy(self.page)
         self.watching = set()
+        # A port some request named in its `Host` header that is not the one
+        # this is listening on. Written by a request thread and read and
+        # cleared by the receive loop, and that is the whole of the traffic on
+        # it: one assignment of one integer, which cannot grow, cannot block,
+        # and cannot be lost in a way that matters, since the next such
+        # request writes it again. A queue would be the shape used for keys
+        # and would be more than this needs, because the newest value is as
+        # good as the oldest and only one of them is ever reported.
+        self.port_notice = None
         self._httpd = None
         self._thread = None
 
