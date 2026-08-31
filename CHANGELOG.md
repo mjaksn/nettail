@@ -50,6 +50,36 @@ parsed, and it is treated as public.
   defaulting to exactly what they always were, so the whole script can be run
   into a temporary directory. An install that sets none of them is unchanged.
 
+### If you wrote your own unit
+
+The two fixes above are about the files `scripts/install.sh` generates, and
+re-running the installer rewrites those. A unit you wrote yourself is not
+touched by anything here, and if you copied the example the README used to
+carry, it still has this in it:
+
+```ini
+ExecStart=/opt/netflow/venv/bin/nettail ... --web-token ${NETTAIL_TOKEN}
+```
+
+Nothing breaks. `--web-token` works exactly as it always has, so that unit
+goes on running and the URL it serves is unchanged. But systemd expands a
+`${...}` in `ExecStart` into the process arguments, so the token is readable
+in `ps` by every user on the machine, which is the thing this release fixed
+everywhere else.
+
+To pick the fix up, take `--web-token` off the `ExecStart` line and let the
+environment carry it:
+
+```ini
+EnvironmentFile=/etc/netflow/nettail.env    # NETTAIL_WEB_TOKEN=...
+ExecStart=/opt/netflow/venv/bin/nettail --port 2055 --web
+```
+
+One detail to get right: the variable has to be named `NETTAIL_WEB_TOKEN`
+exactly. The old README example called it `NETTAIL_TOKEN`, which was a name
+the operator chose and referenced by hand; it was never read by anything.
+This one is, and only under that name.
+
 ## [0.5.1] - 2026-08-30
 
 ### Fixed
