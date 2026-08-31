@@ -1612,8 +1612,8 @@ docker run -d --name nettail --restart unless-stopped \
 The view is reachable that way, because `0.0.0.0` inside the container is a
 routable bind and the `Host` check does not compare names under one; the
 publish to `127.0.0.1` is what keeps it private. Publish the web port with a
-different number on the host side and the page is a 404, since the port in the
-address bar is checked against `--web-port`. The cost that remains is the
+different number on the host side and the page is a 404, for the reason and
+with the fix in [Moving the web port](#moving-the-web-port). The cost that remains is the
 exporter address: every exporter shows as the gateway, as above. For anything
 beyond a look, run the collector locally or in a Linux VM with host
 networking.
@@ -1648,6 +1648,34 @@ to prefer, and the compose file uses it:
 docker run -d --name nettail --network host \
     ghcr.io/mjaksn/nettail:latest --web --web-bind 127.0.0.1
 ```
+
+### Moving the web port
+
+Both halves of the publish have to name the same port. `-p 127.0.0.1:9000:2056`
+looks reasonable and answers 404 to everything, the token page included,
+because the port is part of what the `Host` header is checked against: the
+browser writes `9000` in that header, the collector inside the container is
+listening on `2056` and knows nothing of the mapping, and the two cannot
+agree. The refusal is the same 404 a wrong token gets, deliberately, so that
+somebody probing cannot tell which of the two they got right.
+
+Since 0.5.1 the collector says so on stderr the first time it happens, naming
+both ports, which is where `docker logs` will show it. It says it once a run:
+it is a fact about how the collector was started rather than about the
+request, and repeating it per request would let anyone who can reach the port
+scribble over the display.
+
+To move the port, move both sides and tell the collector:
+
+```
+docker run -d --name nettail --restart unless-stopped     -p 2055:2055/udp -p 127.0.0.1:9000:9000 ghcr.io/mjaksn/nettail:latest     --web --web-bind 0.0.0.0 --web-port 9000
+```
+
+Publishing `9000:2056` and leaving the collector on its default does not work
+and cannot be made to, short of a proxy that rewrites the header. The same
+applies outside Docker: anything in front of this that changes the port, a
+tunnel or a reverse proxy included, needs `--web-port` set to the port the
+browser will actually name.
 
 ### What it does and does not carry
 

@@ -67,7 +67,7 @@ check("the terminal listing still shows every key, browser or not",
 
 
 def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
-        keyboard=None, presses=(), window=None):
+        keyboard=None, presses=(), window=None, port_notices=()):
     """Drive main() with keys arriving as if from a browser.
 
     `web_presses` is a list of (after_n_polls, key, value). The queue is filled
@@ -86,6 +86,11 @@ def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
     `presses` are keys arriving from the terminal rather than from a browser,
     which is the only way to reach a key that a browser is not allowed to
     press. They are handed over one per pass round the loop, in order.
+
+    `port_notices` are ports a request thread would have noted, timed against
+    the poll counter the same way `web_presses` are. They stand in for a
+    request whose Host named another port, which cannot be made to arrive
+    here: the fake interface answers nothing.
 
     `window` is a (columns, lines) pair to run with, set through the two
     environment variables `shutil.get_terminal_size` reads before it asks the
@@ -111,6 +116,7 @@ def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
     """
     waited = []
     queued = list(web_presses)
+    noticed = list(port_notices)
     waiting = list(packets)
     seen = {}
 
@@ -138,6 +144,10 @@ def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
                 if press[0] <= FakeSocket.calls:
                     queued.remove(press)
                     seen["site"].keys.put_nowait((press[1], press[2]))
+            for note in list(noticed):
+                if note[0] <= FakeSocket.calls:
+                    noticed.remove(note)
+                    seen["site"].port_notice = note[1]
             if gap is not None:
                 bus = seen["site"].bus
                 if FakeSocket.calls == gap[0] - 1:
@@ -178,6 +188,7 @@ def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
             self.bound_addr = self.asked_for
             self.stopped = False
             self.serving = False
+            self.port_notice = None
             seen["site"] = self
 
         # Bound and serving are two steps for a reason: the greeting has to be
@@ -350,6 +361,44 @@ check("a run with no keyboard tells nobody about the key",
       "press q for a QR code" not in plain(result["err"])
       and "press q for a QR code"
       not in plain(result["greeting_when_serving"]["banner"]))
+
+# -- a Host naming another port is reported, once ------------------------
+#
+# The refusal happens on a request thread and says nothing to the browser,
+# deliberately, since telling it apart from a wrong token would tell somebody
+# probing which half they had right. The reader at the terminal is owed more,
+# and this is where they get it: on the receive thread, because a line written
+# from a request thread lands inside the scroll region and takes the pinned
+# header and the status bar with it.
+#
+# Once a run, and that is the part worth pinning. It is a fact about how the
+# collector was started rather than about the request, so a second telling
+# says nothing, and one per request would hand anyone who can reach the port a
+# way to scribble over the display for as long as they liked.
+
+result = run([], [v5_packet(0)] * 4, port_notices=[(2, 9000)])
+err = plain(result["err"])
+check("a port mismatch is reported on stderr", "asked for port 9000" in err,
+      repr(err[-300:]))
+check("naming the port actually being served", "listening on 2056" in err)
+check("and the flag that settles it", "--web-port 9000" in err)
+check("nothing about it reaches stdout, where the flows are",
+      "9000" not in result["out"])
+check("nor the browser, which was told 404 and nothing else",
+      not any("9000" in text for _kind, text in result["prose"]))
+
+result = run([], [v5_packet(0)] * 8, port_notices=[(2, 9000), (4, 9000),
+                                                   (6, 9001)])
+err = plain(result["err"])
+check("three refusals are still reported once",
+      err.count("asked for port") == 1, str(err.count("asked for port")))
+check("and it is the first of them that is reported",
+      "asked for port 9000" in err and "9001" not in err)
+
+result = run([], [v5_packet(0)] * 4)
+check("a run nothing was refused in says nothing",
+      "asked for port" not in plain(result["err"]))
+
 
 # -- and pressing it draws the symbol, on the terminal only --------------
 #
