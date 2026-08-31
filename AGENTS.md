@@ -463,21 +463,67 @@ feature means reading both, and their suites.
 ## The installer
 
 `scripts/install.sh` covers both deployments, systemd and Docker, and asks
-which. Three things in it are deliberate:
+which. Four things in it are deliberate:
 
 - **The web token lives in `/etc/nettail/nettail.env` and is never
   regenerated.** Re-running the installer to pick up a new version must not
-  invalidate a URL somebody has bookmarked. It is passed through the
-  environment rather than on the command line so that it stays out of `ps`.
+  invalidate a URL somebody has bookmarked. It reaches the program through the
+  environment and never through the command line, so that it stays out of
+  `ps`: systemd puts it there with `EnvironmentFile`, compose with `env_file`,
+  and `cli.main` reads `WEB_TOKEN_ENV` when `--web-token` was not given.
+
+  That is now true and was not before 0.6.0. Both generated files used to
+  fetch the value back onto the command line as `${NETTAIL_WEB_TOKEN}`, which
+  went wrong differently in each. Under systemd it expands into the argv, so
+  the token appeared in `ps` for every user on the machine, which is the one
+  thing keeping it in a 0640 file was meant to prevent. Under compose it does
+  not expand at all: `${...}` there is interpolated on the host, from the
+  host's environment or a file named `.env` beside the compose file, and never
+  from `env_file`, which is a different mechanism that runs later and inside
+  the container. Nothing exported the variable, so it became the empty string
+  and the container was started with `--web-token ""`, which nettail refuses.
+  **The Docker install could not start at all**, from 0.2.1 until it was
+  found. Nothing had ever run it.
 - **`--web-bind` is left at its loopback default in both paths.** Putting the
   view on the network is a decision to make by editing the unit or the compose
   file, not one an installer makes quietly on somebody's behalf.
 - **`useradd --user-group`, explicitly.** The unit says `Group=nettail`, and
   whether a bare `useradd` creates a matching group depends on `USERGROUPS_ENAB`
   and so on the distribution.
+- **The paths it installs into come from the environment**, defaulting to
+  exactly what they always were. That is what lets `test_installer` run the
+  whole script into a temporary directory and read back what it wrote, rather
+  than testing an intermediate. An install that sets none of them is byte for
+  byte the install it always was.
 
 It is safe to run twice, and that is worth keeping: an existing user, virtual
 environment and token are all reused rather than replaced.
+
+### What tests it, and what does not
+
+`test_installer` runs the real script with fakes for `useradd`, `systemctl`,
+`docker`, `chown`, `id` and `python3`, each logging its argv, and then reads
+the unit and the compose file back. The check that matters is that the command
+line each of them carries is one `build_parser` accepts, because the two bugs
+above were both a command line the program refused.
+
+That is why the parser is a function rather than something `main` builds
+inline. Asking `nettail --help` instead does not work: argparse reports an
+unrecognised argument only after parsing finishes and `--help` exits before
+that, so `nettail --nonsense --help` succeeds while an invalid choice does not.
+
+Faking rather than really installing is the sharper check as well as the
+cheaper one. Asserting `--user-group` in useradd's argv tests the decision two
+bullets up; running the real `useradd` would test whichever `USERGROUPS_ENAB`
+the machine happened to have, which is the variable that flag exists to
+escape. Starting the service, a real `useradd` and a container run are all out
+of scope for the same reason: they test the runner's distribution rather than
+this file.
+
+The permission checks, the file mode and the ownership, are the only ones in
+the whole suite that gate on `os.name`. They mean nothing under Git Bash on
+Windows. Everything else runs wherever bash does, and the suite says so rather
+than skipping quietly.
 
 ## The container image
 

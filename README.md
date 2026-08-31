@@ -258,7 +258,7 @@ All off unless `--web` is given. See [The web interface](#the-web-interface).
 | `--web-bind ADDR` | `127.0.0.1` | Address for the web interface. Anything other than loopback exposes this network's traffic over cleartext HTTP, and is warned about at startup |
 | `--web-host NAME` | none | A name the view answers to. Under the loopback default it is added beside `localhost`; under another `--web-bind`, which otherwise answers to any name, it restricts the view to the names given. May be repeated |
 | `--web-colour WHEN` | `on` | Colour in the browser view: `on` or `off`. A browser is a colour-capable reader whatever stdout is, so a redirected run does not take the colour out of it. `--web-color` is accepted too |
-| `--web-token TOKEN` | random | Use this token in the URL instead of a fresh random one, so a bookmark survives a restart |
+| `--web-token TOKEN` | random | Use this token in the URL instead of a fresh random one, so a bookmark survives a restart. Taken from `NETTAIL_WEB_TOKEN` in the environment when the flag is not given, which is how an installed service receives one without it appearing in `ps` |
 | `--web-readonly` | off | Serve the display but accept no keys from the browser |
 
 ### Sticky header
@@ -1456,8 +1456,12 @@ sudo scripts/install.sh --systemd --non-interactive \
 Either way it generates a web token and keeps it in `/etc/nettail/nettail.env`,
 mode 0640. That file is the whole of the web interface's authentication, and it
 is why the installer is safe to run again: an upgrade keeps the token, so a URL
-you bookmarked carries on working. The token is passed through the environment
-rather than on the command line, so it does not appear in `ps` output.
+you bookmarked carries on working.
+
+The token reaches the collector through the environment and never through the
+command line, so it does not appear in `ps` output. systemd puts it there with
+`EnvironmentFile` and Compose with `env_file`, and nettail reads
+`NETTAIL_WEB_TOKEN` itself when `--web-token` was not given.
 
 The systemd install builds a virtual environment in `/opt/nettail` from
 `requirements.lock`, verifying the hash of every file, creates a `nettail`
@@ -1503,13 +1507,13 @@ A unit is the case `--web` was most worth building for: the flows go to a file
 and there is no terminal to watch, so the browser becomes the only human view.
 
 ```ini
+EnvironmentFile=/etc/netflow/nettail.env
 ExecStart=/opt/netflow/venv/bin/nettail \
     --port 2055 \
     --resolve dns \
     --hosts /opt/netflow/lan-hosts \
     --json \
-    --web \
-    --web-token ${NETTAIL_TOKEN}
+    --web
 ```
 
 Three things are worth knowing about that.
@@ -1526,12 +1530,19 @@ authentication from SSH, which is more than `--web-bind` on its own will ever
 give you.
 
 **Pin the token.** A fresh random token every restart means a fresh URL every
-restart. `--web-token` read from an environment file keeps one bookmark
-working:
+restart. An environment file keeps one bookmark working:
 
 ```ini
-EnvironmentFile=/etc/netflow/nettail.env    # NETTAIL_TOKEN=...
+# /etc/netflow/nettail.env
+NETTAIL_WEB_TOKEN=the-token-you-want-to-keep
 ```
+
+There is no `--web-token` on the `ExecStart` above, and that is on purpose.
+systemd expands a `${...}` in `ExecStart` into the process arguments, so a
+token fetched back onto the command line that way is visible in `ps` to every
+user on the machine, which is the whole thing the file was protecting it from.
+nettail reads the variable itself, so the file in front of the process is the
+entire delivery.
 
 Make that file readable only by the service user. The token is the whole of the
 access control.

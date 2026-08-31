@@ -414,6 +414,21 @@ def in_container():
     return any(os.path.exists(path) for path in ("/.dockerenv", "/run/.containerenv"))
 
 
+# The environment variable the token may arrive in, named once because four
+# things have to agree about it: the flag's help, the fallback in `cli.main`,
+# and the two files `scripts/install.sh` writes, which put it in front of the
+# program by way of systemd's `EnvironmentFile` and compose's `env_file`.
+#
+# It exists because those two already load it and nettail could not read it.
+# Both generated files used to fetch it back onto the command line as
+# `${NETTAIL_WEB_TOKEN}`, which under systemd put the token into the argv and
+# so into `ps`, the one thing keeping it in a file was meant to prevent, and
+# under compose did not work at all: `${...}` there is interpolated on the
+# host, from the host's own environment, which never had it. The container was
+# started with an empty token and refused to run.
+WEB_TOKEN_ENV = "NETTAIL_WEB_TOKEN"
+
+
 def web_token_arg(text):
     """A token given on the command line, checked for the two ways it fails.
 
