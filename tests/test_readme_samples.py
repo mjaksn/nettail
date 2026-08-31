@@ -49,7 +49,7 @@ from harness import ROOT, check, finish, plain
 from netflume import SamplingWatch, SequenceWatch
 
 import nettail as main
-from nettail import cli, services
+from nettail import cli, qr, services
 from nettail.display import HEADER_LINE, TIME_WIDTH, render
 
 # A failing check here prints the row it disagreed about, and a row carries
@@ -202,6 +202,28 @@ check("the README quotes the key listing exactly as the ? key prints it",
       listing in BLOCKS,
       "%d lines, first %r" % (len(listing.splitlines()),
                               listing.splitlines()[0]))
+
+# --- the QR sample ----------------------------------------------------------
+# Pinned whole, for the reason the listing above is: it varies in nothing. It
+# is also the one block here that no reader can check by eye, so if it were
+# ever to drift it would drift silently and stay wrong. The URL under it is the
+# one the block encodes, which is what makes the check worth anything: a sample
+# symbol paired with some other address would look perfectly convincing and
+# send anybody who scanned it nowhere.
+sample = [block for block in BLOCKS if block.splitlines()[:1] == ["Web interface"]]
+check("the README quotes a QR block", len(sample) == 1, str(len(sample)))
+if sample:
+    quoted = sample[0].splitlines()
+    buf = io.StringIO()
+    # The last line of the block is the URL the symbol above it claims to
+    # encode, and handing that back to the encoder is the whole check: a
+    # sample symbol paired with some other address would look perfectly
+    # convincing and send anybody who scanned it somewhere else.
+    qr.write_qr(quoted[-1], out=buf, size=(200, 200))
+    produced = plain(buf.getvalue()).strip("\n").splitlines()
+    check("the README quotes the symbol this URL really encodes to",
+          produced == quoted,
+          "README %d lines, program %d" % (len(quoted), len(produced)))
 
 # --- the exit summary -------------------------------------------------------
 TRAFFIC = [

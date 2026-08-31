@@ -26,6 +26,12 @@ PAUSE_BUFFER = 2000      # flows held while paused before the oldest are dropped
 # line that sends the reader to it.
 HELP_KEY = "?"
 
+# The key that draws the web interface URL as a QR code. Named once for the
+# same reason and for one more thing that has to agree: it is kept back from
+# the browser, so it appears in the table below, in the dispatch, in
+# WEB_EXCLUDED, and in the line under the banner that points a reader at it.
+QR_KEY = "q"
+
 # Every key and what it does, in the order the listing shows them.
 #
 # The only place a key is written down. The dispatch in Controls.actions is
@@ -47,6 +53,7 @@ KEYS = (
     ("p", "show hardware addresses on a line under each flow"),
     ("f", "show full domain names instead of the first label"),
     ("e", "show only flows with a public endpoint, or show all"),
+    (QR_KEY, "print a QR code for the web interface URL, and the URL under it"),
     (HELP_KEY, "this list"),
     ("esc", "close the program, printing the exit summary"),
 )
@@ -60,7 +67,15 @@ KEYS = (
 # not a good enough reason for that to arrive as a side effect, so it does not
 # cross. If it is ever wanted it should be a control that says it stops the
 # collector, asked for on purpose, rather than one more key in a grid.
-WEB_EXCLUDED = ("esc",)
+#
+# The QR key is here for a duller reason: there is nothing for it to do. Its
+# answer is drawn out of half block characters for a terminal and written to
+# the terminal alone, and what it encodes is the address of the page the
+# browser is already looking at. Allowing it would give a browser a key that
+# appears to work and visibly does nothing, which is worse than not having it,
+# and publishing the symbol instead would put forty columns of block
+# characters through a table that has no reason to expect them.
+WEB_EXCLUDED = ("esc", QR_KEY)
 
 # The keys a browser may press but is given no button for.
 #
@@ -94,7 +109,7 @@ def web_buttons():
 
 
 # The one line printed under the startup banner, which is a pointer and not a
-# list. Naming all fifteen ran to two hundred characters and wrapped on any
+# list. Naming all sixteen ran to two hundred characters and wrapped on any
 # ordinary terminal, so a banner already three lines long arrived four or five;
 # and it scrolled away with the banner regardless, leaving the reader who
 # wanted it an hour later no better off for its having been thorough. The
@@ -296,6 +311,10 @@ class Controls:
         # here; the hook exists so that whoever has a second view to write the
         # listing to can arrange for it to go to both.
         self.listing = None
+        # What the q key prints. Set only by a run that has a web interface to
+        # point at, so that being None is the whole of how this knows there is
+        # no URL to encode.
+        self.qr = None
 
         self.quit = False
         self.paused = False
@@ -344,6 +363,7 @@ class Controls:
             "h": self._resolve_mode,
             "f": self._fqdn,
             "e": self._external,
+            QR_KEY: self._qr,
             HELP_KEY: self._help,
         }
 
@@ -434,6 +454,19 @@ class Controls:
         if self.hosts is None:
             return None
         self.hosts()
+        return None
+
+    def _qr(self):
+        """Print a QR code for the web interface URL, with the URL under it.
+
+        Like the summary and the host list, the block is its own confirmation
+        and says nothing on top of itself. A run without a web interface has
+        no URL to encode and says so, because a key that answered a press with
+        silence would be indistinguishable from one that had gone wrong.
+        """
+        if self.qr is None:
+            return "the web interface is not running"
+        self.qr()
         return None
 
     def _help(self):

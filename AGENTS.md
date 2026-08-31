@@ -67,7 +67,9 @@ test:
   `test_key_help` holds them to each other in both directions: a key that
   works and is listed nowhere fails, and so does one listed and wired to
   nothing. `HELP_KEY` is `?` itself, named once and used by the table, the
-  dispatch and the startup reminder line.
+  dispatch and the startup reminder line. `QR_KEY` is `q` in the same way,
+  and has one thing more to agree with: it is kept back from the browser, so
+  it is named in `WEB_EXCLUDED` as well.
 - **`EPHEMERAL_FLOOR` in `services.py`** repeats a number netflume writes
   inline and exports no constant for. `test_services` finds where netflume
   actually stops naming ports and pins ours to it.
@@ -168,9 +170,20 @@ Three things about it are easy to break and quiet when broken.
   asks `bus.active` first, and a record or a snapshot is built only then. The
   display path builds neither today, so a publish that assembled one
   speculatively would be real work per flow on a busy link.
-- **The escape key does not cross.** `WEB_EXCLUDED` in `keys.py` keeps it back,
-  because ending the process for everybody, this terminal included, is not
-  something that should arrive as a side effect of mirroring a keyboard.
+- **Two keys do not cross.** `WEB_EXCLUDED` in `keys.py` keeps them back.
+  `esc` because ending the process for everybody, this terminal included, is
+  not something that should arrive as a side effect of mirroring a keyboard.
+  `q` because there would be nothing for it to do: it draws the URL of the
+  page as a QR code, for a terminal, on the terminal, and a browser showing
+  that page has the address in its own bar. Allowing it would give a browser
+  a key that appears to work and visibly does nothing.
+- **The banner is rendered twice, and only for that.** The line pointing at
+  the `q` key is the one thing the two readers are not shown alike, for the
+  reason the `?` listing is: offering a browser a key the control route then
+  refuses advertises something that is not there. `write_banner` takes a flag
+  and `cli.main` calls it a second time only when the flag would change the
+  answer. `test_web_keys` pins it in both directions, because the failure that
+  costs anything is the quiet one where both copies come out the same.
 
 The `--json` interactions are worth knowing because each of them is
 unreachable from a terminal, so none of them existed as a question before this
@@ -184,11 +197,11 @@ flowing, because `--json` is the part of the interface documented as parseable.
 
 Whether a key may be pressed and whether it deserves a button are two
 questions, so `keys.py` keeps two tables. `WEB_EXCLUDED` is what a browser may
-not press at all, and holds `esc`. `WEB_UNLISTED` is what it may press but gets
-no button for, and holds `?`: the drawer is already the list that key would
-print, so a button reading "this list" beside the list would be absurd, but
-somebody who knows the program will still reach for the key. `web_keys` is the
-first set and `web_buttons` the second, derived from it, so a key can never
+not press at all, and holds `esc` and `q`. `WEB_UNLISTED` is what it may press
+but gets no button for, and holds `?`: the drawer is already the list that key
+would print, so a button reading "this list" beside the list would be absurd,
+but somebody who knows the program will still reach for the key. `web_keys` is
+the first set and `web_buttons` the second, derived from it, so a key can never
 gain a button it is not allowed to press. The page asks `hello.pressable`, not
 its own buttons, when deciding whether to answer a keystroke.
 
@@ -197,6 +210,82 @@ than the same characters: the browser's copy leaves out `esc`, which it cannot
 press. `controls.listing` writes to stderr directly rather than through
 `controls.out`, which is a tee and would publish the listing a line at a time
 dressed as replies to keys nobody pressed.
+
+## There is a QR encoder in here
+
+`qr.py` encodes the `--web` URL as a QR code and draws it out of half block
+characters, which the `q` key prints. It is the one thing in this repository
+that could obviously have been a dependency and deliberately is not, so the
+reasoning is worth keeping.
+
+What it would have cost is not what a dependency costs elsewhere. This program
+installs two pure Python packages and nothing else, the suite has no
+dependencies and is not meant to grow one, and the image pins every byte by
+hash. The obvious library also carries `importlib-metadata`, and `zipp` behind
+it, on the 3.9 that CI gates on, which would have made three statements about
+what this installs false at once.
+
+What it costs instead is about 250 lines against a standard fixed in 2015,
+which is write-once code. It is small enough to be worth it only because the
+payload is one URL of this program's own making, which lets the general case
+go: **error correction level L and versions 1 to 5 only**, and those five are
+one Reed-Solomon block each, so there is no interleaving; no version
+information block, which starts at 7; one alignment pattern at `4V+10`, which
+is where 2 to 5 put their only one; and an eight bit character count, which is
+what byte mode uses below version 10. That leaves 106 bytes of URL, and the
+longest this program builds is nowhere near it. Anything longer gets its URL
+printed alone, which was the point of the block anyway.
+
+Four things about it are easy to break and quiet when broken.
+
+- **Three mistakes kill the symbol and three do not, and knowing which is
+  which is the whole of testing this.** Reversing the format information bits,
+  putting either copy on the wrong axis, or leaving the dark module unset
+  produces a symbol no reader will take, and every one of those happened while
+  this was being written. Starting the pad codewords with `0x11` rather than
+  `0xEC`, or choosing a different one of the eight masks, produces a symbol
+  that scans perfectly and is simply not the one intended: a reader takes the
+  length from the character count indicator and never looks at the padding,
+  and the format information says which mask was used. So a change that looks
+  harmless because it still scans may still be wrong, and `test_qr` is what
+  says so.
+- **The masks are scored before the format information goes on, and with the
+  dark module still light.** The standard asks for the first and `_skeleton`
+  arranges the second by reserving that module without setting it;
+  `_apply_format` turns it on, which is the only place a symbol is finished.
+  Score with either in place and a different mask wins about one time in
+  twenty. Both symbols scan, so nothing fails except the vectors.
+- **The renderer uses no escape codes, and that is why it survives.**
+  `PlainStream` takes SGR out for a reader without colour, so a symbol drawn
+  with reverse video would come out as blank lines in a redirected run while
+  looking right on a terminal. Half blocks are characters and pass through
+  untouched. Dark modules are drawn as the window's background, which is right
+  on a dark terminal and inverted on a light one, and there is no way to ask
+  which it is.
+- **A symbol that will not fit is not drawn at all**, and three separate
+  things go into deciding that. `fits` counts the URL at the rows it really
+  wraps into rather than at one, because a name from `--web-host` makes a URL
+  wider than the symbol above it easy and the block then scrolls its own top
+  away. `cli.main` measures the scroll region rather than the window, because
+  a sticky header and a status bar have taken rows off either end. And the
+  window measured is the one the block is going to: `qr.window` asks about the
+  stream it is handed, where `shutil.get_terminal_size` asks about stdout
+  whatever it is handed, so `nettail --web > flows.txt` would otherwise
+  measure the file and refuse to draw on the terminal beside it. A wrapped
+  code and a code whose top has gone are both unreadable rather than merely
+  worse, and the URL underneath costs the reader nothing.
+
+The vectors in `test_qr.py` were taken from segno, once, with a correction
+applied to it: its `write_padding_bits` extends the stream by a whole codeword
+when the data already ends on a codeword boundary, which in byte mode is
+always. The difference is harmless for the reason above, but anybody
+regenerating those vectors has to apply the same correction or every symbol in
+the file moves by one pad codeword and its check bytes with it.
+
+There is no scanner in the suite and there cannot be one, so the manual check
+is the real acceptance step: press `q` and scan what comes up, once on a dark
+terminal and once on a light one.
+
 
 ## One frame, one append
 

@@ -11,6 +11,26 @@ but it is a program rather than a library, and the names inside it may move
 without that being a breaking change. `--json` output is the part meant to be
 parsed, and it is treated as public.
 
+## [0.5.0] - 2026-08-30
+
+### Added
+
+- **The `q` key prints a QR code for the `--web` URL**, with the URL itself
+  underneath it. The URL carries a token and is not the sort of thing anyone
+  wants to copy off a screen by hand, so this is the short way onto the view
+  from a phone. A line under the startup banner says the key is there; the
+  code itself is not printed at startup, where it would scroll away with the
+  banner and cost every run twenty-one rows for something wanted once.
+  A window too narrow or too short for the symbol gets the URL by itself,
+  because a code that has wrapped or scrolled is unreadable rather than merely
+  worse. The key does not cross to the browser: what it encodes is the address
+  of the page a browser is already looking at.
+
+  The encoder is part of this program rather than a dependency, and handles
+  versions 1 to 5 at error correction level L, which is a URL of up to 106
+  bytes. Installing nettail still brings in two pure Python packages and
+  nothing else, and the suite still has no dependencies.
+
 ## [0.4.1] - 2026-08-29
 
 ### Fixed
@@ -305,6 +325,7 @@ console: the part that decides what a flow should look like on a terminal.
   reminder line under the startup banner can be a pointer rather than a
   two-hundred-character list that wrapped and then scrolled away.
 
+[0.5.0]: https://github.com/mjaksn/nettail/releases/tag/v0.5.0
 [0.4.1]: https://github.com/mjaksn/nettail/releases/tag/v0.4.1
 [0.4.0]: https://github.com/mjaksn/nettail/releases/tag/v0.4.0
 [0.3.0]: https://github.com/mjaksn/nettail/releases/tag/v0.3.0

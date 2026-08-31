@@ -38,12 +38,15 @@ from .feed import Feed
 from .keys import (
     KEY_CHARS,
     KEY_HELP,
+    QR_KEY,
     Controls,
     Keyboard,
     web_buttons,
     web_keys,
     write_keys,
 )
+from .qr import window as qr_window
+from .qr import write_qr
 from .sizescale import (
     DEFAULT_SIZE_SCALE_MAX,
     SizeScale,
@@ -58,7 +61,7 @@ from .statusbar import (
     StatusBar,
     snapshot,
 )
-from .sticky import MIN_STICKY_ROWS, StickyHeader
+from .sticky import HEADER_ROWS, MIN_STICKY_ROWS, StickyHeader
 from .tally import Tally
 from .values import human_bits, human_bytes, human_clock, human_count, human_duration
 from .web import (
@@ -1010,7 +1013,7 @@ def main():
                 web_warnings.append(
                     web_bind_warning(args.web_bind, args.web_port))
 
-    def write_banner(out):
+    def write_banner(out, qr_key=False):
         """What a session opens with: where it is listening, and how it is set.
 
         Gathered into a function so that the same characters can be printed
@@ -1019,6 +1022,15 @@ def main():
         connects an hour in was not here when they were printed. They travel in
         the greeting instead, which is why this builds text rather than
         printing it directly.
+
+        `qr_key` is the one line the two readers are not shown alike, and it is
+        rendered twice for the reason `tee` renders the host list twice: the
+        difference is in the words and not only in their dress. The q key is
+        kept back from a browser, so offering it one would advertise something
+        the control route then refuses, which is the objection `controls.listing`
+        exists to answer for the escape key. Rendering the banner twice is free
+        here in a way it is not there, because everything on it is settled
+        before the first datagram and nothing in it reads live state.
         """
         print(f"{C.BOLD}Listening for NetFlow/IPFIX on "
               f"{args.bind}:{args.port}{C.RESET}", file=out)
@@ -1034,6 +1046,9 @@ def main():
             reach = web_reach_note(web.bound_addr, args.web_host)
             if reach:
                 print(f"{C.GREY}{reach}{C.RESET}", file=out)
+            if qr_key:
+                print(f"{C.GREY}press {QR_KEY} for a QR code of that URL"
+                      f"{C.RESET}", file=out)
             if args.web_readonly:
                 print(f"{C.GREY}The browser is watching only; keys are not "
                       f"taken from it.{C.RESET}", file=out)
@@ -1042,17 +1057,63 @@ def main():
         for warning in web_warnings:
             print(warning, file=out)
 
+    # The QR key is offered only where it can be answered: it needs a web
+    # interface to point at and a keyboard to be pressed on. Whether the window
+    # is wide enough for the symbol is not asked here and deliberately so, since
+    # a window can be resized between this line and the keypress, and the key
+    # answers a narrow one with the URL by itself rather than with nothing.
+    qr_on = bool(web_url) and keys_on
+
+    if web_url:
+        def show_qr():
+            """The QR block, to the terminal and to the terminal alone.
+
+            Written straight at stderr rather than through `controls.out`,
+            which is a tee: the key is kept back from the browser, so
+            publishing the symbol would send it somewhere nobody asked for it,
+            a line at a time and dressed as replies to a key nobody pressed.
+
+            The window is measured on every press rather than once at startup,
+            because it can be resized between the two. It is measured on the
+            stream the block is going to, which is not the one
+            `shutil.get_terminal_size` would have asked about, and against the
+            scroll region rather than the whole terminal: a sticky header and
+            a status bar have taken rows off either end, and a symbol whose
+            top has scrolled out of the region is exactly as unreadable as one
+            cut off at the side.
+            """
+            columns, lines = qr_window(sys.stderr)
+            reserved = ((HEADER_ROWS if sticky.active else 0)
+                        + (STATUS_ROWS if bar.active else 0))
+            write_qr(web_url, size=(columns, lines - reserved))
+
+        # Set from the URL rather than from `qr_on`, which also asks whether
+        # the keyboard is live. The two differ only in a state no keypress can
+        # reach, and the hook being None is how the key says there is no web
+        # interface, which would be the wrong thing to say about a run that
+        # has one.
+        controls.qr = show_qr
+
     # Printed even under --json, where it goes to stderr on its own and the
     # flows have stdout to themselves. It is worth printing there too: the URL
     # is on it, and a run with the web interface up and no way to find out
     # where it is would be a poor joke.
     banner = io.StringIO()
-    write_banner(banner)
+    write_banner(banner, qr_key=qr_on)
     sys.stderr.write(banner.getvalue())
     sys.stderr.flush()
+    # The browser's copy, which differs from the terminal's in the one line
+    # above and in nothing else, so it is rendered a second time only when
+    # there is a difference to render.
+    if qr_on:
+        web_banner = io.StringIO()
+        write_banner(web_banner, qr_key=False)
+        banner_text = web_banner.getvalue()
+    else:
+        banner_text = banner.getvalue()
     bus.set_hello({
         "nettail": __version__,
-        "banner": for_web(banner.getvalue()),
+        "banner": for_web(banner_text),
         # The columns and the keys as the terminal knows them, so that the page
         # builds its table head and its buttons from what this program actually
         # does rather than from a second list written down in the page and left

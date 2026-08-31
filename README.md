@@ -457,7 +457,7 @@ one line under the startup banner says so:
 keys: the collector takes single keypresses; press ? to list them
 ```
 
-That is the whole of it. The line used to name all fifteen keys, which ran to
+That is the whole of it. The line used to name all sixteen keys, which ran to
 two hundred characters and wrapped on any ordinary terminal, and it scrolled
 away with the banner regardless, so the reader who wanted it an hour later was
 no better off for its having been thorough. `?` answers that reader instead,
@@ -481,6 +481,7 @@ keyboard has no reason to press anything, `?` included.
 | `p` | Show hardware (MAC) addresses on a line under the flow |
 | `f` | Toggle full domain names |
 | `e` | Toggle showing only flows with a public endpoint |
+| `q` | Print a QR code for the `--web` URL, with the URL under it. See [The web interface](#the-web-interface) |
 | `?` | List every key and what it does, without stopping |
 
 Every key prints one line saying what changed, so there is no guessing about
@@ -548,6 +549,7 @@ Keyboard controls
       p  show hardware addresses on a line under each flow
       f  show full domain names instead of the first label
       e  show only flows with a public endpoint, or show all
+      q  print a QR code for the web interface URL, and the URL under it
       ?  this list
     esc  close the program, printing the exit summary
 ```
@@ -624,13 +626,76 @@ Listening for NetFlow/IPFIX on 0.0.0.0:2055
 Hostname resolution: reverse DNS, mDNS, NetBIOS (sends probes to the LAN)
 v9 and IPFIX exporters resend templates periodically. Data records before the
 first template are counted as deferred.
-Web interface: http://127.0.0.1:2056/t/QoYm2ZP4rD8xN1sVbTgKcW7e/
+Web interface: http://127.0.0.1:2056/t/QoYm2ZP4rD8xN1sVbTgKcW7eL9uHjX3f/
+press q for a QR code of that URL
 keys: the collector takes single keypresses; press ? to list them
 ```
 
 Open that URL and you get the same flows, in the same colours, with the same
 keys. The terminal keeps working throughout; this is a second view of one
 collector rather than a second collector.
+
+### Getting there from a phone
+
+The URL carries a token, so it is not the sort of thing anyone wants to copy
+off a screen by hand. Press `q` and the collector draws it as a QR code, with
+the URL printed underneath in case the code is no use to you:
+
+```
+Web interface
+█████████████████████████████████████████
+█████████████████████████████████████████
+████ ▄▄▄▄▄ █▄▀▀▄▄██▄ ▀  ██ ███ ▄▄▄▄▄ ████
+████ █   █ ███▄█ ██▄ ▀██  ▀▀▄█ █   █ ████
+████ █▄▄▄█ ██▄▀▄▀█▄  ▄ ▄█   ██ █▄▄▄█ ████
+████▄▄▄▄▄▄▄█ █ ▀▄▀▄▀ █▄▀▄█▄▀▄█▄▄▄▄▄▄▄████
+████  ▀  ▀▄▀▀ ▄▄▀ ██ ██▄▄ █ ▄▀▄█▀██▀▄████
+████▄  █▄█▄▄▄▀  ▀ █ ▄▀█▀▄█▀ ▀▀▄ ▄ ▀█▄████
+████ █▄▄ ▄▄ ▀▄█▄▄ ▀▀▄█▄▄▄▄▀▄█▄▄▄█ █▄▄████
+████▄▄▀▀ ▀▄█▀██ ▄▄█ ▄▄█ █▄ ▀█▄▄▄ ▄▀█▀████
+████ █▄█▄▀▄▀▄  ▀▀▀  █▀▀█▀███ ▀ █ ▄█  ████
+████▄▄▄▀ ▄▄▄███▄▀█▀ █▄█▄▀▄█▄▄ ▄ ▀█▀▀ ████
+████ ▀▄ ▀█▄ ▀█▄█▄▄  ▀▀▀ ▄██▀█ █▄▀▄▀▀█████
+████ █    ▄▀▄ ██▄█ ▄▀ ▀███▀▄██▄▄▀▀ ▄▄████
+████▄▄▄███▄▄ ▀ █▀▄▄█▀▀▄▄▀▄██ ▄▄▄ █▀ █████
+████ ▄▄▄▄▄ ██  █▀▀   █▄ █▄▀▄ █▄█ █▀▀▀████
+████ █   █ █ ▀█ ▄██▀█▀█▄ ▀█ ▄▄▄ ▄█▀▀▀████
+████ █▄▄▄█ █▀▄ ▀▄ ▄▄▄▄█  ▄▄▀▄█▀▄ █▀  ████
+████▄▄▄▄▄▄▄█▄▄▄▄█▄██▄███▄███▄████████████
+█████████████████████████████████████████
+█████████████████████████████████████████
+http://127.0.0.1:2056/t/QoYm2ZP4rD8xN1sVbTgKcW7eL9uHjX3f/
+```
+
+The symbol is drawn out of half block characters, two rows of it to each row
+of text, because a QR code is square and a terminal cell is not. Dark modules
+come out as the window's background, which is right on a dark terminal and
+inverted on a light one; scanners have coped with an inverted symbol for
+years, and there is no way for a program to ask what colour the window is.
+
+The symbol is 41 columns wide and 21 rows tall. With the heading over it and
+the URL under it that is 24 rows in a window wide enough to print the URL on
+one line, and more in a narrower one, where the URL wraps and is counted at
+the rows it really takes. What it is measured against is the space between the
+pinned header and the status bar rather than the whole window, and the window
+it measures is the one this block is going to, which is stderr and need not be
+the one the flows are going to. Anything smaller, or a stderr that is not a
+window at all, gets the URL by itself: a code that has wrapped or scrolled is
+not a degraded code, it is an unreadable one, and the URL underneath was the
+point of it anyway.
+
+The key does not cross to the browser. Its answer is drawn for a terminal and
+written only there, and what it encodes is the address of the page a browser
+is already looking at.
+
+The encoder is in this repository rather than being a dependency. That is a
+trade about what a dependency costs here: this program installs two pure
+Python packages and nothing else, its suite has no dependencies at all, and
+the container image pins every byte it installs by hash. A QR code is a
+standard that was fixed in 2015 and does not move, so the code that makes one
+is written once and then left alone. It handles versions 1 to 5 at error
+correction level L, which is a URL of up to 106 bytes, and anything longer
+gets the plain URL.
 
 ### What it shows
 
@@ -659,13 +724,18 @@ that off the collector rather than tracking it locally, so a key pressed at the
 terminal or in another browser moves this one too.
 
 The buttons are built from the collector's own key table, so a key added to the
-program appears in the browser without the page being touched. Two keys are
+program appears in the browser without the page being touched. Three keys are
 treated differently.
 
 `esc` closes the program, which would end it for everybody, this terminal
 included. That is not something that should arrive as a side effect of
 mirroring a keyboard, so it does not cross at all: stop the collector where you
 started it.
+
+`q` does not cross either, for a duller reason: there would be nothing for it
+to do. It draws the URL of this page as a QR code, for a terminal, on the
+terminal, and a browser showing that page has the address in its own bar
+already.
 
 `?` has no button, for the same reason: it prints the list of keys, and the
 drawer is that list, labelled and already in front of you. The key itself still
