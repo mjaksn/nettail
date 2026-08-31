@@ -19,6 +19,10 @@
   --warn: #e5b547;
   --bad: #f08585;
   --row-hover: #16222a;
+  /* The padding on either side of a cell. Named because the column
+     widths are a character count plus this, twice, and a padding
+     changed in one place and not the other puts every column out. */
+  --cell-pad: 8px;
 }
 @media (prefers-color-scheme: light) {
   :root {
@@ -202,7 +206,14 @@ button:disabled { opacity: .45; cursor: default; }
   cursor: pointer;
 }
 main { flex: 1 1 auto; overflow: auto; }
-table { border-collapse: collapse; width: 100%; }
+/* Fixed layout, sized by the colgroup the greeting's widths build.
+   Under `table-layout: auto` a column is as wide as the widest cell
+   in it, so the browser cannot place a new row without measuring
+   every row already there, and the cost of showing one flow grows
+   with the history behind it. Fixed, a column's width is settled
+   before any row is read and an append costs the same at ten rows
+   as at ten thousand. */
+table { border-collapse: collapse; width: 100%; table-layout: fixed; }
 thead th {
   position: sticky;
   top: 0;
@@ -213,12 +224,12 @@ thead th {
   font-weight: 700;
   text-align: left;
   letter-spacing: .08em;
-  padding: 6px 8px;
+  padding: 6px var(--cell-pad);
   white-space: nowrap;
 }
 thead th.r { text-align: right; }
 tbody td {
-  padding: 1px 8px;
+  padding: 1px var(--cell-pad);
   white-space: pre;
   vertical-align: top;
   border-bottom: 1px solid transparent;
@@ -416,6 +427,7 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
 <div id="keys" hidden></div>
 <main id="scroll">
   <table>
+    <colgroup id="cols"></colgroup>
     <thead><tr id="head"></tr></thead>
     <tbody id="rows"></tbody>
   </table>
@@ -491,6 +503,7 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
 
   var rows = document.getElementById("rows");
   var head = document.getElementById("head");
+  var colgroup = document.getElementById("cols");
   var keysBar = document.getElementById("keys");
   var statusBar = document.getElementById("status");
   var stateBox = document.getElementById("state");
@@ -601,10 +614,27 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
 
   // ---- the table -------------------------------------------------------
 
+  // The head and the colgroup, both out of the widths the greeting
+  // carried. The colgroup is what gives the fixed layout above something
+  // to be fixed at: a width in characters is a width on the page, since
+  // the font is monospace, so a column ends up exactly as wide as the
+  // terminal draws it and the browser never has to read a row to find
+  // out. The endpoint columns are the exception and are left to share
+  // what remains, which is what lets a long hostname have the width of a
+  // wide window rather than the forty characters an eighty column
+  // terminal could spare it.
   function buildHead(cols) {
     columns = cols;
     head.textContent = "";
+    colgroup.textContent = "";
     cols.forEach(function (col) {
+      var sizer = document.createElement("col");
+      if (!col.wrap && col.width) {
+        sizer.style.width = "calc(" + col.width
+                          + "ch + var(--cell-pad) * 2)";
+      }
+      colgroup.appendChild(sizer);
+
       var th = document.createElement("th");
       th.textContent = col.name;
       if (col.align === ">") { th.className = "r"; }
@@ -623,15 +653,21 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
   // frame, with one call to `toTail` at the end of it.
   //
   // What that avoids is layout rather than the building. `toTail` reads
-  // `scrollHeight`, which makes the browser lay the table out there and then,
-  // and a table lays out whole: with `table-layout: auto` every column is as
-  // wide as the widest cell in it, so laying out after one append is a pass
-  // over every row the page is holding. The cost of showing one flow would
-  // otherwise grow with the history behind it, and the history is thousands of
-  // rows. A reconnect hands over a backlog of up to CLIENT_BACKLOG events in a
-  // single task, and so does letting go of pause. A task that spends itself on
-  // thousands of full-table layouts is, from the outside, a tab that has
-  // frozen.
+  // `scrollHeight`, which makes the browser lay the table out there and
+  // then, so a queue turns one such read per event into one per frame. A
+  // reconnect hands over a backlog of up to CLIENT_BACKLOG events in a
+  // single task, and so does letting go of pause, and a task that stops to
+  // measure the page thousands of times is, from the outside, a tab that
+  // has frozen.
+  //
+  // What each of those measurements costs is the colgroup's business rather
+  // than this one's. Under `table-layout: auto` a column is as wide as the
+  // widest cell in it, so laying the table out is a pass over every row
+  // there is and the cost of showing one flow grows with the history behind
+  // it. The fixed layout settles the widths before a row is read and takes
+  // that growth out. The batching is still worth having with it gone: the
+  // order rows arrive in is what it keeps, and a measurement per frame is
+  // cheaper than a measurement per event however cheap each one is.
   //
   // Everything that changes the table comes through here: flows, prose, the
   // notes the page writes itself, and the clear. That is what keeps them in

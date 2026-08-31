@@ -133,6 +133,16 @@ COLUMNS = (
     ("FLAGS", 0, "<", 2),
 )
 
+# What FLAGS is worth in a table, which is not what COLUMNS gives it.
+# COLUMNS says nothing, and rightly: on a terminal the column is last and
+# nothing is padded against it, so a width would buy trailing spaces and no
+# alignment. A table has to size every column it draws, and the browser's
+# is the one that does, so the number is asked of the string netflume
+# actually produces rather than counted off a screen. One character per
+# flag bit, a dot for each bit the exporter did not set, and the same eight
+# whatever the flags were.
+FLAGS_WIDTH = len(tcp_flags_str(0))
+
 HEADER_LINE = "".join(
     " " * gap + format(name, "%s%d" % (align, width))
     for name, width, align, gap in COLUMNS

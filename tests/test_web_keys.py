@@ -21,6 +21,7 @@ import time
 from harness import FakeTTY, check, finish, plain
 
 import nettail as main
+from nettail.display import COLUMNS, ENDPOINT_WIDTH, FLAGS_WIDTH
 from nettail.keys import (
     KEY_CHARS,
     KEYS,
@@ -353,6 +354,32 @@ check("which carries the columns", greeting["columns"][0]["name"] == "TIME")
 check("and the keys", any(k["key"] == "s" for k in greeting["keys"]))
 check("and the banner, so a late arrival still gets one",
       "Listening for NetFlow" in plain(greeting["banner"]))
+
+# -- the columns are COLUMNS, all of them and nothing else ---------------
+#
+# The page builds its head and the colgroup that lays the table out from
+# what arrives here, so a column widened or renamed in display.py has to
+# reach a browser without anybody editing web.html. Nothing held the two to
+# each other before this: the check above reads one name out of the first
+# column, which a greeting built from a list that had gone stale behind it
+# would pass just as happily.
+#
+# Compared whole rather than field by field, so that a key added here and
+# not there fails too. The page reads `width` and `wrap` and would lay the
+# table out silently wrong on either.
+check("the greeting carries every column and no others",
+      len(greeting["columns"]) == len(COLUMNS),
+      "%d != %d" % (len(greeting["columns"]), len(COLUMNS)))
+for sent, (name, width, align, _gap) in zip(greeting["columns"], COLUMNS):
+    # FLAGS is the one column COLUMNS gives no width, having nothing padded
+    # against it on a terminal, and FLAGS_WIDTH is what the table sizes it
+    # by instead. Written the same way here as in cli.py deliberately: if
+    # the fallback moves, this has to be read again rather than pass.
+    want = {"name": name, "align": align,
+            "wrap": width >= ENDPOINT_WIDTH,
+            "width": width or FLAGS_WIDTH}
+    check("the %s column arrives as display.py has it" % (name or "arrow"),
+          sent == want, "%r != %r" % (sent, want))
 
 # -- the one line the two readers are not shown alike --------------------
 #

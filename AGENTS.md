@@ -141,11 +141,16 @@ test:
   the gap in front of it. `HEADER_LINE` is built from it, so is
   `ENDPOINT_INDENT`, and so is the table head the browser draws, which arrives
   over the wire in the `hello` event rather than being written down again in
-  `web.html`. The same goes for the buttons, which come from `KEYS` by the same
-  route. **The page hardcodes nothing the terminal already names**, and that is
-  the rule to hold: a second list of columns or keys living in the HTML is a
-  second thing to go stale, and nothing in the page would fail loudly when it
-  did.
+  `web.html`. The widths travel with it and are what the page's `colgroup` is
+  built from, a character count being a width on the page because the font is
+  monospace. `FLAGS` is the one column `COLUMNS` gives no width, since a
+  terminal has nothing to pad it against, and `FLAGS_WIDTH` fills that in for
+  the table by asking netflume how long the string it produces is rather than
+  counting it off a screen. The same goes for the buttons, which come from
+  `KEYS` by the same route. **The page hardcodes nothing the terminal already
+  names**, and that is the rule to hold: a second list of columns or keys
+  living in the HTML is a second thing to go stale, and nothing in the page
+  would fail loudly when it did.
 - **`row_cells` in `display.py`** builds one flow's cells once, plain and
   painted, and both views use them. A browser must never work a cell out for
   itself. It could not do it correctly in any case, since a service name is
@@ -783,14 +788,22 @@ its event comes in, held in a `DocumentFragment`, and put on the page once per
 animation frame, with a single `toTail` at the end of it.
 
 What that removes is layout, not building. `toTail` reads `scrollHeight`, which
-makes the browser lay the table out there and then, and a table lays out whole:
-under `table-layout: auto` every column is as wide as the widest cell in it, so
-laying out after one append is a pass over every row the page is holding. A
-reconnect hands over a backlog of up to `CLIENT_BACKLOG` events inside a single
-task, and letting go of pause does the same. A task that spends itself on
-thousands of full-table layouts is, from the outside, a tab that has frozen. A
-long session seizing up looked at first like the memory the history takes, and
-the code says it is this.
+makes the browser lay the table out there and then, so the queue turns one such
+measurement per event into one per frame. A reconnect hands over a backlog of up
+to `CLIENT_BACKLOG` events inside a single task, and letting go of pause does
+the same. A task that stops to measure the page thousands of times is, from the
+outside, a tab that has frozen. A long session seizing up looked at first like
+the memory the history takes, and the code says it is this.
+
+What each measurement costs is the colgroup's business rather than the queue's,
+and the two were written a release apart. Under `table-layout: auto` a column is
+as wide as the widest cell in it, so laying the table out is a pass over every
+row there is, and the cost of showing one flow grows with the history behind it.
+`table-layout: fixed` with widths from `COLUMNS` settles every column before a
+row is read and takes that growth out. Neither replaces the other: the fixed
+layout makes a measurement cheap, the queue makes there be one measurement a
+frame, and the queue is also what keeps rows in the order they arrived in, which
+nothing about layout would.
 
 Four things about the arrangement are easy to break.
 

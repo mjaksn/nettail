@@ -31,6 +31,7 @@ from .colour import C, PlainStream, behind, colour_on, strip_colour
 from .display import (
     COLUMNS,
     ENDPOINT_WIDTH,
+    FLAGS_WIDTH,
     HEADER_LINE,
     proto_colour,
     render,
@@ -1980,7 +1981,14 @@ def main():
                      # than the window. Said here rather than worked out
                      # in the page, which would mean naming the columns
                      # over there and having two lists to keep in step.
-                     "wrap": width >= ENDPOINT_WIDTH}
+                     "wrap": width >= ENDPOINT_WIDTH,
+                     # What the page lays the column out at, so that a
+                     # width lives in one file and not in two. FLAGS is
+                     # the only column COLUMNS gives no width, because a
+                     # terminal pads nothing against it, and a table has
+                     # to size it anyway: hence the fallback rather than
+                     # a zero the page would have to interpret.
+                     "width": width or FLAGS_WIDTH}
                     for name, width, align, _gap in COLUMNS],
         "keys": [{"key": key, "doc": doc} for key, doc in web_buttons()],
         # Every key the browser may press, as the characters a keypress
