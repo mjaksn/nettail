@@ -23,7 +23,7 @@
 # patch tag stops moving once the next one ships, so it can be both specific
 # and old enough. Check the age before bumping it: this one was 23 days when
 # it was pinned.
-FROM python:3.14.6-slim@sha256:7bec7ddcddeff7975d6ba9b4be7dd6f6b2f55e7491539145e2978f7f97ce9144 AS builder
+FROM python:3.14.7-slim@sha256:656d12e70054d5fda18a045e2494c96701e9792dd1445f95b3d038df954f57e9 AS builder
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -58,7 +58,7 @@ RUN pip install --no-deps --no-build-isolation . \
     && pip uninstall --yes setuptools
 
 
-FROM python:3.14.6-slim@sha256:7bec7ddcddeff7975d6ba9b4be7dd6f6b2f55e7491539145e2978f7f97ce9144
+FROM python:3.14.7-slim@sha256:656d12e70054d5fda18a045e2494c96701e9792dd1445f95b3d038df954f57e9
 
 LABEL org.opencontainers.image.title="nettail" \
       org.opencontainers.image.description="A NetFlow v5, NetFlow v9 and IPFIX collector that prints flows to a console, with hostnames, colour, a live status bar and an optional browser view" \
