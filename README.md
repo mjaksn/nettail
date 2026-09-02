@@ -570,11 +570,11 @@ listing into the middle of the flows.
 
 `space` holds at most 2000 flows. Past that the oldest are dropped and the count
 is reported when you resume. Pausing is for reading what is on screen, not for
-recording. Decoding never stops, so the summary and the top talkers table are
+recording. Decoding never stops, so the summary and the address tables are
 unaffected by how long you pause.
 
-`c` clears the datagram, flow, template and export-gap counters, the top talkers
-table, the name resolution counters, and the runtime clock. It deliberately
+`c` clears the datagram, flow, template and export-gap counters, the address
+tables, the name resolution counters, and the runtime clock. It deliberately
 leaves the learned templates alone, along with the sequence positions each
 exporter has reached, and the sampling rates, which are facts about the
 exporter rather than statistics. Resetting the sequence positions would make
@@ -938,9 +938,17 @@ Name resolution
   unresolved         2
 
 Top external addresses by bytes
-  93.184.216.34                                          5.2M
-  140.82.121.4                                         878.9K
-  9.9.9.9                                                4.9K
+                                                        bytes           in/out
+  93.184.216.34                                          5.2M          0B/5.2M
+  140.82.121.4                                         878.9K        0B/878.9K
+  9.9.9.9                                                4.9K          0B/4.9K
+
+Top internal addresses by bytes
+                                                        bytes           in/out
+  192.168.1.13                                          20.0M         0B/20.0M
+  192.168.1.20                                          20.0M         20.0M/0B
+  192.168.1.10 (laptop)                                  5.2M          0B/5.2M
+  192.168.1.12 (buildbox)                              878.9K        0B/878.9K
 ```
 
 **Protocols and services.** A flow is filed under whichever of its two ports has
@@ -975,6 +983,17 @@ exporter that reports only post-NAT addresses is treated the same way by all
 three. Inbound is what arrived from a public address and outbound is what left
 for one; a flow between two public addresses is counted in both directions
 rather than assigned to one.
+
+**Top addresses** come as two tables, one for each side of the network edge:
+the busiest public addresses, then the busiest private ones. Each total is
+split by direction in the `in/out` column beside it, and the words mean what
+they mean under **External traffic**: in is what entered this network and out
+is what left it, whichever end the address is on. So a public address is read by what
+came from it and what went to it, and a private one by what it received and
+what it sent, and the two halves of an internal conversation show the same
+bytes from opposite sides, as `192.168.1.13` and `192.168.1.20` do above.
+Multicast and broadcast destinations are left out of the internal table, since
+an mDNS group at the top of a list of machines is not a machine.
 
 ### Minimum link speed, and concurrent demand
 
@@ -1950,7 +1969,7 @@ another suite's result.
 | `test_sticky_with_gradient` | the pinned header and the size ramp sharing one screen |
 | `test_services` | the supplemental port names, the parser behind them, the system database keeping precedence, and the ephemeral floor pinned to where netflume actually puts it |
 | `test_readme_samples` | the transcripts this README quotes, against what the program prints today |
-| `test_endpoints`, `test_top_talkers` | one definition of a flow's ends, both directions counted |
+| `test_endpoints`, `test_top_talkers` | one definition of a flow's ends, both directions counted, and each address table split by direction |
 | `test_web_feed` | the event bus: what it publishes, what it drops when a browser falls behind, and the greeting a late arrival gets |
 | `test_web_server` | the stream against a real server: the greeting, the events, the watcher cap, and the exit summary reaching a browser that is still open |
 | `test_web_security` | everything the web interface refuses: forged tokens, forged `Host` and `Origin` headers, paths that try to reach the filesystem, and keys the collector does not answer |

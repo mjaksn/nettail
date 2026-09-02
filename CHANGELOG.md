@@ -11,6 +11,25 @@ but it is a program rather than a library, and the names inside it may move
 without that being a breaking change. `--json` output is the part meant to be
 parsed, and it is treated as public.
 
+## [0.7.0] - 2026-09-01
+
+### Added
+
+- **A "Top internal addresses by bytes" table** follows the external one in
+  the traffic summary, ranking the busiest private addresses the same way and
+  splitting each total by direction the same way. Multicast and broadcast
+  destinations are left out of it, so an mDNS group does not sit at the top
+  of a table of machines.
+
+### Changed
+
+- **"Top external addresses by bytes" splits each total by direction** in a
+  new `in/out` column beside it, and gains the header row the other tables
+  already had. In is what entered this network and out is what left it, read
+  the way the external traffic section reads them: a public address shows
+  what came from it and what went to it, and a private one what it received
+  and what it sent.
+
 ## [0.6.0] - 2026-08-31
 
 ### Fixed

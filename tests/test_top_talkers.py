@@ -1,5 +1,10 @@
-"""Top talkers must credit whichever end of a flow is public."""
+"""Top talkers must credit whichever end of a flow is public.
+
+And each address table splits its total by direction, with "in" meaning what
+entered this network and "out" what left it, whichever end the address is on.
+"""
 import io
+import re
 import socket
 import struct
 import sys
@@ -15,7 +20,7 @@ V5_REC = struct.Struct("!4s4s4sHHIIIIHHBBBBHHBBH")
 # outbound to one public host, inbound from another, and one purely internal
 FLOWS = [((192, 168, 1, 10), (93, 184, 216, 34), 5000),     # out, dst public
          ((9, 9, 9, 9), (192, 168, 1, 20), 9000),       # in, src public
-         ((192, 168, 1, 11), (192, 168, 1, 12), 100000)]    # internal, ignored
+         ((192, 168, 1, 11), (192, 168, 1, 12), 100000)]    # internal only
 
 
 def v5_packet():
@@ -77,20 +82,26 @@ def run(argv, packets):
     return out.getvalue(), err.getvalue()
 
 
-def table(err):
-    """The top-talkers rows of the summary, as {address: size string}."""
+def table(err, heading="Top external"):
+    """One address table of the summary, as {address: (bytes, in/out)}.
+
+    The header row is skipped and the table ends at the first line that is
+    not three columns wide, which is the blank line before the next heading.
+    """
     rows = {}
     seen = False
     for line in err.splitlines():
-        if "Top external" in line:
+        if heading in line:
             seen = True
             continue
-        if seen:
-            parts = line.split()
-            if len(parts) == 2:
-                rows[parts[0]] = parts[1]
-            elif parts:
-                break
+        if not seen:
+            continue
+        parts = line.split()
+        if parts == ["bytes", "in/out"]:
+            continue
+        if len(parts) != 3:
+            break
+        rows[parts[0]] = (parts[1], parts[2])
     return rows
 
 
@@ -100,23 +111,43 @@ check("the outbound public destination is listed", "93.184.216.34" in rows, str(
 check("the inbound public source is listed too", "9.9.9.9" in rows, str(rows))
 check("the internal-only flow is not listed",
       not any(a.startswith("192.168.") for a in rows), str(rows))
-check("bytes are attributed to the destination", rows.get("93.184.216.34") == "4.9K",
-      str(rows))
-check("bytes are attributed to the source", rows.get("9.9.9.9") == "8.8K",
-      str(rows))
+check("bytes are attributed to the destination",
+      rows.get("93.184.216.34") == ("4.9K", "0B/4.9K"), str(rows))
+check("bytes are attributed to the source",
+      rows.get("9.9.9.9") == ("8.8K", "8.8K/0B"), str(rows))
 check("the heading no longer says destinations only",
       "Top external addresses by bytes" in err)
+check("the table has a header naming the split",
+      re.search(r"Top external addresses by bytes\n\s+bytes\s+in/out\n", err),
+      repr(err[err.find("Top external"):][:120]))
+
+# the internal table is the same table for the other side of the edge
+rows = table(err, "Top internal")
+check("the internal table lists every private address",
+      set(rows) == {"192.168.1.10", "192.168.1.20", "192.168.1.11", "192.168.1.12"},
+      str(rows))
+check("what a private address sent is out",
+      rows.get("192.168.1.10") == ("4.9K", "0B/4.9K"), str(rows))
+check("what a private address received is in",
+      rows.get("192.168.1.20") == ("8.8K", "8.8K/0B"), str(rows))
+check("an internal-only flow credits both ends",
+      rows.get("192.168.1.11") == ("97.7K", "0B/97.7K")
+      and rows.get("192.168.1.12") == ("97.7K", "97.7K/0B"), str(rows))
+check("the internal table follows the external one",
+      err.find("Top external addresses") < err.find("Top internal addresses"))
 
 # --external-only shows both of those flows, so both must be counted
 out, err = run(["--external-only"], [v5_packet()])
 rows = table(err)
 check("both directions still counted under --external-only",
       set(rows) == {"93.184.216.34", "9.9.9.9"}, str(rows))
+check("and the internal table is still over every flow",
+      "192.168.1.12" in table(err, "Top internal"), str(table(err, "Top internal")))
 
 # IPFIX exporters that report octetDeltaCount as element 85
 out, err = run([], [ipfix_totals_packet()])
 rows = table(err)
-check("octets_total is counted, not read as zero", rows.get("8.8.4.4") == "7.6K",
-      str(rows))
+check("octets_total is counted, not read as zero",
+      rows.get("8.8.4.4") == ("7.6K", "0B/7.6K"), str(rows))
 
 finish("top talker")

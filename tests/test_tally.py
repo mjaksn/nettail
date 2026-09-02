@@ -132,6 +132,42 @@ check("the internal flow is absent from both",
       t.outbound_bytes + t.inbound_bytes == 1540, "public-to-public counts twice")
 check("top talkers still work", t.talkers["8.8.8.8"] == 1070, str(dict(t.talkers)))
 
+# --- addresses split by direction -------------------------------------------
+# "In" is what entered this network and "out" what left it, whichever end the
+# address is on, so the two tables read the way the external section does.
+check("bytes to a public address are out",
+      t.talkers_out["8.8.8.8"] == 1000, str(dict(t.talkers_out)))
+check("bytes from a public address are in",
+      t.talkers_in["9.9.9.9"] == 400, str(dict(t.talkers_in)))
+check("a public-to-public flow is in at one end and out at the other",
+      t.talkers_in["8.8.8.8"] == 70 and t.talkers_out["1.1.1.1"] == 70,
+      str((dict(t.talkers_in), dict(t.talkers_out))))
+check("the split adds up to the total",
+      all(t.talkers_in[a] + t.talkers_out[a] == n for a, n in t.talkers.items()))
+check("a private address is ranked by everything it touched",
+      t.internal["192.168.1.1"] == 51_400, str(dict(t.internal)))
+check("what a private address sent is out",
+      t.internal_out["192.168.1.1"] == 51_000, str(dict(t.internal_out)))
+check("what a private address received is in",
+      t.internal_in["192.168.1.1"] == 400 and t.internal_in["192.168.1.2"] == 50_000,
+      str(dict(t.internal_in)))
+check("a public address is not an internal one",
+      not set(t.internal) & set(t.talkers), str(dict(t.internal)))
+check("the external report carries the split",
+      t.top_external(10)[0] == ("8.8.8.8", 1070, 70, 1000), str(t.top_external(10)))
+check("and so does the internal one",
+      t.top_internal(10)[0] == ("192.168.1.1", 51_400, 400, 51_000),
+      str(t.top_internal(10)))
+check("the internal report is bounded like the rest",
+      len(t.top_internal(1)) == 1, str(t.top_internal(1)))
+t = tally_of([flow("192.168.1.1", "224.0.0.251", octets=10),
+              flow("192.168.1.1", "255.255.255.255", octets=20),
+              flow("192.168.1.1", "8.8.8.8", octets=30)])
+check("a multicast or broadcast destination is not an internal address",
+      set(t.internal) == {"192.168.1.1"}, str(dict(t.internal)))
+check("but what was sent to it still counts as sent",
+      t.internal_out["192.168.1.1"] == 60, str(dict(t.internal_out)))
+
 
 # --- the link speed floor, against a brute force sweep ----------------------
 def brute_force_peak(intervals, step=0.01):
@@ -277,6 +313,8 @@ t = tally_of([flow("192.168.1.1", "8.8.8.8", duration=1)])
 t.clear()
 check("clear() empties everything",
       t.flows == 0 and not t.proto_bytes and not t.pair_bytes and not t.talkers
+      and not t.talkers_in and not t.talkers_out and not t.internal
+      and not t.internal_in and not t.internal_out
       and t.longest == [] and t.external_bytes == 0 and t._events == []
       and t.peak_flow_bits == 0.0 and not t.second_bits,
       str(t.__dict__))

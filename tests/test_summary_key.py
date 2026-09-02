@@ -46,6 +46,14 @@ check("a run past a day keeps counting hours rather than wrapping",
 check("nothing yet is still a clock", main.human_clock(0) == "00:00:00")
 check("and a missing runtime is not", main.human_clock(None) == "-")
 check("it lists the top talkers", "9.9.9.9" in report and "1.1.1.1" in report)
+lines = report.splitlines()
+check("each external address is split by direction",
+      any(ln.split() == ["9.9.9.9", "4.9K", "0B/4.9K"] for ln in lines),
+      repr([ln for ln in lines if "9.9.9.9" in ln]))
+check("it lists the internal addresses too",
+      "Top internal addresses by bytes" in report
+      and any(ln.split() == ["192.168.1.5", "5.0K", "0B/5.0K"] for ln in lines),
+      repr([ln for ln in lines if "192.168.1.5" in ln]))
 check("it writes where it is told", sys.stdout is not out)
 
 # sampling and gaps appear when there is something to say

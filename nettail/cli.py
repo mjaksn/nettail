@@ -360,7 +360,8 @@ def write_summary(stats, tally, resolver, sequences, sampling, args,
     pairs_by_bytes = tally.top_pairs_by_bytes()
     pairs_by_packets = tally.top_pairs_by_packets()
     longest = tally.longest_flows()
-    talkers = tally.talkers.most_common(10)
+    talkers = tally.top_external(10)
+    internal = tally.top_internal(10)
 
     # One ramp for the whole report, stretched over the figures it is about to
     # print, so a colour says how a number compares with its neighbours here.
@@ -370,7 +371,8 @@ def write_summary(stats, tally, resolver, sequences, sampling, args,
              + [octets for _name, octets in service_rows]
              + [octets for _pair, octets in pairs_by_bytes]
              + [details[5] for _duration, details in longest]
-             + [octets for _ip, octets in talkers])
+             + [octets for _ip, octets, _in, _out in talkers]
+             + [octets for _ip, octets, _in, _out in internal])
     ramp = SpanScale(sizes)
 
     def address(addr, port=None):
@@ -400,12 +402,37 @@ def write_summary(stats, tally, resolver, sequences, sampling, args,
     def heading(text):
         print(f"\n{C.BOLD}{C.BLUE}{text}{C.RESET}", file=out)
 
-    def columns(name, *headings):
+    def columns(name, *headings, widths=(9, 7, 9), name_width=16):
         """A dim header row, so the numbers under it need no unit beside them."""
-        widths = (9, 7, 9)
         cells = "  ".join(f"{text:>{width}}"
                           for text, width in zip(headings, widths))
-        print(f"  {C.GREY}{name:<16}{cells}{C.RESET}", file=out)
+        print(f"  {C.GREY}{name:<{name_width}}{cells}{C.RESET}", file=out)
+
+    def in_out(inbound, outbound, width=15):
+        """Two sizes either side of a slash, each on the ramp for its own size.
+
+        Padded on the plain text before the paint goes on, since a right
+        aligned cell is aligned by what the reader sees and not by the escape
+        codes around it.
+        """
+        left, right = human_bytes(inbound), human_bytes(outbound)
+        pad = " " * (width - len(left) - 1 - len(right))
+        return (f"{pad}{ramp.paint(left, inbound)}"
+                f"{C.GREY}/{C.RESET}{ramp.paint(right, outbound)}")
+
+    def address_table(title, rows):
+        """The busiest addresses on one side of the network edge.
+
+        The total is split by direction beside it. What "in" and "out" mean,
+        and why they mean the same thing for both sides, is written once
+        where the counters are declared, in `Tally.reset`.
+        """
+        heading(title)
+        columns("", "bytes", "in/out", widths=(10, 15), name_width=49)
+        for ip, nbytes, inbound, outbound in rows:
+            print(f"  {_column(_painted(*address(ip)), 48)} "
+                  f"{ramp.paint(f'{human_bytes(nbytes):>10}', nbytes)}  "
+                  f"{in_out(inbound, outbound)}", file=out)
 
     elapsed = time.time() - started
     heading("Summary")
@@ -548,10 +575,9 @@ def write_summary(stats, tally, resolver, sequences, sampling, args,
                                    f"(cache holds {RESOLVER_CACHE_MAX})")
 
     if talkers:
-        heading("Top external addresses by bytes")
-        for ip, nbytes in talkers:
-            print(f"  {_column(_painted(*address(ip)), 48)} "
-                  f"{ramp.paint(f'{human_bytes(nbytes):>10}', nbytes)}", file=out)
+        address_table("Top external addresses by bytes", talkers)
+    if internal:
+        address_table("Top internal addresses by bytes", internal)
 
 
 def web_bind_warning(bind, port, contained=None):
