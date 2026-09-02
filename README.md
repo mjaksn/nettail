@@ -235,7 +235,7 @@ usage: nettail [-h] [--version] [--bind BIND] [--port PORT] [--external-only]
 | Option | Default | Description |
 | --- | --- | --- |
 | `--version` | | Print the version and exit |
-| `--bind ADDR` | `0.0.0.0` | Address to bind the UDP socket to |
+| `--bind BIND` | `0.0.0.0` | Address to bind the UDP socket to |
 | `--port PORT` | `2055` | UDP port to listen on |
 | `--external-only` | off | Only display flows where the source or destination is a public IP. Everything is still counted in the summary |
 | `--verbose` | off | Print every decoded field on an indented line under each flow. Also surfaces parse errors |
@@ -1939,7 +1939,7 @@ python tests/run.py tally keys    # only suites whose name contains either
 python tests/run.py -v            # print every check, not only failures
 ```
 
-1412 checks across 34 suites, in well under a minute. No test dependencies and
+1412 checks across 34 suites, in about a minute. No test dependencies and
 no test runner to learn: the suites need only netflume and lanname, the same as
 the collector.
 
