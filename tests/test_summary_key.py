@@ -238,6 +238,59 @@ check("the right hand names line up among themselves",
            if cli.PAIR_ARROW in line and "(" in line.split(cli.PAIR_ARROW)[1]})
       == 1, repr([ln for ln in named_report.splitlines() if "<->" in ln]))
 
+# --- the address table header sits over the figures it names ----------------
+# The header row was drawn at a width written down beside the one the rows
+# were measured at, and the two agreed only while nothing widened the column.
+# A name long enough to widen it carried every figure right and left "bytes"
+# and "in/out" standing short of the numbers they name. Both come off one
+# width now. Nothing else fails when they part: the figures are all still
+# right, and only a reader following a heading down to its column pays for it.
+
+
+class WideName(Names):
+    """Long enough on one row to push the column past the width it starts at."""
+
+    KNOWN = dict(Names.KNOWN,
+                 **{"192.168.1.5": "homeassistant.lounge.internal.example.lan"})
+
+
+os.environ["COLUMNS"] = "140"
+try:
+    buf = io.StringIO()
+    cli.write_summary(stats, wide, WideName(), sequences, sampling, args,
+                      time.time() - 42, out=buf)
+finally:
+    del os.environ["COLUMNS"]
+widened = plain(buf.getvalue())
+
+
+def slash_columns(text, heading):
+    """Where the in/out slash falls, over the header row and every row under it.
+
+    One column means the header is above its own figures. The slash is the
+    landmark because it is the only one in either line: an address has none
+    and neither does a name.
+    """
+    columns, seen = set(), False
+    for line in text.splitlines():
+        if line.strip() == heading:
+            seen = True
+        elif seen and not line.strip():
+            break
+        elif seen and "/" in line:
+            columns.add(line.index("/"))
+    return columns
+
+
+check("the name that widened the column is drawn whole",
+      "(homeassistant.lounge.internal.example.lan)" in widened,
+      repr([ln for ln in widened.splitlines() if "192.168.1.5" in ln][:2]))
+for heading in ("Top external addresses by bytes",
+                "Top internal addresses by bytes"):
+    found = slash_columns(widened, heading)
+    check("the header of %s sits over its figures" % heading,
+          len(found) == 1, "%s in %r" % (sorted(found), heading))
+
 # sampling and gaps appear when there is something to say
 sampling.note("10.0.0.1", 0, {"sampling_interval": 1000})
 for seq in (0, 10, 20):

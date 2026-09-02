@@ -523,11 +523,16 @@ def write_summary(stats, tally, resolver, sequences, sampling, args,
         where the counters are declared, in `Tally.reset`.
         """
         heading(title)
-        columns("", "bytes", f"{'in':>{SIZE_WIDTH}}/out", widths=(10, 0),
-                name_width=49)
         cells = with_names([(ip, None) for ip, _n, _i, _o in rows])
         width = table_width(max(len(plain) for plain, _paint in cells), 48,
                             overhead=2 + 1 + 10 + 2 + 2 * SIZE_WIDTH + 1)
+        # Measured before the header is drawn, and the header set from the
+        # same width. A name wide enough to widen the column carries every
+        # figure right with it, and a heading left at the width the column
+        # used to be drawn at would sit short of the numbers it names. One
+        # more than the column, which is the space a row puts after it.
+        columns("", "bytes", f"{'in':>{SIZE_WIDTH}}/out", widths=(10, 0),
+                name_width=width + 1)
         for (_ip, nbytes, inbound, outbound), cell in zip(rows, cells):
             print(f"  {_column(cell, width)} "
                   f"{ramp.paint(f'{human_bytes(nbytes):>10}', nbytes)}  "

@@ -1939,7 +1939,7 @@ python tests/run.py tally keys    # only suites whose name contains either
 python tests/run.py -v            # print every check, not only failures
 ```
 
-1412 checks across 34 suites, in about a minute. No test dependencies and
+1415 checks across 34 suites, in about a minute. No test dependencies and
 no test runner to learn: the suites need only netflume and lanname, the same as
 the collector.
 
