@@ -988,12 +988,17 @@ rather than assigned to one.
 the busiest public addresses, then the busiest private ones. Each total is
 split by direction in the `in/out` column beside it, and the words mean what
 they mean under **External traffic**: in is what entered this network and out
-is what left it, whichever end the address is on. So a public address is read by what
-came from it and what went to it, and a private one by what it received and
-what it sent, and the two halves of an internal conversation show the same
-bytes from opposite sides, as `192.168.1.13` and `192.168.1.20` do above.
-Multicast and broadcast destinations are left out of the internal table, since
-an mDNS group at the top of a list of machines is not a machine.
+is what left it, whichever end the address is on. So a public address is read
+by what came from it and what went to it, and a private one by what it
+received and what it sent, and the two halves of an internal conversation show
+the same bytes from opposite sides, as `192.168.1.13` and `192.168.1.20` do
+above. Multicast destinations are left out of the internal table, since an
+mDNS group at the top of a list of machines is not a machine, and so are the
+reserved ranges, which is where the limited broadcast `255.255.255.255` falls.
+A subnet broadcast such as `192.168.1.255` stays in and can rank high on a
+chatty LAN: it is private like any other address, and nothing in a flow record
+says what prefix length the network uses, so no collector can tell it apart
+from a machine.
 
 ### Minimum link speed, and concurrent demand
 

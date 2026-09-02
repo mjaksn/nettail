@@ -122,7 +122,9 @@ class Tally:
         # address as somewhere on this network. Multicast and the special
         # ranges are left out: a table of machines topped by 224.0.0.251,
         # which is every mDNS query on the LAN and not a machine at all,
-        # would answer a question nobody asked.
+        # would answer a question nobody asked. A subnet broadcast address
+        # stays, since it is private like any other and nothing in a flow
+        # record says what prefix length the network uses.
         if src_kind == "private":
             self.internal[src] += octets
             self.internal_out[src] += octets
@@ -142,8 +144,8 @@ class Tally:
 
         self._prune((self.pair_bytes, self.pair_packets))
         self._prune((self.service_bytes, self.service_flows))
-        self._prune((self.talkers, self.talkers_in, self.talkers_out))
-        self._prune((self.internal, self.internal_in, self.internal_out))
+        self._prune((self.talkers,), (self.talkers_in, self.talkers_out))
+        self._prune((self.internal,), (self.internal_in, self.internal_out))
 
         duration = flow_duration(rec, hdr)
         if not duration:
@@ -208,13 +210,23 @@ class Tally:
         self._events.append((start, rate))
         self._events.append((end, -rate))
 
-    def _prune(self, counters):
+    def _prune(self, counters, companions=()):
         """Drop the small fry from counters that would otherwise grow forever.
 
         Only the busiest handful is ever reported, so holding every
         conversation a long run has ever seen costs memory to no purpose. What
         survives is whatever ranks highest in any of the counters given, since
         a pair can be large by bytes or by packets and either earns its keep.
+
+        A companion ranks nothing of its own and only decorates a row the
+        counters chose, as the two direction halves beside an address total
+        do. It loses whatever they dropped and has no say in what that is,
+        which matters more than it sounds: ranking by a half would hold on to
+        addresses no table can ever show, and every pass would give back less
+        for it. Where each address is seen in one direction only, the two
+        halves between them cover the whole table, a pass reclaims a single
+        key, and the counter then sits at the cap paying for a full pass on
+        every flow that brings a new address.
         """
         primary = counters[0]
         if len(primary) <= MAX_TRACKED_KEYS:
@@ -223,7 +235,7 @@ class Tally:
         for counter in counters:
             keep.update(key for key, _ in counter.most_common(MAX_TRACKED_KEYS // 2))
         dropped = [key for key in primary if key not in keep]
-        for counter in counters:
+        for counter in (*counters, *companions):
             for key in dropped:
                 counter.pop(key, None)
         self.pruned += len(dropped)

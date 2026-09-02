@@ -17,9 +17,10 @@ parsed, and it is treated as public.
 
 - **A "Top internal addresses by bytes" table** follows the external one in
   the traffic summary, ranking the busiest private addresses the same way and
-  splitting each total by direction the same way. Multicast and broadcast
-  destinations are left out of it, so an mDNS group does not sit at the top
-  of a table of machines.
+  splitting each total by direction the same way. Multicast destinations and
+  the reserved ranges are left out of it, so an mDNS group does not sit at
+  the top of a table of machines. A subnet broadcast address stays in, since
+  nothing in a flow record says what prefix length the network uses.
 
 ### Changed
 
@@ -440,6 +441,7 @@ console: the part that decides what a flow should look like on a terminal.
   reminder line under the startup banner can be a pointer rather than a
   two-hundred-character list that wrapped and then scrolled away.
 
+[0.7.0]: https://github.com/mjaksn/nettail/releases/tag/v0.7.0
 [0.6.0]: https://github.com/mjaksn/nettail/releases/tag/v0.6.0
 [0.5.1]: https://github.com/mjaksn/nettail/releases/tag/v0.5.1
 [0.5.0]: https://github.com/mjaksn/nettail/releases/tag/v0.5.0

@@ -163,10 +163,17 @@ check("the internal report is bounded like the rest",
 t = tally_of([flow("192.168.1.1", "224.0.0.251", octets=10),
               flow("192.168.1.1", "255.255.255.255", octets=20),
               flow("192.168.1.1", "8.8.8.8", octets=30)])
-check("a multicast or broadcast destination is not an internal address",
+check("a multicast or reserved destination is not an internal address",
       set(t.internal) == {"192.168.1.1"}, str(dict(t.internal)))
 check("but what was sent to it still counts as sent",
       t.internal_out["192.168.1.1"] == 60, str(dict(t.internal_out)))
+# A subnet broadcast is private like any other address and no flow record says
+# what prefix length the network uses, so it is ranked as a machine. The README
+# says as much rather than promising an exclusion that cannot be made.
+t = tally_of([flow("192.168.1.1", "192.168.1.255", octets=40)])
+check("a subnet broadcast address is one, since nothing says it is not",
+      dict(t.internal) == {"192.168.1.1": 40, "192.168.1.255": 40}
+      and t.internal_in["192.168.1.255"] == 40, str(dict(t.internal)))
 
 
 # --- the link speed floor, against a brute force sweep ----------------------
@@ -283,6 +290,23 @@ check("its companion is pruned in step", set(t.pair_bytes) == set(t.pair_packets
 check("what was dropped is counted", t.pruned > 0, str(t.pruned))
 check("the talkers table is bounded too",
       len(t.talkers) <= main.MAX_TRACKED_KEYS, str(len(t.talkers)))
+
+# A direction half ranks no table of its own, so it must not decide what a
+# prune keeps. Every address below is seen in one direction only, which is
+# where letting the halves decide reclaims a single key per pass and leaves
+# the table pinned at the cap, paying for a full pass on every new address.
+t = main.Tally()
+for i in range(main.MAX_TRACKED_KEYS + 500):
+    addr = "8.%d.%d.%d" % (i // 65536, (i // 256) % 256, i % 256)
+    if i % 2:
+        t.add(flow(addr, "192.168.1.1", octets=1 + i, packets=1 + i), HDR)
+    else:
+        t.add(flow("192.168.1.1", addr, octets=1 + i, packets=1 + i), HDR)
+check("a prune still gives back half the table when the halves disagree",
+      len(t.talkers) <= main.MAX_TRACKED_KEYS // 2 + 500, str(len(t.talkers)))
+check("and the halves lose exactly what the total lost",
+      set(t.talkers) == set(t.talkers_in) | set(t.talkers_out),
+      "%d vs %d and %d" % (len(t.talkers), len(t.talkers_in), len(t.talkers_out)))
 
 # The busiest survive a prune, which is the whole point.
 t = main.Tally()
