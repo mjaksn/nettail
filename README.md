@@ -689,7 +689,7 @@ written only there, and what it encodes is the address of the page a browser
 is already looking at.
 
 The encoder is in this repository rather than being a dependency. That is a
-trade about what a dependency costs here: this program installs two pure
+trade about what a dependency costs here: this program installs three pure
 Python packages and nothing else, its suite has no dependencies at all, and
 the container image pins every byte it installs by hash. A QR code is a
 standard that was fixed in 2015 and does not move, so the code that makes one
