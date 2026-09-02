@@ -99,6 +99,7 @@ USER nettail
 # startup instead of the warning it prints for a routable bind on a host.
 #
 # CMD rather than baking it into ENTRYPOINT, so that `docker run ... nettail
-# --json` or an interactive `-it` run with no arguments can replace the lot.
+# --json` replaces the lot. A run that supplies no arguments of its own gets
+# this instead, whatever docker flags come before the image name.
 ENTRYPOINT ["nettail"]
 CMD ["--web", "--web-bind", "0.0.0.0"]

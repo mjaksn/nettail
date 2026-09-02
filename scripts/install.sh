@@ -19,8 +19,9 @@ set -euo pipefail
 #
 # They come from the environment when it offers them so that the whole script
 # can be run somewhere harmless, which is what `tests/test_installer.py` does:
-# it points these at a temporary directory, puts fakes for useradd, systemctl,
-# docker and python3 on the PATH, and then reads what was actually written.
+# it points these at a temporary directory, puts fakes for id, useradd,
+# systemctl, docker, chown and python3 on the PATH, and then reads what was
+# actually written.
 # Testing the file that comes out beats testing an intermediate, because the
 # unit's ExecStart is the command line the machine really runs, and that is
 # the thing that drifted from what nettail accepts and cost a release.
@@ -246,8 +247,9 @@ cat > "$ENV_FILE" <<ENV
 # Written by scripts/install.sh.
 #
 # The token is the whole of the web interface's authentication, so this file is
-# 0640 and owned by the service. Re-running the installer keeps it, which is
-# what makes a bookmarked URL survive an upgrade.
+# 0640, owned by root, and under systemd group-owned by the service user that
+# has to read it. Re-running the installer keeps it, which is what makes a
+# bookmarked URL survive an upgrade.
 NETTAIL_WEB_TOKEN=$WEB_TOKEN
 ENV
 chmod 0640 "$ENV_FILE"
