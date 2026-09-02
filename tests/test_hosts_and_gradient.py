@@ -250,13 +250,15 @@ check("packet figures are not painted with the size ramp",
       packet_rows and all("[38;5;" not in ln for ln in packet_rows),
       repr(packet_rows[:1]))
 
+# A name opens three spaces past the widest address in its column, so the
+# gap in front of it is the column's to decide and these match any width of it.
 check("pair rows carry hostnames",
-      "192.168.1.10 (laptop) <-> 93.184.216.34" in bare,
+      re.search(r"192\.168\.1\.10 +\(laptop\) <-> 93\.184\.216\.34", bare),
       repr([ln for ln in bare.splitlines() if "93.184" in ln]))
 check("packet pair rows carry them too",
       len([ln for ln in bare.splitlines() if "(laptop)" in ln]) >= 2, repr(bare))
 check("longest flow rows carry them",
-      "192.168.1.10:51000 (laptop)" in bare,
+      re.search(r"192\.168\.1\.10:51000 +\(laptop\)", bare),
       repr([ln for ln in bare.splitlines() if "51000" in ln]))
 check("services carry their port number",
       "443/https" in bare and "53/domain" in bare,

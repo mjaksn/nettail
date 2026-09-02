@@ -911,19 +911,19 @@ Services
   53/domain            9.6K        2
 
 Busiest 5 pairs by volume
-  192.168.1.13 <-> 192.168.1.20                                  20.0M
-  192.168.1.10 (laptop) <-> 93.184.216.34                         5.2M
-  140.82.121.4 <-> 192.168.1.12 (buildbox)                      878.9K
+  192.168.1.13            <-> 192.168.1.20                       20.0M
+  192.168.1.10   (laptop) <-> 93.184.216.34                       5.2M
+  140.82.121.4            <-> 192.168.1.12   (buildbox)         878.9K
 
 Busiest 5 pairs by packets
-  140.82.121.4 <-> 192.168.1.12 (buildbox)                       17.0k
-  192.168.1.10 (laptop) <-> 93.184.216.34                         4.1k
-  192.168.1.13 <-> 192.168.1.20                                    400
+  140.82.121.4            <-> 192.168.1.12   (buildbox)          17.0k
+  192.168.1.10   (laptop) <-> 93.184.216.34                       4.1k
+  192.168.1.13            <-> 192.168.1.20                         400
 
 Longest 5 flows
-    1h00m  TCP    192.168.1.12:51004 (buildbox) -> 140.82.121.4:22            878.9K
-     8.0s  TCP    192.168.1.13:51005 -> 192.168.1.20:445                       20.0M
-     3.0s  TCP    192.168.1.10:51000 (laptop) -> 93.184.216.34:443              5.1M
+    1h00m  TCP    192.168.1.12:51004   (buildbox) -> 140.82.121.4:22          878.9K
+     8.0s  TCP    192.168.1.13:51005              -> 192.168.1.20:445          20.0M
+     3.0s  TCP    192.168.1.10:51000   (laptop)   -> 93.184.216.34:443          5.1M
 
 External traffic
   total              6.1M
@@ -947,8 +947,8 @@ Top internal addresses by bytes
                                                         bytes       in/out
   192.168.1.13                                          20.0M       0B/20.0M
   192.168.1.20                                          20.0M    20.0M/0B
-  192.168.1.10 (laptop)                                  5.2M       0B/5.2M
-  192.168.1.12 (buildbox)                              878.9K       0B/878.9K
+  192.168.1.10   (laptop)                                5.2M       0B/5.2M
+  192.168.1.12   (buildbox)                            878.9K       0B/878.9K
 ```
 
 **Protocols and services.** A flow is filed under whichever of its two ports has
@@ -960,8 +960,13 @@ searching a capture. Two ephemeral ports have no name between them, so those
 read `51002/tcp`, and a flow with no ports at all is filed under its protocol.
 
 **Pairs.** Every table that names an address shows its hostname beside it where
-one is known, so `192.168.1.10 (laptop) <-> 93.184.216.34`. A row too long for
-its column is trimmed with `...` rather than allowed to wrap.
+one is known, so `192.168.1.10   (laptop) <-> 93.184.216.34`. Within a column
+every name opens three spaces past the widest named address in it, so the
+brackets line up down the table rather than trailing each address by one, and
+the first address of every row is drawn at one width for the whole table, so
+the arrows fall in a column too rather than wherever the address in front of
+them happened to stop. A first half wider than the table can spare is trimmed with `...`, and
+so is a row too long for its column, rather than either being allowed to wrap.
 
 Direction is collapsed: a conversation is one row whichever end
 opened it. Both tables are over every flow, internal ones included, which is

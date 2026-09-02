@@ -56,6 +56,121 @@ check("it lists the internal addresses too",
       repr([ln for ln in lines if "192.168.1.5" in ln]))
 check("it writes where it is told", sys.stdout is not out)
 
+# --- the arrows share a column ----------------------------------------------
+# Every table that puts two endpoints on a row pads the first half to one
+# width, so the arrows fall in a column rather than wherever the address in
+# front of them happened to stop. Nothing else would fail if that came back:
+# the rows would still be right, and only a reader would pay for it.
+NOW = 1700000000.0
+WIDE_HDR = {"exporter": "10.0.0.1", "unix_secs": int(NOW)}
+wide = main.Tally()
+for src, dst, octets in (("10.0.0.1", "9.9.9.9", 5000),
+                         ("192.168.1.5", "1.1.1.1", 4000),
+                         ("172.16.30.100", "203.0.113.9", 3000)):
+    wide.add({"src_addr": src, "dst_addr": dst, "proto": 6, "octets": octets,
+              "packets": 10, "src_port": 51000, "dst_port": 443,
+              "flow_start_ms": int(NOW * 1000),
+              "flow_end_ms": int((NOW + 3) * 1000)}, WIDE_HDR)
+buf = io.StringIO()
+cli.write_summary(stats, wide, resolver, sequences, sampling, args,
+                  time.time() - 42, out=buf)
+wide_report = plain(buf.getvalue())
+
+
+def arrow_columns(text, heading, arrow):
+    """Where the arrow sits in each row of one table, as a set of columns."""
+    columns = set()
+    seen = False
+    for line in text.splitlines():
+        if line.strip() == heading:
+            seen = True
+        elif seen and not line.strip():
+            break
+        elif seen and arrow in line:
+            columns.add(line.index(arrow))
+    return columns
+
+
+for heading in ("Busiest 5 pairs by volume", "Busiest 5 pairs by packets"):
+    found = arrow_columns(wide_report, heading, cli.PAIR_ARROW)
+    check("every arrow under %s sits in one column" % heading,
+          len(found) == 1, "%s in %r" % (sorted(found), heading))
+found = arrow_columns(wide_report, "Longest 5 flows", cli.FLOW_ARROW)
+check("and so does every arrow among the longest flows",
+      len(found) == 1, str(sorted(found)))
+check("the fixture really had first halves of differing width to line up",
+      len({len(pair[0]) for pair, _octets in wide.top_pairs_by_bytes()}) > 1,
+      str([pair[0] for pair, _octets in wide.top_pairs_by_bytes()]))
+
+# --- the names share a column too -------------------------------------------
+# A name opens three spaces past the widest named address in its column, so
+# the brackets line up down a table rather than trailing each address by one.
+# An address with no name does not count: nothing on its row needs clearing.
+
+
+class Names:
+    """A resolver that knows two addresses of different widths, and no more."""
+
+    # Short names, so that the longest-flow rows, which carry a port on each
+    # end, still fit their column once the names are set in: a row wider than
+    # the table has its first half trimmed, and the check below is about
+    # where a name opens and not about what the trim does.
+    # 172.16.30.100 is the widest address on the left and has no name, so
+    # it is the one the measure has to look past.
+    KNOWN = {"10.0.0.1": "a", "192.168.1.5": "b",
+             "9.9.9.9": "q", "203.0.113.9": "d"}
+    stats = Counter({"resolved": 4, "via_dns": 4, "via_mdns": 0,
+                     "via_netbios": 0, "missed": 2, "dropped": 0,
+                     "evicted": 0})
+
+    def lookup(self, addr):
+        return self.KNOWN.get(addr)
+
+
+buf = io.StringIO()
+cli.write_summary(stats, wide, Names(), sequences, sampling, args,
+                  time.time() - 42, out=buf)
+named_report = plain(buf.getvalue())
+
+
+def bracket_columns(text, heading, arrow=None):
+    """Where the first name opens in each row of one table, as a set."""
+    columns = set()
+    seen = False
+    for line in text.splitlines():
+        if line.strip() == heading:
+            seen = True
+        elif seen and not line.strip():
+            break
+        elif seen and "(" in line:
+            # Past the arrow it is the other column's name, aligned on its own.
+            head = line.split(arrow)[0] if arrow else line
+            if "(" in head:
+                columns.add(head.index("("))
+    return columns
+
+
+for heading, arrow, widest in (("Busiest 5 pairs by volume", cli.PAIR_ARROW,
+                                "192.168.1.5"),
+                               ("Longest 5 flows", cli.FLOW_ARROW,
+                                "192.168.1.5:51000"),
+                               ("Top internal addresses by bytes", None,
+                                "192.168.1.5")):
+    found = bracket_columns(named_report, heading, arrow)
+    check("every name under %s opens in one column" % heading,
+          len(found) == 1, "%s in %r" % (sorted(found), heading))
+    check("and three spaces past the widest named address there",
+          any(widest + "   (" in line for line in named_report.splitlines()),
+          repr([ln for ln in named_report.splitlines() if widest in ln][:2]))
+check("a wider address with no name does not push the names out",
+      "10.0.0.1      (a)" in named_report and "172.16.30.100   (" not in named_report,
+      repr([ln for ln in named_report.splitlines() if "10.0.0.1" in ln][:2]))
+check("the right hand names line up among themselves",
+      len({line.split(cli.PAIR_ARROW)[1].index("(")
+           for line in named_report.splitlines()
+           if cli.PAIR_ARROW in line and "(" in line.split(cli.PAIR_ARROW)[1]})
+      == 1, repr([ln for ln in named_report.splitlines() if "<->" in ln]))
+
 # sampling and gaps appear when there is something to say
 sampling.note("10.0.0.1", 0, {"sampling_interval": 1000})
 for seq in (0, 10, 20):

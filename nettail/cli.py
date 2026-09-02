@@ -269,12 +269,56 @@ def _address_colour(addr):
     return C.GREY
 
 
-def _column(cell, width):
-    """Pad a cell to width, or trim it saying so rather than let a row wrap."""
+PAIR_ARROW = " <-> "     # between the two ends of one conversation
+FLOW_ARROW = " -> "      # from a flow's source towards its destination
+
+
+def _fitted(cell, width):
+    """A cell padded to width, or trimmed to it saying so, text and paint both.
+
+    Both come back because whatever goes next to the cell has to measure what
+    a reader sees, and neither the escape codes nor the padding are that.
+    """
     plain_text, painted = cell
     if len(plain_text) > width:
-        return f"{C.CYAN}{plain_text[:width - 3]}...{C.RESET}"
-    return painted + " " * (width - len(plain_text))
+        plain_text = plain_text[:width - 3] + "..."
+        return plain_text, f"{C.CYAN}{plain_text}{C.RESET}"
+    pad = " " * (width - len(plain_text))
+    return plain_text + pad, painted + pad
+
+
+def _column(cell, width):
+    """Pad a cell to width, or trim it saying so rather than let a row wrap."""
+    return _fitted(cell, width)[1]
+
+
+def _arrow_column(halves, arrow, width):
+    """How wide the first half of an endpoint pair is drawn, for a whole table.
+
+    Left aligned, an arrow stops wherever the address in front of it happens
+    to stop, and the eye hunts for the break in every row. One width for the
+    first half of every row puts the arrows in a column instead. Where the
+    widest row fits as it is, that width is the widest first half and nothing
+    is trimmed for it. Where it does not, the first half gets what is left
+    once the widest second half has its room, and never less than half the
+    line: past that the trimming has moved from one side to the other rather
+    than stopped.
+    """
+    room = width - len(arrow[0])
+    widest = max(len(plain) for (plain, _paint), _right in halves)
+    facing = max(len(plain) for _left, (plain, _paint) in halves)
+    if widest + facing <= room:
+        return widest
+    return min(widest, max(room - facing, room // 2))
+
+
+def _endpoints(left, arrow, right, column):
+    """Two ends of a conversation, the arrow between them starting at column."""
+    text, colour = arrow
+    left_plain, left_painted = _fitted(left, column)
+    right_plain, right_painted = right
+    return (f"{left_plain}{text}{right_plain}",
+            f"{left_painted}{colour}{text}{C.RESET}{right_painted}")
 
 
 def report_events(events, args, out=None):
@@ -375,21 +419,46 @@ def write_summary(stats, tally, resolver, sequences, sampling, args,
              + [octets for _ip, octets, _in, _out in internal])
     ramp = SpanScale(sizes)
 
-    def address(addr, port=None):
+    def address(addr, port, name_at):
         """One endpoint: the address, its port, and the name it answers to.
 
         Three things worth telling apart at a glance, so they get three
         colours rather than one run of text. The address itself is coloured by
         what kind it is, the same distinction the flow display draws: cyan for
         somewhere out on the internet, blue for somewhere on this network.
+
+        `name_at` is the column the name's bracket opens in, which
+        `with_names` works out for a whole column of addresses at once, and
+        it is the only caller: where a name goes is never one row's to say.
         """
         pieces = [(str(addr) if addr else "-", _address_colour(addr))]
         if port:
             pieces.append((f":{port}", C.GREY))
         host = resolver.lookup(addr) if addr else None
         if host:
-            pieces += [(" (", C.GREY), (host, C.GREEN), (")", C.GREY)]
+            gap = name_at - sum(len(text) for text, _colour in pieces)
+            pieces += [(" " * gap + "(", C.GREY), (host, C.GREEN), (")", C.GREY)]
         return pieces
+
+    def with_names(column):
+        """One column of endpoints, their names starting in one place.
+
+        Every name opens three spaces past the widest address in the column
+        that has one. Addresses on one network are twelve to fifteen
+        characters wide, so a name set one space in from its own address sits
+        a different distance in on every row, and the eye has to find each
+        one afresh. An address with no name is left out of the measure: there
+        is no bracket on its row for the others to clear, and a wide stranger
+        with no name would otherwise push every name in the column out past
+        it for nothing. `column` is the (addr, port) of every row, and what
+        comes back is a painted cell per row in the same order.
+        """
+        widest = max((len(str(addr) if addr else "-")
+                      + (len(f":{port}") if port else 0)
+                      for addr, port in column
+                      if addr and resolver.lookup(addr)), default=0)
+        return [_painted(*address(addr, port, name_at=widest + 3))
+                for addr, port in column]
 
     def row(label, value, width=18):
         print(f"  {C.GREY}{label:<{width}}{C.RESET} {C.CYAN}{value}{C.RESET}",
@@ -434,8 +503,9 @@ def write_summary(stats, tally, resolver, sequences, sampling, args,
         heading(title)
         columns("", "bytes", f"{'in':>{SIZE_WIDTH}}/out", widths=(10, 0),
                 name_width=49)
-        for ip, nbytes, inbound, outbound in rows:
-            print(f"  {_column(_painted(*address(ip)), 48)} "
+        cells = with_names([(ip, None) for ip, _n, _i, _o in rows])
+        for (_ip, nbytes, inbound, outbound), cell in zip(rows, cells):
+            print(f"  {_column(cell, 48)} "
                   f"{ramp.paint(f'{human_bytes(nbytes):>10}', nbytes)}  "
                   f"{in_out(inbound, outbound)}", file=out)
 
@@ -479,26 +549,39 @@ def write_summary(stats, tally, resolver, sequences, sampling, args,
                   f"{C.CYAN}{human_count(tally.service_flows[name]):>7}{C.RESET}",
                   file=out)
 
+    def pair_halves(pairs):
+        """Both ends of every row, built once so they can be measured once."""
+        return list(zip(with_names([(pair[0], None) for pair, _figure in pairs]),
+                        with_names([(pair[1], None) for pair, _figure in pairs])))
+
     if pairs_by_bytes:
+        arrow = (PAIR_ARROW, C.MAGENTA)
+
         heading(f"Busiest {tally.top} pairs by volume")
-        for pair, octets in pairs_by_bytes:
-            cell = _painted(*address(pair[0]), (" <-> ", C.MAGENTA),
-                            *address(pair[1]))
+        halves = pair_halves(pairs_by_bytes)
+        column = _arrow_column(halves, arrow, 58)
+        for (left, right), (_pair, octets) in zip(halves, pairs_by_bytes):
+            cell = _endpoints(left, arrow, right, column)
             print(f"  {_column(cell, 58)} "
                   f"{ramp.paint(f'{human_bytes(octets):>9}', octets)}", file=out)
 
         heading(f"Busiest {tally.top} pairs by packets")
-        for pair, packets in pairs_by_packets:
-            cell = _painted(*address(pair[0]), (" <-> ", C.MAGENTA),
-                            *address(pair[1]))
+        halves = pair_halves(pairs_by_packets)
+        column = _arrow_column(halves, arrow, 58)
+        for (left, right), (_pair, packets) in zip(halves, pairs_by_packets):
+            cell = _endpoints(left, arrow, right, column)
             print(f"  {_column(cell, 58)} "
                   f"{C.CYAN}{human_count(packets):>9}{C.RESET}", file=out)
 
     if longest:
+        arrow = (FLOW_ARROW, C.MAGENTA)
         heading(f"Longest {tally.top} flows")
-        for duration, (src, sport, dst, dport, proto_name, octets) in longest:
-            cell = _painted(*address(src, sport), (" -> ", C.MAGENTA),
-                            *address(dst, dport))
+        halves = list(zip(with_names([(d[0], d[1]) for _duration, d in longest]),
+                          with_names([(d[2], d[3]) for _duration, d in longest])))
+        column = _arrow_column(halves, arrow, 56)
+        for (left, right), (duration, details) in zip(halves, longest):
+            proto_name, octets = details[4], details[5]
+            cell = _endpoints(left, arrow, right, column)
             print(f"  {C.CYAN}{human_duration(duration):>7}{C.RESET}  "
                   f"{proto_colour(proto_name)}{proto_name:<6}{C.RESET} "
                   f"{_column(cell, 56)} "
