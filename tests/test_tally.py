@@ -176,6 +176,74 @@ check("a subnet broadcast address is one, since nothing says it is not",
       and t.internal_in["192.168.1.255"] == 40, str(dict(t.internal)))
 
 
+# --- protocols and services split by direction -------------------------------
+# The same words as above, but a protocol has no side of its own to be read
+# from, so its halves are only what crossed the edge. A flow that stayed
+# inside this network crossed nothing and is in neither of them, which is what
+# makes the total less the two halves the traffic that never left. The two
+# rows asserted on by key below use ephemeral ports at both ends, so the key
+# is the lower port and this machine's services database is not consulted.
+t = tally_of([
+    flow("192.168.1.10", "93.184.216.34", octets=5000, sport=51000, dport=443),
+    flow("9.9.9.9", "192.168.1.10", octets=400, proto=17, sport=53, dport=51001),
+    flow("192.168.1.13", "192.168.1.20", octets=70_000, sport=51005, dport=51006),
+    flow("140.82.121.4", "8.8.8.8", octets=900, sport=51007, dport=51008),
+])
+check("bytes to a public address are out for a protocol too",
+      t.proto_out["TCP"] == 5900, str(dict(t.proto_out)))
+check("and bytes from one are in",
+      t.proto_in["TCP"] == 900 and t.proto_in["UDP"] == 400,
+      str((dict(t.proto_in), dict(t.proto_out))))
+check("a flow that never left this network is in neither half",
+      t.service_bytes["51005/tcp"] == 70_000
+      and t.service_in["51005/tcp"] == 0 and t.service_out["51005/tcp"] == 0,
+      str(dict(t.service_bytes)))
+# So the total less the two halves is what stayed inside, with one correction:
+# a flow public at both ends is in both halves and comes off twice. Here that
+# is the 900 byte one, and the arithmetic is pinned exactly rather than
+# roughly, because "roughly" is how a wrong reading of it would survive.
+check("the total less both halves is the traffic that stayed inside",
+      t.proto_bytes["TCP"] - t.proto_in["TCP"] - t.proto_out["TCP"]
+      == 70_000 - 900,
+      str((t.proto_bytes["TCP"], t.proto_in["TCP"], t.proto_out["TCP"])))
+inside = tally_of([
+    flow("192.168.1.10", "93.184.216.34", octets=5000, sport=51000, dport=443),
+    flow("192.168.1.13", "192.168.1.20", octets=70_000, sport=51005, dport=51006),
+])
+check("and it comes out exact where nothing is public at both ends",
+      inside.proto_bytes["TCP"] - inside.proto_in["TCP"]
+      - inside.proto_out["TCP"] == 70_000,
+      str((dict(inside.proto_bytes), dict(inside.proto_in),
+           dict(inside.proto_out))))
+check("a public-to-public flow is counted in both halves of one row",
+      t.service_in["51007/tcp"] == 900 and t.service_out["51007/tcp"] == 900,
+      str((dict(t.service_in), dict(t.service_out))))
+check("a service is split the same way as a protocol",
+      t.service_out["443/https"] == 5000 and t.service_in["53/domain"] == 400,
+      str((dict(t.service_in), dict(t.service_out))))
+# Every flow is filed under exactly one protocol and one service, so these are
+# the same bytes counted a different way and the sums are equal rather than
+# close. This is what ties the new column to the External traffic section the
+# README points a reader at, and it is the check that would fail if a flow
+# were ever counted into a half without the edge test agreeing.
+check("what arrived is the same total however it is grouped",
+      sum(t.proto_in.values()) == t.inbound_bytes
+      and sum(t.service_in.values()) == t.inbound_bytes,
+      "%d, %d, %d" % (sum(t.proto_in.values()), sum(t.service_in.values()),
+                      t.inbound_bytes))
+check("and so is what left",
+      sum(t.proto_out.values()) == t.outbound_bytes
+      and sum(t.service_out.values()) == t.outbound_bytes,
+      "%d, %d, %d" % (sum(t.proto_out.values()), sum(t.service_out.values()),
+                      t.outbound_bytes))
+check("the protocol report carries the split",
+      t.top_protocols(10)[0] == ("TCP", 75_900, 900, 5900), str(t.top_protocols(10)))
+check("and the service report too",
+      ("51007/tcp", 900, 900, 900) in t.top_services(10), str(t.top_services(10)))
+check("both reports are bounded like the rest",
+      len(t.top_protocols(1)) == 1 and len(t.top_services(1)) == 1)
+
+
 # --- the link speed floor, against a brute force sweep ----------------------
 def brute_force_peak(intervals, step=0.01):
     """Sample the timeline and take the busiest instant."""

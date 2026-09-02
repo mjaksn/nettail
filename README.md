@@ -899,16 +899,16 @@ Summary
   option records     2
 
 Protocols
-                      bytes    flows    packets
-  TCP                 26.1M        4      21.5k
-  UDP                  9.6K        2         82
+                      bytes    flows    packets       in/out
+  TCP                 26.1M        4      21.5k       0B/6.0M
+  UDP                  9.6K        2         82       0B/9.6K
 
 Services
-                      bytes    flows
-  445/microsoft-ds    20.0M        1
-  443/https            5.2M        2
-  22/ssh             878.9K        1
-  53/domain            9.6K        2
+                      bytes    flows       in/out
+  445/microsoft-ds    20.0M        1       0B/0B
+  443/https            5.2M        2       0B/5.2M
+  22/ssh             878.9K        1       0B/878.9K
+  53/domain            9.6K        2       0B/9.6K
 
 Busiest 5 pairs by volume
   192.168.1.13            <-> 192.168.1.20                       20.0M
@@ -958,6 +958,19 @@ ordinary case. The number is always shown even when the name is known, as in
 fact, and the number is what you reach for when writing a firewall rule or
 searching a capture. Two ephemeral ports have no name between them, so those
 read `51002/tcp`, and a flow with no ports at all is filed under its protocol.
+
+Both tables carry the same `in/out` column the address tables do, and the words
+mean what they mean everywhere else here: in is what entered this network and
+out is what left it. A protocol has no side of the edge to be read from, though,
+so its two halves are only what crossed: a flow that stayed inside this network
+crossed nothing and is in neither of them. That is why `445/microsoft-ds` above
+reads `0B/0B` beside a total of 20.0M, which is the useful thing about the
+column rather than a gap in it. Twenty megabytes of SMB that never left the
+building looks exactly like twenty megabytes that did, until this column, and
+subtracting the two halves from the total is how much stayed inside. Exactly
+so in the sample above, and in most reports: the one thing that spoils the
+arithmetic is a flow between two public addresses, which touched the edge
+coming and going, is counted in both halves, and so comes off twice.
 
 **Pairs.** Every table that names an address shows its hostname beside it where
 one is known, so `192.168.1.10   (laptop) <-> 93.184.216.34`. Within a column
@@ -1939,7 +1952,7 @@ python tests/run.py tally keys    # only suites whose name contains either
 python tests/run.py -v            # print every check, not only failures
 ```
 
-1415 checks across 34 suites, in about a minute. No test dependencies and
+1427 checks across 34 suites, in about a minute. No test dependencies and
 no test runner to learn: the suites need only netflume and lanname, the same as
 the collector.
 
@@ -1972,7 +1985,7 @@ another suite's result.
 
 | Suite | What it holds |
 | --- | --- |
-| `test_tally` | breakdowns, busiest pairs, longest flows, and the link speed floor against a brute-force sweep |
+| `test_tally` | breakdowns, the direction split behind them, busiest pairs, longest flows, and the link speed floor against a brute-force sweep |
 | `test_sequence_gaps` | learning how each exporter counts, and telling loss from reordering and restarts |
 | `test_options_records` | options data kept out of the flow display, sampling rates read from every form exporters use |
 | `test_keys`, `test_keys_end_to_end` | every keyboard control, and scripted keys driven through the real receive loop |

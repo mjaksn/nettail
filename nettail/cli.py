@@ -421,8 +421,8 @@ def write_summary(stats, tally, resolver, sequences, sampling, args,
 
     # Gathered before anything is printed, because the colour ramp below is
     # ranged over these rows and has to see the same figures the reader will.
-    protocol_rows = tally.proto_bytes.most_common(8)
-    service_rows = tally.service_bytes.most_common(8)
+    protocol_rows = tally.top_protocols(8)
+    service_rows = tally.top_services(8)
     pairs_by_bytes = tally.top_pairs_by_bytes()
     pairs_by_packets = tally.top_pairs_by_packets()
     longest = tally.longest_flows()
@@ -433,8 +433,8 @@ def write_summary(stats, tally, resolver, sequences, sampling, args,
     # print, so a colour says how a number compares with its neighbours here.
     sizes = ([stats["bytes_rx"], tally.external_bytes, tally.inbound_bytes,
               tally.outbound_bytes]
-             + [octets for _name, octets in protocol_rows]
-             + [octets for _name, octets in service_rows]
+             + [octets for _name, octets, _in, _out in protocol_rows]
+             + [octets for _name, octets, _in, _out in service_rows]
              + [octets for _pair, octets in pairs_by_bytes]
              + [details[5] for _duration, details in longest]
              + [octets for _ip, octets, _in, _out in talkers]
@@ -556,18 +556,20 @@ def write_summary(stats, tally, resolver, sequences, sampling, args,
 
     if tally.proto_bytes:
         heading("Protocols")
-        columns("", "bytes", "flows", "packets")
-        for name, octets in protocol_rows:
+        columns("", "bytes", "flows", "packets",
+                f"{'in':>{SIZE_WIDTH}}/out", widths=(9, 7, 9, 0))
+        for name, octets, inbound, outbound in protocol_rows:
             print(f"  {proto_colour(name)}{name:<16}{C.RESET}"
                   f"{ramp.paint(f'{human_bytes(octets):>9}', octets)}  "
                   f"{C.CYAN}{human_count(tally.proto_flows[name]):>7}{C.RESET}  "
-                  f"{C.CYAN}{human_count(tally.proto_packets[name]):>9}{C.RESET}",
-                  file=out)
+                  f"{C.CYAN}{human_count(tally.proto_packets[name]):>9}{C.RESET}  "
+                  f"{in_out(inbound, outbound)}", file=out)
 
     if tally.service_bytes:
         heading("Services")
-        columns("", "bytes", "flows")
-        for name, octets in service_rows:
+        columns("", "bytes", "flows", f"{'in':>{SIZE_WIDTH}}/out",
+                widths=(9, 7, 0))
+        for name, octets, inbound, outbound in service_rows:
             # "443/https" is a number and a convention; colour says which half
             # is which, and which half to trust.
             port, slash, named = name.partition("/")
@@ -575,8 +577,8 @@ def write_summary(stats, tally, resolver, sequences, sampling, args,
                     if slash else _painted((name, C.GREEN)))
             print(f"  {_column(cell, 16)}"
                   f"{ramp.paint(f'{human_bytes(octets):>9}', octets)}  "
-                  f"{C.CYAN}{human_count(tally.service_flows[name]):>7}{C.RESET}",
-                  file=out)
+                  f"{C.CYAN}{human_count(tally.service_flows[name]):>7}{C.RESET}  "
+                  f"{in_out(inbound, outbound)}", file=out)
 
     def pair_halves(pairs):
         """Both ends of every row, built once so they can be measured once."""
