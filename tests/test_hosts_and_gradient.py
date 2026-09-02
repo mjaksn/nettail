@@ -1,6 +1,7 @@
 """Host observation, the l key, the report gradient, and named report rows."""
 import argparse
 import io
+import os
 import re
 import socket
 import sys
@@ -271,18 +272,24 @@ check("and carries no escapes at all",
       "\033[" not in report_text(tally, r, colour=False))
 r.shutdown()
 
-# a very long label is trimmed rather than wrapped
-long_r = resolver_with(("192.168.1.10", "a-very-long-hostname-for-one-machine"))
+# a label too long for the window is trimmed rather than wrapped. The window
+# is named outright, because the column grows to fit a name wherever there is
+# room and a terminal wide enough would otherwise show this one whole.
+LONG_NAME = "a-very-long-hostname-for-one-machine-" * 4
+long_r = resolver_with(("192.168.1.10", LONG_NAME))
 long_r.mode = "dns"
-long_r._cache["192.168.1.10"] = ("a-very-long-hostname-for-one-machine",
-                                 time.monotonic() + 999)
+long_r._cache["192.168.1.10"] = (LONG_NAME, time.monotonic() + 999)
 wide = main.Tally()
 wide.add(flow("192.168.1.10", "93.184.216.34", 1000, sport=51000, dport=443,
               duration=5), HDR)
-rows = [ln for ln in plain(report_text(wide, long_r)).splitlines()
-        if "192.168.1.10" in ln]
-check("no report row runs away with a long name",
-      all(len(ln) < 100 for ln in rows), str([len(ln) for ln in rows]))
+os.environ["COLUMNS"] = "100"
+try:
+    rows = [ln for ln in plain(report_text(wide, long_r)).splitlines()
+            if "192.168.1.10" in ln]
+finally:
+    del os.environ["COLUMNS"]
+check("no report row runs past the window with a long name",
+      all(len(ln) <= 100 for ln in rows), str([len(ln) for ln in rows]))
 check("a trimmed label says it was trimmed",
       any("..." in ln for ln in rows), repr(rows))
 long_r.shutdown()

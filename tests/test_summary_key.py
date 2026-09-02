@@ -1,6 +1,7 @@
 """The s key prints the traffic summary without stopping the collector."""
 import argparse
 import io
+import os
 import socket
 import struct
 import sys
@@ -165,6 +166,46 @@ for heading, arrow, widest in (("Busiest 5 pairs by volume", cli.PAIR_ARROW,
 check("a wider address with no name does not push the names out",
       "10.0.0.1      (a)" in named_report and "172.16.30.100   (" not in named_report,
       repr([ln for ln in named_report.splitlines() if "10.0.0.1" in ln][:2]))
+# --- a column widens to show a name whole ------------------------------------
+# Drawn at its old width, a longest-flow row with a name on each end had its
+# first half trimmed. The column now takes what the rows need when the window
+# has it, and only a window without the room trims.
+
+
+class LongNames(Names):
+    KNOWN = {"10.0.0.1": "homeassistant", "172.16.30.100": "homeassistant",
+             "9.9.9.9": "quad9-resolver", "203.0.113.9": "documentation"}
+
+
+def report_at(columns):
+    os.environ["COLUMNS"] = str(columns)
+    try:
+        buf = io.StringIO()
+        cli.write_summary(stats, wide, LongNames(), sequences, sampling, args,
+                          time.time() - 42, out=buf)
+    finally:
+        del os.environ["COLUMNS"]
+    return plain(buf.getvalue())
+
+
+roomy = report_at(140)
+check("with room, every name is shown whole",
+      "..." not in roomy and "(homeassistant) -> 203.0.113.9:443" in roomy,
+      repr([ln for ln in roomy.splitlines() if "..." in ln or "-> 203" in ln]))
+check("and no row runs past the window",
+      all(len(ln) <= 140 for ln in roomy.splitlines()),
+      str(max(len(ln) for ln in roomy.splitlines())))
+# Ninety columns is room for the pair rows whole and not for the longest-flow
+# rows, which carry a port on each end; narrower than a column's old width
+# there is no trimming to do, since a column never draws narrower than that.
+cramped = report_at(90)
+check("without it, the row is trimmed rather than wrapped",
+      any("..." in ln for ln in cramped.splitlines() if cli.FLOW_ARROW in ln)
+      and all(len(ln) <= 90 for ln in cramped.splitlines()),
+      str(max(len(ln) for ln in cramped.splitlines())))
+check("and only where the room ran out",
+      not any("..." in ln for ln in cramped.splitlines() if cli.PAIR_ARROW in ln),
+      repr([ln for ln in cramped.splitlines() if "<->" in ln][:2]))
 check("the right hand names line up among themselves",
       len({line.split(cli.PAIR_ARROW)[1].index("(")
            for line in named_report.splitlines()

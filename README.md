@@ -965,8 +965,12 @@ every name opens three spaces past the widest named address in it, so the
 brackets line up down the table rather than trailing each address by one, and
 the first address of every row is drawn at one width for the whole table, so
 the arrows fall in a column too rather than wherever the address in front of
-them happened to stop. A first half wider than the table can spare is trimmed with `...`, and
-so is a row too long for its column, rather than either being allowed to wrap.
+them happened to stop. Each address column is drawn as wide as its rows need,
+and no narrower than the width shown here, up to what the terminal has room
+for: a name is shown whole wherever it fits, and only a row that would wrap is
+trimmed with `...` instead. Without a terminal to measure, in a file or in the
+browser's copy from a detached run, a row may run to 120 columns before that
+happens.
 
 Direction is collapsed: a conversation is one row whichever end
 opened it. Both tables are over every flow, internal ones included, which is

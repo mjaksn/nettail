@@ -24,6 +24,15 @@ parsed, and it is treated as public.
 
 ### Changed
 
+- **The summary's address tables line up, and widen when they need to.** The
+  two halves of the `in/out` column meet at one slash down the table, the
+  arrows in the pair and longest-flow tables fall in one column, and every
+  hostname opens three spaces past the widest named address in its column
+  rather than one space past its own. An address column is now drawn as wide
+  as its rows need, and no narrower than before, up to what the terminal has
+  room for, so a name is shown whole wherever it fits and trimmed with `...`
+  only where the row would otherwise wrap. Without a terminal to measure, a
+  row may run to 120 columns before that happens.
 - **"Top external addresses by bytes" splits each total by direction** in a
   new `in/out` column beside it, and gains the header row the other tables
   already had. In is what entered this network and out is what left it, read

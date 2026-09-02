@@ -271,6 +271,7 @@ def _address_colour(addr):
 
 PAIR_ARROW = " <-> "     # between the two ends of one conversation
 FLOW_ARROW = " -> "      # from a flow's source towards its destination
+SUMMARY_WIDTH = 120      # how long a summary row may run with no window to ask
 
 
 def _fitted(cell, width):
@@ -397,6 +398,26 @@ def write_summary(stats, tally, resolver, sequences, sampling, args,
     """
     out = out if out is not None else sys.stderr
 
+    # An address column is drawn as wide as its rows need and no narrower
+    # than it always was, so that a name is shown whole wherever there is
+    # room for it, and trimmed only where there is not. The room is the
+    # window the report is going to: `out` when that is a terminal, and
+    # stderr when `out` is the buffer `tee` renders into for the browser's
+    # copy, since the same characters reach stderr from there. With neither,
+    # a file or a pipe, nothing wraps and SUMMARY_WIDTH is the row that is
+    # long enough.
+    row_width = (qr_window(out)[0] or qr_window(sys.stderr)[0]
+                 or SUMMARY_WIDTH)
+
+    def table_width(needed, default, overhead):
+        """How wide an address column is drawn, for one table.
+
+        `needed` is what the widest row asks for, `default` the width the
+        column was always drawn at, and `overhead` what else is on the row
+        beside it: the margin, the figures, and the gaps between.
+        """
+        return max(default, min(needed, row_width - overhead))
+
     # Gathered before anything is printed, because the colour ramp below is
     # ranged over these rows and has to see the same figures the reader will.
     protocol_rows = tally.proto_bytes.most_common(8)
@@ -504,8 +525,10 @@ def write_summary(stats, tally, resolver, sequences, sampling, args,
         columns("", "bytes", f"{'in':>{SIZE_WIDTH}}/out", widths=(10, 0),
                 name_width=49)
         cells = with_names([(ip, None) for ip, _n, _i, _o in rows])
+        width = table_width(max(len(plain) for plain, _paint in cells), 48,
+                            overhead=2 + 1 + 10 + 2 + 2 * SIZE_WIDTH + 1)
         for (_ip, nbytes, inbound, outbound), cell in zip(rows, cells):
-            print(f"  {_column(cell, 48)} "
+            print(f"  {_column(cell, width)} "
                   f"{ramp.paint(f'{human_bytes(nbytes):>10}', nbytes)}  "
                   f"{in_out(inbound, outbound)}", file=out)
 
@@ -554,23 +577,31 @@ def write_summary(stats, tally, resolver, sequences, sampling, args,
         return list(zip(with_names([(pair[0], None) for pair, _figure in pairs]),
                         with_names([(pair[1], None) for pair, _figure in pairs])))
 
+    def halves_width(halves, arrow, default, overhead):
+        """The endpoint column of a two-ended table, sized to its rows."""
+        needed = max(len(left) + len(arrow[0]) + len(right)
+                     for (left, _lp), (right, _rp) in halves)
+        return table_width(needed, default, overhead)
+
     if pairs_by_bytes:
         arrow = (PAIR_ARROW, C.MAGENTA)
 
         heading(f"Busiest {tally.top} pairs by volume")
         halves = pair_halves(pairs_by_bytes)
-        column = _arrow_column(halves, arrow, 58)
+        width = halves_width(halves, arrow, 58, overhead=2 + 1 + 9)
+        column = _arrow_column(halves, arrow, width)
         for (left, right), (_pair, octets) in zip(halves, pairs_by_bytes):
             cell = _endpoints(left, arrow, right, column)
-            print(f"  {_column(cell, 58)} "
+            print(f"  {_column(cell, width)} "
                   f"{ramp.paint(f'{human_bytes(octets):>9}', octets)}", file=out)
 
         heading(f"Busiest {tally.top} pairs by packets")
         halves = pair_halves(pairs_by_packets)
-        column = _arrow_column(halves, arrow, 58)
+        width = halves_width(halves, arrow, 58, overhead=2 + 1 + 9)
+        column = _arrow_column(halves, arrow, width)
         for (left, right), (_pair, packets) in zip(halves, pairs_by_packets):
             cell = _endpoints(left, arrow, right, column)
-            print(f"  {_column(cell, 58)} "
+            print(f"  {_column(cell, width)} "
                   f"{C.CYAN}{human_count(packets):>9}{C.RESET}", file=out)
 
     if longest:
@@ -578,13 +609,14 @@ def write_summary(stats, tally, resolver, sequences, sampling, args,
         heading(f"Longest {tally.top} flows")
         halves = list(zip(with_names([(d[0], d[1]) for _duration, d in longest]),
                           with_names([(d[2], d[3]) for _duration, d in longest])))
-        column = _arrow_column(halves, arrow, 56)
+        width = halves_width(halves, arrow, 56, overhead=2 + 7 + 2 + 6 + 1 + 1 + 9)
+        column = _arrow_column(halves, arrow, width)
         for (left, right), (duration, details) in zip(halves, longest):
             proto_name, octets = details[4], details[5]
             cell = _endpoints(left, arrow, right, column)
             print(f"  {C.CYAN}{human_duration(duration):>7}{C.RESET}  "
                   f"{proto_colour(proto_name)}{proto_name:<6}{C.RESET} "
-                  f"{_column(cell, 56)} "
+                  f"{_column(cell, width)} "
                   f"{ramp.paint(f'{human_bytes(octets):>9}', octets)}", file=out)
 
     if tally.external_flows:
