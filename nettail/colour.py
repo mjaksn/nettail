@@ -110,12 +110,12 @@ class PlainStream:
         """Everything else a stream has, from the one underneath.
 
         This stands where `sys.stdout` and `sys.stderr` stood, so anything
-        reaching past the four methods above, for `encoding`, `buffer`,
-        `writelines` or `reconfigure`, should find what it would have found
-        there. Without this the UTF-8 reconfigure that runs before the
-        wrapping is installed would quietly not run at all on a second pass
-        through `main` in one process, and a Windows console page would take
-        the display down on its first arrow.
+        reaching past the five methods above, for `encoding`, `buffer` or
+        `reconfigure`, should find what it would have found there. Without this
+        the UTF-8 reconfigure that runs before the wrapping is installed would
+        quietly not run at all on a second pass through `main` in one process,
+        and a Windows console page would take the display down on its first
+        arrow.
 
         Only reached for names this class does not define, so `write` and the
         rest above still win. `stream` is refused explicitly: it is set in

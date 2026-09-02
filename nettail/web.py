@@ -95,8 +95,8 @@ POLL = 1.0
 # to serve anybody.
 KEY_QUEUE_MAX = 64
 
-# How long a request may spend reading a body. A control message is a few dozen
-# bytes; anything slower than this is not a browser being slow.
+# How large a request body may be. A control message is a few dozen bytes;
+# anything bigger than this is not a browser pressing a key.
 BODY_MAX = 4096
 
 # How long a connection may take to say what it wants before it is dropped.
@@ -114,9 +114,10 @@ BODY_MAX = 4096
 REQUEST_TIMEOUT = 10.0
 
 # How much room the endpoint columns get when the cells are bound for a
-# browser. The terminal's forty is what fits beside everything else on an
-# eighty column window; a page has no such constraint, so a long name reaches
-# it whole rather than trimmed to an ellipsis somebody cannot expand.
+# browser. The terminal's forty is what it needs to hold an address, a port,
+# a service name and a hostname beside each other; a page has no such
+# constraint, so a long name reaches it whole rather than trimmed to an
+# ellipsis somebody cannot expand.
 WEB_ENDPOINT_WIDTH = 96
 
 PAGE_FILE = "web.html"

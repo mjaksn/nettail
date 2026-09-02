@@ -222,9 +222,9 @@ def _place(matrix, function, size, words):
     skipped whole: the vertical timing pattern lives there and the pairing
     resumes on its far side rather than straddling it.
 
-    A symbol has a few more module positions than the message has bits, three,
-    four or seven of them depending on the version, and those are left as they
-    were found, which is light.
+    A symbol has a few more module positions than the message has bits, seven of
+    them in versions 2 to 5 and none at all in version 1, and those are left as
+    they were found, which is light.
     """
     bits = iter([(word >> b) & 1 for word in words for b in range(7, -1, -1)])
     upward = True

@@ -116,8 +116,9 @@ def flow_record(rec, hdr, resolver):
 
 # Whether the browser is to be shown colour. Settled once by main() and read
 # by the publish paths below, rather than threaded through a dozen callers
-# that have no other interest in it. It stays True for a run with no web
-# interface, where nothing reads it.
+# that have no other interest in it. A run with no web interface settles it
+# False, and the one thing that then asks, the banner kept for a greeting no
+# browser will fetch, loses colour nobody would have seen.
 _WEB_COLOUR = True
 
 
@@ -868,7 +869,7 @@ def build_parser():
         "web interface",
         "Off unless asked for. Serves the same flows, notices and summary to a "
         "browser over plain HTTP on the loopback address, reachable only "
-        "through a one-time token printed at startup.")
+        "through a random token printed at startup.")
     web_grp.add_argument("--web", action="store_true",
                          help="serve the display to a browser as well as to "
                               "this terminal")
@@ -1144,10 +1145,11 @@ def main():
         """The ? listing, to each view with the keys that view can press.
 
         The one place the two are deliberately shown different text rather than
-        the same characters. A browser cannot press the escape key, so a
-        listing offering it would advertise something the control route then
-        refuses. Everything else it can press, this key included, which has no
-        button of its own precisely because the drawer is already the list.
+        the same characters. A browser can press neither the escape key nor the
+        QR key, so a listing offering either would advertise something the
+        control route then refuses. Everything else it can press, this key
+        included, which has no button of its own precisely because the drawer
+        is already the list.
 
         It goes straight at stderr rather than through `controls.out`, which is
         a tee: a listing written there would be published a line at a time,
