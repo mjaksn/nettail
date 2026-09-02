@@ -42,7 +42,20 @@ class Tally:
 
         self.pair_bytes = Counter()
         self.pair_packets = Counter()
+
+        # Bytes by address, one trio for each side of the network edge, with
+        # the direction counters beside the total they split. "In" is what
+        # entered this network and "out" what left it, from whichever end the
+        # address is on: bytes from a public address arrived and bytes to one
+        # departed, while a private address received what was sent to it and
+        # sent what it was the source of. That is the reading the external
+        # traffic section already uses, so the tables agree with it.
         self.talkers = Counter()
+        self.talkers_in = Counter()
+        self.talkers_out = Counter()
+        self.internal = Counter()
+        self.internal_in = Counter()
+        self.internal_out = Counter()
 
         self.longest = []            # a heap of the `top` longest lived flows
         self._tick = 0               # breaks ties without comparing addresses
@@ -94,12 +107,30 @@ class Tally:
             self.pair_bytes[pair] += octets
             self.pair_packets[pair] += packets
 
-        src_public = bool(src) and addr_kind(src) == "public"
-        dst_public = bool(dst) and addr_kind(dst) == "public"
+        src_kind = addr_kind(src) if src else "unknown"
+        dst_kind = addr_kind(dst) if dst else "unknown"
+        src_public = src_kind == "public"
+        dst_public = dst_kind == "public"
         if dst_public:
             self.talkers[dst] += octets
+            self.talkers_out[dst] += octets
         if src_public:
             self.talkers[src] += octets
+            self.talkers_in[src] += octets
+
+        # Internal means private, the same test the display uses to colour an
+        # address as somewhere on this network. Multicast and the special
+        # ranges are left out: a table of machines topped by 224.0.0.251,
+        # which is every mDNS query on the LAN and not a machine at all,
+        # would answer a question nobody asked. A subnet broadcast address
+        # stays, since it is private like any other and nothing in a flow
+        # record says what prefix length the network uses.
+        if src_kind == "private":
+            self.internal[src] += octets
+            self.internal_out[src] += octets
+        if dst_kind == "private":
+            self.internal[dst] += octets
+            self.internal_in[dst] += octets
 
         if src_public or dst_public:
             self.external_bytes += octets
@@ -113,7 +144,8 @@ class Tally:
 
         self._prune((self.pair_bytes, self.pair_packets))
         self._prune((self.service_bytes, self.service_flows))
-        self._prune((self.talkers,))
+        self._prune((self.talkers,), (self.talkers_in, self.talkers_out))
+        self._prune((self.internal,), (self.internal_in, self.internal_out))
 
         duration = flow_duration(rec, hdr)
         if not duration:
@@ -178,13 +210,23 @@ class Tally:
         self._events.append((start, rate))
         self._events.append((end, -rate))
 
-    def _prune(self, counters):
+    def _prune(self, counters, companions=()):
         """Drop the small fry from counters that would otherwise grow forever.
 
         Only the busiest handful is ever reported, so holding every
         conversation a long run has ever seen costs memory to no purpose. What
         survives is whatever ranks highest in any of the counters given, since
         a pair can be large by bytes or by packets and either earns its keep.
+
+        A companion ranks nothing of its own and only decorates a row the
+        counters chose, as the two direction halves beside an address total
+        do. It loses whatever they dropped and has no say in what that is,
+        which matters more than it sounds: ranking by a half would hold on to
+        addresses no table can ever show, and every pass would give back less
+        for it. Where each address is seen in one direction only, the two
+        halves between them cover the whole table, a pass reclaims a single
+        key, and the counter then sits at the cap paying for a full pass on
+        every flow that brings a new address.
         """
         primary = counters[0]
         if len(primary) <= MAX_TRACKED_KEYS:
@@ -193,7 +235,7 @@ class Tally:
         for counter in counters:
             keep.update(key for key, _ in counter.most_common(MAX_TRACKED_KEYS // 2))
         dropped = [key for key in primary if key not in keep]
-        for counter in counters:
+        for counter in (*counters, *companions):
             for key in dropped:
                 counter.pop(key, None)
         self.pruned += len(dropped)
@@ -210,6 +252,20 @@ class Tally:
 
     def top_pairs_by_packets(self):
         return self.pair_packets.most_common(self.top)
+
+    def top_external(self, n):
+        """The busiest public addresses, as (address, bytes, in, out)."""
+        return self._by_bytes(self.talkers, self.talkers_in, self.talkers_out, n)
+
+    def top_internal(self, n):
+        """The busiest private addresses, in the same shape."""
+        return self._by_bytes(self.internal, self.internal_in,
+                              self.internal_out, n)
+
+    @staticmethod
+    def _by_bytes(total, inbound, outbound, n):
+        return [(addr, octets, inbound[addr], outbound[addr])
+                for addr, octets in total.most_common(n)]
 
     def min_link_speed(self):
         """Bits per second the external link certainly carried at some point.

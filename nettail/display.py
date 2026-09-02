@@ -204,10 +204,11 @@ def row_cells(rec, hdr, args, resolver, scale, endpoint_width=None):
     those would be two things to drift apart. So there is one, and it is here.
 
     `endpoint_width` widens the two endpoint columns for a caller that is not
-    a terminal. Forty characters is what fits beside everything else on an
-    eighty column window, and it is why a long name arrives trimmed with an
-    ellipsis. A browser has no such limit and should not inherit the trim, so
-    it asks for more room and lays the result out itself.
+    a terminal. Forty characters is what a terminal needs to hold an address, a
+    port, a service name and a hostname beside each other, and it is why a long
+    name arrives trimmed with an ellipsis. A browser has no such limit and
+    should not inherit the trim, so it asks for more room and lays the result
+    out itself.
     """
     width = ENDPOINT_WIDTH if endpoint_width is None else endpoint_width
     proto = rec.get("proto")

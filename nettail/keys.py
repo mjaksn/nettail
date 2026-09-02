@@ -142,8 +142,8 @@ def write_keys(out=None, keys=None):
     """List every key and what it does.
 
     `keys` narrows the listing to a particular set, which is what the browser's
-    copy asks for: it cannot press the escape key, so a listing offering it
-    there would advertise something the control route then refuses.
+    copy asks for: it cannot press the escape key or the QR key, so a listing
+    offering either there would advertise something the control route refuses.
 
     What the ? key prints, and what the reminder line under the banner points
     at rather than tries to be. A line has room to name the keys or to explain
@@ -566,7 +566,7 @@ class Controls:
     def _fixed_max(self, ask):
         if ask is None:
             return None
-        typed = ask("new top of the size scale, K/M/G accepted: ")
+        typed = ask("new top of the size scale, K/M/G/T accepted: ")
         if typed is None or not typed.strip():
             return "size scale unchanged"
         try:

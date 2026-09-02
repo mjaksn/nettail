@@ -2,9 +2,9 @@
 
 Why there is a QR encoder in this repository at all, when a good one is a pip
 install away: the answer is what a dependency costs here rather than what it is
-worth anywhere else. This program installs two pure Python packages and nothing
-else, its suite has no dependencies and is not meant to grow one, and the
-container image pins every byte it installs by hash. The encoder below is
+worth anywhere else. This program installs three pure Python packages and
+nothing else, its suite has no dependencies and is not meant to grow one, and
+the container image pins every byte it installs by hash. The encoder below is
 write-once code against a standard that was fixed in 2015 and is not going to
 move. Paying for it once in lines is cheaper here than paying for it forever in
 supply chain.
@@ -222,9 +222,9 @@ def _place(matrix, function, size, words):
     skipped whole: the vertical timing pattern lives there and the pairing
     resumes on its far side rather than straddling it.
 
-    A symbol has a few more module positions than the message has bits, three,
-    four or seven of them depending on the version, and those are left as they
-    were found, which is light.
+    A symbol has a few more module positions than the message has bits, seven of
+    them in versions 2 to 5 and none at all in version 1, and those are left as
+    they were found, which is light.
     """
     bits = iter([(word >> b) & 1 for word in words for b in range(7, -1, -1)])
     upward = True

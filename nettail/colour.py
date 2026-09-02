@@ -98,9 +98,11 @@ class PlainStream:
         self.stream.flush()
 
     def isatty(self):
-        # Passed through, and it matters: whether the keyboard is live and
-        # whether the x key may clear the screen are both settled by asking
-        # stdout this, and neither has anything to do with colour.
+        # Passed through, and it matters: whether the x key may clear the
+        # screen, and whether the sticky header and the status bar may claim
+        # the window, are settled by asking stdout this, and none of them has
+        # anything to do with colour. The keyboard is not among them. It asks
+        # stdin, which is never wrapped.
         return self.stream.isatty()
 
     def fileno(self):
@@ -110,12 +112,12 @@ class PlainStream:
         """Everything else a stream has, from the one underneath.
 
         This stands where `sys.stdout` and `sys.stderr` stood, so anything
-        reaching past the four methods above, for `encoding`, `buffer`,
-        `writelines` or `reconfigure`, should find what it would have found
-        there. Without this the UTF-8 reconfigure that runs before the
-        wrapping is installed would quietly not run at all on a second pass
-        through `main` in one process, and a Windows console page would take
-        the display down on its first arrow.
+        reaching past the five methods above, for `encoding`, `buffer` or
+        `reconfigure`, should find what it would have found there. Without this
+        the UTF-8 reconfigure that runs before the wrapping is installed would
+        quietly not run at all on a second pass through `main` in one process,
+        and a Windows console page would take the display down on its first
+        arrow.
 
         Only reached for names this class does not define, so `write` and the
         rest above still win. `stream` is refused explicitly: it is set in

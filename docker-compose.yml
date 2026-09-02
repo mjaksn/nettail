@@ -4,8 +4,9 @@
 #   docker compose logs --follow        the console display, as it scrolls
 #
 # The URL with the token in it is printed at startup, so read the logs once
-# after the first start. Set NETTAIL_WEB_TOKEN below to pin it and a bookmark
-# will survive a restart.
+# after the first start. To pin it so that a bookmark survives a restart,
+# uncomment the env_file block below and put NETTAIL_WEB_TOKEN in the file
+# it names.
 
 name: nettail
 
@@ -57,19 +58,23 @@ services:
       # be reachable at all; here that would put the view on every interface.
       - --web-bind
       - 127.0.0.1
-      # Only meaningful with a routable --web-bind above, which answers to
-      # any name on its own: the names listed here become the only ones it
-      # answers to, and the printed URL carries the first.
+      # A name the view answers to. Under the loopback bind above it is added
+      # beside localhost; under a routable --web-bind, which otherwise answers
+      # to any name, the names listed here become the only ones it answers to.
+      # Either way the printed URL carries the first.
       #- --web-host
       #- z2m
-      # Pin the token so a bookmark survives a restart. Leave it out and a
-      # fresh random one is printed at every start.
-      #- --web-token
-      #- ${NETTAIL_WEB_TOKEN}
       # Serve the display but accept no keys from the browser.
       #- --web-readonly
       # Only flows that touch the internet, which is usually what is wanted.
       #- --external-only
+
+    # Pin the token so a bookmark survives a restart. Leave it out and a
+    # fresh random one is printed at every start. It goes in a file rather
+    # than on the command line so that it stays out of ps; nettail reads
+    # NETTAIL_WEB_TOKEN itself.
+    #env_file:
+    #  - ./nettail.env        # NETTAIL_WEB_TOKEN=the-token-you-want-to-keep
 
     # Nothing is mounted by default. The collector keeps no state: it holds
     # what it is showing in memory and writes nothing, so there is no volume to

@@ -116,8 +116,9 @@ def flow_record(rec, hdr, resolver):
 
 # Whether the browser is to be shown colour. Settled once by main() and read
 # by the publish paths below, rather than threaded through a dozen callers
-# that have no other interest in it. It stays True for a run with no web
-# interface, where nothing reads it.
+# that have no other interest in it. A run with no web interface settles it
+# False, and the one thing that then asks, the banner kept for a greeting no
+# browser will fetch, loses colour nobody would have seen.
 _WEB_COLOUR = True
 
 
@@ -269,12 +270,57 @@ def _address_colour(addr):
     return C.GREY
 
 
-def _column(cell, width):
-    """Pad a cell to width, or trim it saying so rather than let a row wrap."""
+PAIR_ARROW = " <-> "     # between the two ends of one conversation
+FLOW_ARROW = " -> "      # from a flow's source towards its destination
+SUMMARY_WIDTH = 120      # how long a summary row may run with no window to ask
+
+
+def _fitted(cell, width):
+    """A cell padded to width, or trimmed to it saying so, text and paint both.
+
+    Both come back because whatever goes next to the cell has to measure what
+    a reader sees, and neither the escape codes nor the padding are that.
+    """
     plain_text, painted = cell
     if len(plain_text) > width:
-        return f"{C.CYAN}{plain_text[:width - 3]}...{C.RESET}"
-    return painted + " " * (width - len(plain_text))
+        plain_text = plain_text[:width - 3] + "..."
+        return plain_text, f"{C.CYAN}{plain_text}{C.RESET}"
+    pad = " " * (width - len(plain_text))
+    return plain_text + pad, painted + pad
+
+
+def _column(cell, width):
+    """Pad a cell to width, or trim it saying so rather than let a row wrap."""
+    return _fitted(cell, width)[1]
+
+
+def _arrow_column(halves, arrow, width):
+    """How wide the first half of an endpoint pair is drawn, for a whole table.
+
+    Left aligned, an arrow stops wherever the address in front of it happens
+    to stop, and the eye hunts for the break in every row. One width for the
+    first half of every row puts the arrows in a column instead. Where the
+    widest row fits as it is, that width is the widest first half and nothing
+    is trimmed for it. Where it does not, the first half gets what is left
+    once the widest second half has its room, and never less than half the
+    line: past that the trimming has moved from one side to the other rather
+    than stopped.
+    """
+    room = width - len(arrow[0])
+    widest = max(len(plain) for (plain, _paint), _right in halves)
+    facing = max(len(plain) for _left, (plain, _paint) in halves)
+    if widest + facing <= room:
+        return widest
+    return min(widest, max(room - facing, room // 2))
+
+
+def _endpoints(left, arrow, right, column):
+    """Two ends of a conversation, the arrow between them starting at column."""
+    text, colour = arrow
+    left_plain, left_painted = _fitted(left, column)
+    right_plain, right_painted = right
+    return (f"{left_plain}{text}{right_plain}",
+            f"{left_painted}{colour}{text}{C.RESET}{right_painted}")
 
 
 def report_events(events, args, out=None):
@@ -353,6 +399,26 @@ def write_summary(stats, tally, resolver, sequences, sampling, args,
     """
     out = out if out is not None else sys.stderr
 
+    # An address column is drawn as wide as its rows need and no narrower
+    # than it always was, so that a name is shown whole wherever there is
+    # room for it, and trimmed only where there is not. The room is the
+    # window the report is going to: `out` when that is a terminal, and
+    # stderr when `out` is the buffer `tee` renders into for the browser's
+    # copy, since the same characters reach stderr from there. With neither,
+    # a file or a pipe, nothing wraps and SUMMARY_WIDTH is the row that is
+    # long enough.
+    row_width = (qr_window(out)[0] or qr_window(sys.stderr)[0]
+                 or SUMMARY_WIDTH)
+
+    def table_width(needed, default, overhead):
+        """How wide an address column is drawn, for one table.
+
+        `needed` is what the widest row asks for, `default` the width the
+        column was always drawn at, and `overhead` what else is on the row
+        beside it: the margin, the figures, and the gaps between.
+        """
+        return max(default, min(needed, row_width - overhead))
+
     # Gathered before anything is printed, because the colour ramp below is
     # ranged over these rows and has to see the same figures the reader will.
     protocol_rows = tally.proto_bytes.most_common(8)
@@ -360,7 +426,8 @@ def write_summary(stats, tally, resolver, sequences, sampling, args,
     pairs_by_bytes = tally.top_pairs_by_bytes()
     pairs_by_packets = tally.top_pairs_by_packets()
     longest = tally.longest_flows()
-    talkers = tally.talkers.most_common(10)
+    talkers = tally.top_external(10)
+    internal = tally.top_internal(10)
 
     # One ramp for the whole report, stretched over the figures it is about to
     # print, so a colour says how a number compares with its neighbours here.
@@ -370,24 +437,50 @@ def write_summary(stats, tally, resolver, sequences, sampling, args,
              + [octets for _name, octets in service_rows]
              + [octets for _pair, octets in pairs_by_bytes]
              + [details[5] for _duration, details in longest]
-             + [octets for _ip, octets in talkers])
+             + [octets for _ip, octets, _in, _out in talkers]
+             + [octets for _ip, octets, _in, _out in internal])
     ramp = SpanScale(sizes)
 
-    def address(addr, port=None):
+    def address(addr, port, name_at):
         """One endpoint: the address, its port, and the name it answers to.
 
         Three things worth telling apart at a glance, so they get three
         colours rather than one run of text. The address itself is coloured by
         what kind it is, the same distinction the flow display draws: cyan for
         somewhere out on the internet, blue for somewhere on this network.
+
+        `name_at` is the column the name's bracket opens in, which
+        `with_names` works out for a whole column of addresses at once, and
+        it is the only caller: where a name goes is never one row's to say.
         """
         pieces = [(str(addr) if addr else "-", _address_colour(addr))]
         if port:
             pieces.append((f":{port}", C.GREY))
         host = resolver.lookup(addr) if addr else None
         if host:
-            pieces += [(" (", C.GREY), (host, C.GREEN), (")", C.GREY)]
+            gap = name_at - sum(len(text) for text, _colour in pieces)
+            pieces += [(" " * gap + "(", C.GREY), (host, C.GREEN), (")", C.GREY)]
         return pieces
+
+    def with_names(column):
+        """One column of endpoints, their names starting in one place.
+
+        Every name opens three spaces past the widest address in the column
+        that has one. Addresses on one network are twelve to fifteen
+        characters wide, so a name set one space in from its own address sits
+        a different distance in on every row, and the eye has to find each
+        one afresh. An address with no name is left out of the measure: there
+        is no bracket on its row for the others to clear, and a wide stranger
+        with no name would otherwise push every name in the column out past
+        it for nothing. `column` is the (addr, port) of every row, and what
+        comes back is a painted cell per row in the same order.
+        """
+        widest = max((len(str(addr) if addr else "-")
+                      + (len(f":{port}") if port else 0)
+                      for addr, port in column
+                      if addr and resolver.lookup(addr)), default=0)
+        return [_painted(*address(addr, port, name_at=widest + 3))
+                for addr, port in column]
 
     def row(label, value, width=18):
         print(f"  {C.GREY}{label:<{width}}{C.RESET} {C.CYAN}{value}{C.RESET}",
@@ -400,12 +493,50 @@ def write_summary(stats, tally, resolver, sequences, sampling, args,
     def heading(text):
         print(f"\n{C.BOLD}{C.BLUE}{text}{C.RESET}", file=out)
 
-    def columns(name, *headings):
+    def columns(name, *headings, widths=(9, 7, 9), name_width=16):
         """A dim header row, so the numbers under it need no unit beside them."""
-        widths = (9, 7, 9)
         cells = "  ".join(f"{text:>{width}}"
                           for text, width in zip(headings, widths))
-        print(f"  {C.GREY}{name:<16}{cells}{C.RESET}", file=out)
+        print(f"  {C.GREY}{name:<{name_width}}{cells}{C.RESET}", file=out)
+
+    # The widest size human_bytes writes is seven characters, and the left
+    # half is padded to that so the slashes fall in one column down the table.
+    SIZE_WIDTH = 7
+
+    def in_out(inbound, outbound):
+        """Two sizes either side of a slash, each on the ramp for its own size.
+
+        Padded on the plain text before the paint goes on, since an aligned
+        cell is aligned by what the reader sees and not by the escape codes
+        around it. The right half is the end of the row and is not padded.
+        """
+        left, right = human_bytes(inbound), human_bytes(outbound)
+        pad = " " * (SIZE_WIDTH - len(left))
+        return (f"{pad}{ramp.paint(left, inbound)}"
+                f"{C.GREY}/{C.RESET}{ramp.paint(right, outbound)}")
+
+    def address_table(title, rows):
+        """The busiest addresses on one side of the network edge.
+
+        The total is split by direction beside it. What "in" and "out" mean,
+        and why they mean the same thing for both sides, is written once
+        where the counters are declared, in `Tally.reset`.
+        """
+        heading(title)
+        cells = with_names([(ip, None) for ip, _n, _i, _o in rows])
+        width = table_width(max(len(plain) for plain, _paint in cells), 48,
+                            overhead=2 + 1 + 10 + 2 + 2 * SIZE_WIDTH + 1)
+        # Measured before the header is drawn, and the header set from the
+        # same width. A name wide enough to widen the column carries every
+        # figure right with it, and a heading left at the width the column
+        # used to be drawn at would sit short of the numbers it names. One
+        # more than the column, which is the space a row puts after it.
+        columns("", "bytes", f"{'in':>{SIZE_WIDTH}}/out", widths=(10, 0),
+                name_width=width + 1)
+        for (_ip, nbytes, inbound, outbound), cell in zip(rows, cells):
+            print(f"  {_column(cell, width)} "
+                  f"{ramp.paint(f'{human_bytes(nbytes):>10}', nbytes)}  "
+                  f"{in_out(inbound, outbound)}", file=out)
 
     elapsed = time.time() - started
     heading("Summary")
@@ -447,29 +578,60 @@ def write_summary(stats, tally, resolver, sequences, sampling, args,
                   f"{C.CYAN}{human_count(tally.service_flows[name]):>7}{C.RESET}",
                   file=out)
 
+    def pair_halves(pairs):
+        """Both ends of every row, built once so they can be measured once."""
+        return list(zip(with_names([(pair[0], None) for pair, _figure in pairs]),
+                        with_names([(pair[1], None) for pair, _figure in pairs])))
+
+    def halves_width(halves, arrow, default, overhead):
+        """The endpoint column of a two-ended table, sized to its rows.
+
+        Measured as the widest first half plus the widest second half, and
+        not as the widest row: every first half is padded out to the widest
+        one so that the arrows line up, so a row whose name is on the right
+        is as wide as the widest name on the left plus its own. A pair of
+        flows in opposite directions, named at the local end of each, is
+        exactly that shape, and measuring row by row trimmed both.
+        """
+        needed = (max(len(left) for (left, _lp), _right in halves)
+                  + len(arrow[0])
+                  + max(len(right) for _left, (right, _rp) in halves))
+        return table_width(needed, default, overhead)
+
     if pairs_by_bytes:
+        arrow = (PAIR_ARROW, C.MAGENTA)
+
         heading(f"Busiest {tally.top} pairs by volume")
-        for pair, octets in pairs_by_bytes:
-            cell = _painted(*address(pair[0]), (" <-> ", C.MAGENTA),
-                            *address(pair[1]))
-            print(f"  {_column(cell, 58)} "
+        halves = pair_halves(pairs_by_bytes)
+        width = halves_width(halves, arrow, 58, overhead=2 + 1 + 9)
+        column = _arrow_column(halves, arrow, width)
+        for (left, right), (_pair, octets) in zip(halves, pairs_by_bytes):
+            cell = _endpoints(left, arrow, right, column)
+            print(f"  {_column(cell, width)} "
                   f"{ramp.paint(f'{human_bytes(octets):>9}', octets)}", file=out)
 
         heading(f"Busiest {tally.top} pairs by packets")
-        for pair, packets in pairs_by_packets:
-            cell = _painted(*address(pair[0]), (" <-> ", C.MAGENTA),
-                            *address(pair[1]))
-            print(f"  {_column(cell, 58)} "
+        halves = pair_halves(pairs_by_packets)
+        width = halves_width(halves, arrow, 58, overhead=2 + 1 + 9)
+        column = _arrow_column(halves, arrow, width)
+        for (left, right), (_pair, packets) in zip(halves, pairs_by_packets):
+            cell = _endpoints(left, arrow, right, column)
+            print(f"  {_column(cell, width)} "
                   f"{C.CYAN}{human_count(packets):>9}{C.RESET}", file=out)
 
     if longest:
+        arrow = (FLOW_ARROW, C.MAGENTA)
         heading(f"Longest {tally.top} flows")
-        for duration, (src, sport, dst, dport, proto_name, octets) in longest:
-            cell = _painted(*address(src, sport), (" -> ", C.MAGENTA),
-                            *address(dst, dport))
+        halves = list(zip(with_names([(d[0], d[1]) for _duration, d in longest]),
+                          with_names([(d[2], d[3]) for _duration, d in longest])))
+        width = halves_width(halves, arrow, 56, overhead=2 + 7 + 2 + 6 + 1 + 1 + 9)
+        column = _arrow_column(halves, arrow, width)
+        for (left, right), (duration, details) in zip(halves, longest):
+            proto_name, octets = details[4], details[5]
+            cell = _endpoints(left, arrow, right, column)
             print(f"  {C.CYAN}{human_duration(duration):>7}{C.RESET}  "
                   f"{proto_colour(proto_name)}{proto_name:<6}{C.RESET} "
-                  f"{_column(cell, 56)} "
+                  f"{_column(cell, width)} "
                   f"{ramp.paint(f'{human_bytes(octets):>9}', octets)}", file=out)
 
     if tally.external_flows:
@@ -548,10 +710,9 @@ def write_summary(stats, tally, resolver, sequences, sampling, args,
                                    f"(cache holds {RESOLVER_CACHE_MAX})")
 
     if talkers:
-        heading("Top external addresses by bytes")
-        for ip, nbytes in talkers:
-            print(f"  {_column(_painted(*address(ip)), 48)} "
-                  f"{ramp.paint(f'{human_bytes(nbytes):>10}', nbytes)}", file=out)
+        address_table("Top external addresses by bytes", talkers)
+    if internal:
+        address_table("Top internal addresses by bytes", internal)
 
 
 def web_bind_warning(bind, port, contained=None):
@@ -713,7 +874,7 @@ def build_parser():
         "web interface",
         "Off unless asked for. Serves the same flows, notices and summary to a "
         "browser over plain HTTP on the loopback address, reachable only "
-        "through a one-time token printed at startup.")
+        "through a random token printed at startup.")
     web_grp.add_argument("--web", action="store_true",
                          help="serve the display to a browser as well as to "
                               "this terminal")
@@ -989,10 +1150,11 @@ def main():
         """The ? listing, to each view with the keys that view can press.
 
         The one place the two are deliberately shown different text rather than
-        the same characters. A browser cannot press the escape key, so a
-        listing offering it would advertise something the control route then
-        refuses. Everything else it can press, this key included, which has no
-        button of its own precisely because the drawer is already the list.
+        the same characters. A browser can press neither the escape key nor the
+        QR key, so a listing offering either would advertise something the
+        control route then refuses. Everything else it can press, this key
+        included, which has no button of its own precisely because the drawer
+        is already the list.
 
         It goes straight at stderr rather than through `controls.out`, which is
         a tee: a listing written there would be published a line at a time,

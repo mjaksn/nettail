@@ -245,8 +245,9 @@ footer {
 footer span b { color: var(--ink); font-weight: 400; }
 footer span i { color: var(--ink-3); font-style: normal; }
 .paused { color: var(--warn); }
-/* The eight ANSI colours this program uses, plus the 256 colour ramp behind
-   the BYTES column. Named by code so the converter can map straight onto them. */
+/* The seven ANSI colours this program uses, with white beside them for a code
+   it does not write today, plus the 256 colour ramp behind the BYTES column.
+   Named by code so the converter can map straight onto them. */
 .a1 { font-weight: 700; }
 .a2 { opacity: .6; }
 .a31 { color: var(--bad); }
@@ -694,7 +695,7 @@ footer span i { color: var(--ink-3); font-style: normal; }
 
   // The one key that asks a question. The terminal answers it by typing a
   // line; here it is a prompt, and the answer travels with the key.
-  var ASKS = { m: "New top of the size scale. K, M and G are accepted:" };
+  var ASKS = { m: "New top of the size scale. K, M, G and T are accepted:" };
 
   function send(key) {
     if (key in ASKS) {

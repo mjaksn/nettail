@@ -132,6 +132,49 @@ check("the internal flow is absent from both",
       t.outbound_bytes + t.inbound_bytes == 1540, "public-to-public counts twice")
 check("top talkers still work", t.talkers["8.8.8.8"] == 1070, str(dict(t.talkers)))
 
+# --- addresses split by direction -------------------------------------------
+# "In" is what entered this network and "out" what left it, whichever end the
+# address is on, so the two tables read the way the external section does.
+check("bytes to a public address are out",
+      t.talkers_out["8.8.8.8"] == 1000, str(dict(t.talkers_out)))
+check("bytes from a public address are in",
+      t.talkers_in["9.9.9.9"] == 400, str(dict(t.talkers_in)))
+check("a public-to-public flow is in at one end and out at the other",
+      t.talkers_in["8.8.8.8"] == 70 and t.talkers_out["1.1.1.1"] == 70,
+      str((dict(t.talkers_in), dict(t.talkers_out))))
+check("the split adds up to the total",
+      all(t.talkers_in[a] + t.talkers_out[a] == n for a, n in t.talkers.items()))
+check("a private address is ranked by everything it touched",
+      t.internal["192.168.1.1"] == 51_400, str(dict(t.internal)))
+check("what a private address sent is out",
+      t.internal_out["192.168.1.1"] == 51_000, str(dict(t.internal_out)))
+check("what a private address received is in",
+      t.internal_in["192.168.1.1"] == 400 and t.internal_in["192.168.1.2"] == 50_000,
+      str(dict(t.internal_in)))
+check("a public address is not an internal one",
+      not set(t.internal) & set(t.talkers), str(dict(t.internal)))
+check("the external report carries the split",
+      t.top_external(10)[0] == ("8.8.8.8", 1070, 70, 1000), str(t.top_external(10)))
+check("and so does the internal one",
+      t.top_internal(10)[0] == ("192.168.1.1", 51_400, 400, 51_000),
+      str(t.top_internal(10)))
+check("the internal report is bounded like the rest",
+      len(t.top_internal(1)) == 1, str(t.top_internal(1)))
+t = tally_of([flow("192.168.1.1", "224.0.0.251", octets=10),
+              flow("192.168.1.1", "255.255.255.255", octets=20),
+              flow("192.168.1.1", "8.8.8.8", octets=30)])
+check("a multicast or reserved destination is not an internal address",
+      set(t.internal) == {"192.168.1.1"}, str(dict(t.internal)))
+check("but what was sent to it still counts as sent",
+      t.internal_out["192.168.1.1"] == 60, str(dict(t.internal_out)))
+# A subnet broadcast is private like any other address and no flow record says
+# what prefix length the network uses, so it is ranked as a machine. The README
+# says as much rather than promising an exclusion that cannot be made.
+t = tally_of([flow("192.168.1.1", "192.168.1.255", octets=40)])
+check("a subnet broadcast address is one, since nothing says it is not",
+      dict(t.internal) == {"192.168.1.1": 40, "192.168.1.255": 40}
+      and t.internal_in["192.168.1.255"] == 40, str(dict(t.internal)))
+
 
 # --- the link speed floor, against a brute force sweep ----------------------
 def brute_force_peak(intervals, step=0.01):
@@ -248,6 +291,23 @@ check("what was dropped is counted", t.pruned > 0, str(t.pruned))
 check("the talkers table is bounded too",
       len(t.talkers) <= main.MAX_TRACKED_KEYS, str(len(t.talkers)))
 
+# A direction half ranks no table of its own, so it must not decide what a
+# prune keeps. Every address below is seen in one direction only, which is
+# where letting the halves decide reclaims a single key per pass and leaves
+# the table pinned at the cap, paying for a full pass on every new address.
+t = main.Tally()
+for i in range(main.MAX_TRACKED_KEYS + 500):
+    addr = "8.%d.%d.%d" % (i // 65536, (i // 256) % 256, i % 256)
+    if i % 2:
+        t.add(flow(addr, "192.168.1.1", octets=1 + i, packets=1 + i), HDR)
+    else:
+        t.add(flow("192.168.1.1", addr, octets=1 + i, packets=1 + i), HDR)
+check("a prune still gives back half the table when the halves disagree",
+      len(t.talkers) <= main.MAX_TRACKED_KEYS // 2 + 500, str(len(t.talkers)))
+check("and the halves lose exactly what the total lost",
+      set(t.talkers) == set(t.talkers_in) | set(t.talkers_out),
+      "%d vs %d and %d" % (len(t.talkers), len(t.talkers_in), len(t.talkers_out)))
+
 # The busiest survive a prune, which is the whole point.
 t = main.Tally()
 t.add(flow("192.168.1.1", "8.8.8.8", octets=10 ** 9, packets=10 ** 6), HDR)
@@ -277,6 +337,8 @@ t = tally_of([flow("192.168.1.1", "8.8.8.8", duration=1)])
 t.clear()
 check("clear() empties everything",
       t.flows == 0 and not t.proto_bytes and not t.pair_bytes and not t.talkers
+      and not t.talkers_in and not t.talkers_out and not t.internal
+      and not t.internal_in and not t.internal_out
       and t.longest == [] and t.external_bytes == 0 and t._events == []
       and t.peak_flow_bits == 0.0 and not t.second_bits,
       str(t.__dict__))

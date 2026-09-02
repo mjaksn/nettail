@@ -235,7 +235,7 @@ usage: nettail [-h] [--version] [--bind BIND] [--port PORT] [--external-only]
 | Option | Default | Description |
 | --- | --- | --- |
 | `--version` | | Print the version and exit |
-| `--bind ADDR` | `0.0.0.0` | Address to bind the UDP socket to |
+| `--bind BIND` | `0.0.0.0` | Address to bind the UDP socket to |
 | `--port PORT` | `2055` | UDP port to listen on |
 | `--external-only` | off | Only display flows where the source or destination is a public IP. Everything is still counted in the summary |
 | `--verbose` | off | Print every decoded field on an indented line under each flow. Also surfaces parse errors |
@@ -450,7 +450,7 @@ its absence is not news.
 ## Keyboard controls
 
 While the collector is running it also takes single keypresses. Nothing has to
-be enabled: if stdout is a terminal and `--json` is off, the keys are live and
+be enabled: if stdin is a terminal and `--json` is off, the keys are live and
 one line under the startup banner says so:
 
 ```
@@ -485,12 +485,12 @@ keyboard has no reason to press anything, `?` included.
 | `?` | List every key and what it does, without stopping |
 
 Every key prints one line saying what changed, so there is no guessing about
-which mode you are now in. The exceptions are `s`, `l` and `?`, whose output is
-its own confirmation and needs nothing said on top of it. What `s` prints is
-exactly the report the program prints on the way out, as a snapshot of the
-moment it was asked for, and the collector keeps running. Press it as often as
-you like; press `c` first if you want the next one to cover only what happens
-from now on.
+which mode you are now in. The exceptions are `s`, `l`, `q` and `?`, whose
+output is its own confirmation and needs nothing said on top of it. What `s`
+prints is exactly the report the program prints on the way out, as a snapshot
+of the moment it was asked for, and the collector keeps running. Press it as
+often as you like; press `c` first if you want the next one to cover only what
+happens from now on.
 
 `b` gives the two bottom rows back to the flows and takes them again on the next
 press. Turning it off releases the scroll region; turning it back on scrolls up
@@ -570,11 +570,11 @@ listing into the middle of the flows.
 
 `space` holds at most 2000 flows. Past that the oldest are dropped and the count
 is reported when you resume. Pausing is for reading what is on screen, not for
-recording. Decoding never stops, so the summary and the top talkers table are
+recording. Decoding never stops, so the summary and the address tables are
 unaffected by how long you pause.
 
-`c` clears the datagram, flow, template and export-gap counters, the top talkers
-table, the name resolution counters, and the runtime clock. It deliberately
+`c` clears the datagram, flow, template and export-gap counters, the address
+tables, the name resolution counters, and the runtime clock. It deliberately
 leaves the learned templates alone, along with the sequence positions each
 exporter has reached, and the sampling rates, which are facts about the
 exporter rather than statistics. Resetting the sequence positions would make
@@ -583,8 +583,8 @@ every exporter look as though it had restarted.
 `d` honours whatever `--size-scale-window` was set to, so re-ranging is over the
 last N flows if a window was given and over the whole run otherwise. Turning it
 off returns the scale to its previous fixed top rather than to the default. `m`
-accepts the same `K`, `M`, `G` suffixes as `--size-scale-max`; escape cancels,
-and anything unparseable leaves the scale as it was.
+accepts the same `K`, `M`, `G`, `T` suffixes as `--size-scale-max`; escape
+cancels, and anything unparseable leaves the scale as it was.
 
 `h` and `f` both affect what gets looked up from that moment on. Switching to
 `dns` or `all` from `off` starts the lookup threads, which a collector started
@@ -689,7 +689,7 @@ written only there, and what it encodes is the address of the page a browser
 is already looking at.
 
 The encoder is in this repository rather than being a dependency. That is a
-trade about what a dependency costs here: this program installs two pure
+trade about what a dependency costs here: this program installs three pure
 Python packages and nothing else, its suite has no dependencies at all, and
 the container image pins every byte it installs by hash. A QR code is a
 standard that was fixed in 2015 and does not move, so the code that makes one
@@ -911,19 +911,19 @@ Services
   53/domain            9.6K        2
 
 Busiest 5 pairs by volume
-  192.168.1.13 <-> 192.168.1.20                                  20.0M
-  192.168.1.10 (laptop) <-> 93.184.216.34                         5.2M
-  140.82.121.4 <-> 192.168.1.12 (buildbox)                      878.9K
+  192.168.1.13            <-> 192.168.1.20                       20.0M
+  192.168.1.10   (laptop) <-> 93.184.216.34                       5.2M
+  140.82.121.4            <-> 192.168.1.12   (buildbox)         878.9K
 
 Busiest 5 pairs by packets
-  140.82.121.4 <-> 192.168.1.12 (buildbox)                       17.0k
-  192.168.1.10 (laptop) <-> 93.184.216.34                         4.1k
-  192.168.1.13 <-> 192.168.1.20                                    400
+  140.82.121.4            <-> 192.168.1.12   (buildbox)          17.0k
+  192.168.1.10   (laptop) <-> 93.184.216.34                       4.1k
+  192.168.1.13            <-> 192.168.1.20                         400
 
 Longest 5 flows
-    1h00m  TCP    192.168.1.12:51004 (buildbox) -> 140.82.121.4:22            878.9K
-     8.0s  TCP    192.168.1.13:51005 -> 192.168.1.20:445                       20.0M
-     3.0s  TCP    192.168.1.10:51000 (laptop) -> 93.184.216.34:443              5.1M
+    1h00m  TCP    192.168.1.12:51004   (buildbox) -> 140.82.121.4:22          878.9K
+     8.0s  TCP    192.168.1.13:51005              -> 192.168.1.20:445          20.0M
+     3.0s  TCP    192.168.1.10:51000   (laptop)   -> 93.184.216.34:443          5.1M
 
 External traffic
   total              6.1M
@@ -938,9 +938,17 @@ Name resolution
   unresolved         2
 
 Top external addresses by bytes
-  93.184.216.34                                          5.2M
-  140.82.121.4                                         878.9K
-  9.9.9.9                                                4.9K
+                                                        bytes       in/out
+  93.184.216.34                                          5.2M       0B/5.2M
+  140.82.121.4                                         878.9K       0B/878.9K
+  9.9.9.9                                                4.9K       0B/4.9K
+
+Top internal addresses by bytes
+                                                        bytes       in/out
+  192.168.1.13                                          20.0M       0B/20.0M
+  192.168.1.20                                          20.0M    20.0M/0B
+  192.168.1.10   (laptop)                                5.2M       0B/5.2M
+  192.168.1.12   (buildbox)                            878.9K       0B/878.9K
 ```
 
 **Protocols and services.** A flow is filed under whichever of its two ports has
@@ -952,8 +960,17 @@ searching a capture. Two ephemeral ports have no name between them, so those
 read `51002/tcp`, and a flow with no ports at all is filed under its protocol.
 
 **Pairs.** Every table that names an address shows its hostname beside it where
-one is known, so `192.168.1.10 (laptop) <-> 93.184.216.34`. A row too long for
-its column is trimmed with `...` rather than allowed to wrap.
+one is known, so `192.168.1.10   (laptop) <-> 93.184.216.34`. Within a column
+every name opens three spaces past the widest named address in it, so the
+brackets line up down the table rather than trailing each address by one, and
+the first address of every row is drawn at one width for the whole table, so
+the arrows fall in a column too rather than wherever the address in front of
+them happened to stop. Each address column is drawn as wide as its rows need,
+and no narrower than the width shown here, up to what the terminal has room
+for: a name is shown whole wherever it fits, and only a row that would wrap is
+trimmed with `...` instead. Without a terminal to measure, in a file or in the
+browser's copy from a detached run, a row may run to 120 columns before that
+happens.
 
 Direction is collapsed: a conversation is one row whichever end
 opened it. Both tables are over every flow, internal ones included, which is
@@ -975,6 +992,22 @@ exporter that reports only post-NAT addresses is treated the same way by all
 three. Inbound is what arrived from a public address and outbound is what left
 for one; a flow between two public addresses is counted in both directions
 rather than assigned to one.
+
+**Top addresses** come as two tables, one for each side of the network edge:
+the busiest public addresses, then the busiest private ones. Each total is
+split by direction in the `in/out` column beside it, and the words mean what
+they mean under **External traffic**: in is what entered this network and out
+is what left it, whichever end the address is on. So a public address is read
+by what came from it and what went to it, and a private one by what it
+received and what it sent, and the two halves of an internal conversation show
+the same bytes from opposite sides, as `192.168.1.13` and `192.168.1.20` do
+above. Multicast destinations are left out of the internal table, since an
+mDNS group at the top of a list of machines is not a machine, and so are the
+reserved ranges, which is where the limited broadcast `255.255.255.255` falls.
+A subnet broadcast such as `192.168.1.255` stays in and can rank high on a
+chatty LAN: it is private like any other address, and nothing in a flow record
+says what prefix length the network uses, so no collector can tell it apart
+from a machine.
 
 ### Minimum link speed, and concurrent demand
 
@@ -1710,13 +1743,16 @@ which is above 1024 and so needs no privilege to bind.
 ### The console display, if you want it
 
 ```
-docker run -it --rm --network host ghcr.io/mjaksn/nettail:latest
+docker run -it --rm --network host ghcr.io/mjaksn/nettail:latest --port 2055
 ```
 
-`-it` is not optional. Without a terminal the keyboard controls turn themselves
-off and the sticky header has nothing to stick to. For anything longer than a
-look, install it locally instead: this is a console program, and a container is
-a poor terminal.
+An argument after the image name is not optional. The image's default command
+is `--web --web-bind 0.0.0.0`, so a run with nothing after the image name
+starts the browser view on every address the host has rather than a bare
+collector. `-it` is not optional either: without a terminal the keyboard
+controls turn themselves off and the sticky header has nothing to stick to. For
+anything longer than a look, install it locally instead: this is a console
+program, and a container is a poor terminal.
 
 For a machine readable stream, `--json` needs no terminal and pipes as usual:
 
@@ -1742,9 +1778,10 @@ IPFIX variable-length fields are handled: a declared length of `0xFFFF` means th
 value is prefixed by a one-byte length, or by `0xFF` followed by a two-byte length
 for values 255 bytes or longer.
 
-Options templates are parsed and stored even though their contents are not currently
-interpreted. This is necessary so that options data sets can be walked without
-desyncing the parser mid-message.
+Options templates are parsed and stored so that options data sets can be walked
+without desyncing the parser mid-message. What is read out of the data itself is
+the sampling rate; the rest, interface names and application ID mappings among
+it, is decoded and not displayed.
 
 ### Layout
 
@@ -1781,6 +1818,7 @@ subprocesses. Everything else is the package:
 | `display.py` | laying one flow out as a line of text |
 | `sticky.py` | pinning the column header to the top of the window |
 | `statusbar.py` | the two-line bar along the foot of the window |
+| `qr.py` | the web interface URL, encoded and drawn as a QR code |
 | `feed.py` | the events a browser watches, and the bounded queues they wait in |
 | `web.py` | serving those events over HTTP, and taking keys back from a browser |
 | `web.html` | the page itself, shipped as package data |
@@ -1901,7 +1939,7 @@ python tests/run.py tally keys    # only suites whose name contains either
 python tests/run.py -v            # print every check, not only failures
 ```
 
-1192 checks across 32 suites, in well under a minute. No test dependencies and
+1415 checks across 34 suites, in about a minute. No test dependencies and
 no test runner to learn: the suites need only netflume and lanname, the same as
 the collector.
 
@@ -1949,8 +1987,9 @@ another suite's result.
 | `test_summary_key` | the traffic summary printed on demand, and the clock it is dated by |
 | `test_sticky_with_gradient` | the pinned header and the size ramp sharing one screen |
 | `test_services` | the supplemental port names, the parser behind them, the system database keeping precedence, and the ephemeral floor pinned to where netflume actually puts it |
+| `test_qr` | the encoder against pinned symbols: the format information and its BCH check, the mask that was chosen, and the padding codewords no reader ever looks at |
 | `test_readme_samples` | the transcripts this README quotes, against what the program prints today |
-| `test_endpoints`, `test_top_talkers` | one definition of a flow's ends, both directions counted |
+| `test_endpoints`, `test_top_talkers` | one definition of a flow's ends, both directions counted, and each address table split by direction |
 | `test_web_feed` | the event bus: what it publishes, what it drops when a browser falls behind, and the greeting a late arrival gets |
 | `test_web_server` | the stream against a real server: the greeting, the events, the watcher cap, and the exit summary reaching a browser that is still open |
 | `test_web_security` | everything the web interface refuses: forged tokens, forged `Host` and `Origin` headers, paths that try to reach the filesystem, and keys the collector does not answer |
@@ -1958,6 +1997,7 @@ another suite's result.
 | `test_container_warning` | which of the two web bind warnings is printed, and that guessing at a container only ever chooses prose |
 | `test_size_end_to_end` | a real collector on loopback, fed real v5 datagrams, with the scale fixed and re-ranging |
 | `test_version` | `--version`, and the package, pyproject and changelog agreeing about the number |
+| `test_installer` | the real install script run into a temporary directory against fakes, and the command line each file it writes carries put back through nettail's own parser |
 
 Nothing reaches the network except `test_size_end_to_end`, which starts a real
 collector on the loopback interface, waits to be told the socket is bound, and
@@ -2040,4 +2080,4 @@ appear on a blocklist. Worth building, in rough order of yield:
 
 ## License
 
-Do what you want with it.
+MIT. Do what you want with it, and keep the notice. See [LICENSE](LICENSE).

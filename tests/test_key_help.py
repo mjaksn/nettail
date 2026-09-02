@@ -102,8 +102,8 @@ check("and every key in the table works",
 
 # --- the reminder line points somewhere real --------------------------------
 #
-# It named all fifteen keys once and ran to two hundred characters, which wrapped
-# on any ordinary terminal and scrolled away with the banner regardless. Now it
+# It named every key once and ran to two hundred characters, which wrapped on
+# any ordinary terminal and scrolled away with the banner regardless. Now it
 # says where the listing is, so what matters is that the key it names is the key
 # that answers, and that it stays short enough to be one line.
 check("the reminder line points at the help key",

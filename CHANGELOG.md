@@ -11,6 +11,35 @@ but it is a program rather than a library, and the names inside it may move
 without that being a breaking change. `--json` output is the part meant to be
 parsed, and it is treated as public.
 
+## [0.7.0] - 2026-09-02
+
+### Added
+
+- **A "Top internal addresses by bytes" table** follows the external one in
+  the traffic summary, ranking the busiest private addresses the same way and
+  splitting each total by direction the same way. Multicast destinations and
+  the reserved ranges are left out of it, so an mDNS group does not sit at
+  the top of a table of machines. A subnet broadcast address stays in, since
+  nothing in a flow record says what prefix length the network uses.
+
+### Changed
+
+- **The summary's address tables line up, and widen when they need to.** The
+  two halves of the `in/out` column meet at one slash down the table, the
+  arrows in the pair and longest-flow tables fall in one column, and every
+  hostname opens three spaces past the widest named address in its column
+  rather than one space past its own. An address column is now drawn as wide
+  as its rows need, and no narrower than before, up to what the terminal has
+  room for, so a name is shown whole wherever it fits and trimmed with `...`
+  only where the row would otherwise wrap. Without a terminal to measure, a
+  row may run to 120 columns before that happens.
+- **"Top external addresses by bytes" splits each total by direction** in a
+  new `in/out` column beside it, and gains the header row the other tables
+  already had. In is what entered this network and out is what left it, read
+  the way the external traffic section reads them: a public address shows
+  what came from it and what went to it, and a private one what it received
+  and what it sent.
+
 ## [0.6.0] - 2026-08-31
 
 ### Fixed
@@ -38,11 +67,11 @@ parsed, and it is treated as public.
   nettail could not read it, which is why both generated files were fetching
   it back onto a command line. Neither passes it now.
 - **`scripts/install.sh` has a test suite.** It runs the real script with
-  fakes for `useradd`, `systemctl`, `docker` and `python3`, then hands the
-  command line out of the unit and the compose file to nettail's own argument
-  parser. Both bugs above were a command line the program refused, and so was
-  the `--resolve passive` default corrected in 0.5.1, so that is the shape it
-  pins.
+  fakes for `useradd`, `systemctl`, `docker`, `chown`, `id` and `python3`,
+  then hands the command line out of the unit and the compose file to
+  nettail's own argument parser. Both bugs above were a command line the
+  program refused, and so was the `--resolve passive` default corrected in
+  0.5.1, so that is the shape it pins.
 
 ### Changed
 
@@ -124,7 +153,7 @@ This one is, and only under that name.
 
   The encoder is part of this program rather than a dependency, and handles
   versions 1 to 5 at error correction level L, which is a URL of up to 106
-  bytes. Installing nettail still brings in two pure Python packages and
+  bytes. Installing nettail still brings in three pure Python packages and
   nothing else, and the suite still has no dependencies.
 
 ## [0.4.1] - 2026-08-29
@@ -421,6 +450,7 @@ console: the part that decides what a flow should look like on a terminal.
   reminder line under the startup banner can be a pointer rather than a
   two-hundred-character list that wrapped and then scrolled away.
 
+[0.7.0]: https://github.com/mjaksn/nettail/releases/tag/v0.7.0
 [0.6.0]: https://github.com/mjaksn/nettail/releases/tag/v0.6.0
 [0.5.1]: https://github.com/mjaksn/nettail/releases/tag/v0.5.1
 [0.5.0]: https://github.com/mjaksn/nettail/releases/tag/v0.5.0
