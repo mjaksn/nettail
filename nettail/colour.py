@@ -98,9 +98,11 @@ class PlainStream:
         self.stream.flush()
 
     def isatty(self):
-        # Passed through, and it matters: whether the keyboard is live and
-        # whether the x key may clear the screen are both settled by asking
-        # stdout this, and neither has anything to do with colour.
+        # Passed through, and it matters: whether the x key may clear the
+        # screen, and whether the sticky header and the status bar may claim
+        # the window, are settled by asking stdout this, and none of them has
+        # anything to do with colour. The keyboard is not among them. It asks
+        # stdin, which is never wrapped.
         return self.stream.isatty()
 
     def fileno(self):
