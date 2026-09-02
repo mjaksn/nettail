@@ -938,17 +938,17 @@ Name resolution
   unresolved         2
 
 Top external addresses by bytes
-                                                        bytes           in/out
-  93.184.216.34                                          5.2M          0B/5.2M
-  140.82.121.4                                         878.9K        0B/878.9K
-  9.9.9.9                                                4.9K          0B/4.9K
+                                                        bytes       in/out
+  93.184.216.34                                          5.2M       0B/5.2M
+  140.82.121.4                                         878.9K       0B/878.9K
+  9.9.9.9                                                4.9K       0B/4.9K
 
 Top internal addresses by bytes
-                                                        bytes           in/out
-  192.168.1.13                                          20.0M         0B/20.0M
-  192.168.1.20                                          20.0M         20.0M/0B
-  192.168.1.10 (laptop)                                  5.2M          0B/5.2M
-  192.168.1.12 (buildbox)                              878.9K        0B/878.9K
+                                                        bytes       in/out
+  192.168.1.13                                          20.0M       0B/20.0M
+  192.168.1.20                                          20.0M    20.0M/0B
+  192.168.1.10 (laptop)                                  5.2M       0B/5.2M
+  192.168.1.12 (buildbox)                              878.9K       0B/878.9K
 ```
 
 **Protocols and services.** A flow is filed under whichever of its two ports has

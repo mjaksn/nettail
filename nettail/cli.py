@@ -408,15 +408,19 @@ def write_summary(stats, tally, resolver, sequences, sampling, args,
                           for text, width in zip(headings, widths))
         print(f"  {C.GREY}{name:<{name_width}}{cells}{C.RESET}", file=out)
 
-    def in_out(inbound, outbound, width=15):
+    # The widest size human_bytes writes is seven characters, and the left
+    # half is padded to that so the slashes fall in one column down the table.
+    SIZE_WIDTH = 7
+
+    def in_out(inbound, outbound):
         """Two sizes either side of a slash, each on the ramp for its own size.
 
-        Padded on the plain text before the paint goes on, since a right
-        aligned cell is aligned by what the reader sees and not by the escape
-        codes around it.
+        Padded on the plain text before the paint goes on, since an aligned
+        cell is aligned by what the reader sees and not by the escape codes
+        around it. The right half is the end of the row and is not padded.
         """
         left, right = human_bytes(inbound), human_bytes(outbound)
-        pad = " " * (width - len(left) - 1 - len(right))
+        pad = " " * (SIZE_WIDTH - len(left))
         return (f"{pad}{ramp.paint(left, inbound)}"
                 f"{C.GREY}/{C.RESET}{ramp.paint(right, outbound)}")
 
@@ -428,7 +432,8 @@ def write_summary(stats, tally, resolver, sequences, sampling, args,
         where the counters are declared, in `Tally.reset`.
         """
         heading(title)
-        columns("", "bytes", "in/out", widths=(10, 15), name_width=49)
+        columns("", "bytes", f"{'in':>{SIZE_WIDTH}}/out", widths=(10, 0),
+                name_width=49)
         for ip, nbytes, inbound, outbound in rows:
             print(f"  {_column(_painted(*address(ip)), 48)} "
                   f"{ramp.paint(f'{human_bytes(nbytes):>10}', nbytes)}  "
