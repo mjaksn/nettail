@@ -67,11 +67,11 @@ parsed, and it is treated as public.
   nettail could not read it, which is why both generated files were fetching
   it back onto a command line. Neither passes it now.
 - **`scripts/install.sh` has a test suite.** It runs the real script with
-  fakes for `useradd`, `systemctl`, `docker` and `python3`, then hands the
-  command line out of the unit and the compose file to nettail's own argument
-  parser. Both bugs above were a command line the program refused, and so was
-  the `--resolve passive` default corrected in 0.5.1, so that is the shape it
-  pins.
+  fakes for `useradd`, `systemctl`, `docker`, `chown`, `id` and `python3`,
+  then hands the command line out of the unit and the compose file to
+  nettail's own argument parser. Both bugs above were a command line the
+  program refused, and so was the `--resolve passive` default corrected in
+  0.5.1, so that is the shape it pins.
 
 ### Changed
 
@@ -153,7 +153,7 @@ This one is, and only under that name.
 
   The encoder is part of this program rather than a dependency, and handles
   versions 1 to 5 at error correction level L, which is a URL of up to 106
-  bytes. Installing nettail still brings in two pure Python packages and
+  bytes. Installing nettail still brings in three pure Python packages and
   nothing else, and the suite still has no dependencies.
 
 ## [0.4.1] - 2026-08-29

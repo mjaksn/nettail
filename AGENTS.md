@@ -206,10 +206,10 @@ gain a button it is not allowed to press. The page asks `hello.pressable`, not
 its own buttons, when deciding whether to answer a keystroke.
 
 The `?` listing is the one place the two views are shown different text rather
-than the same characters: the browser's copy leaves out `esc`, which it cannot
-press. `controls.listing` writes to stderr directly rather than through
-`controls.out`, which is a tee and would publish the listing a line at a time
-dressed as replies to keys nobody pressed.
+than the same characters: the browser's copy leaves out `esc` and `q`, neither
+of which it can press. `controls.listing` writes to stderr directly rather than
+through `controls.out`, which is a tee and would publish the listing a line at
+a time dressed as replies to keys nobody pressed.
 
 ## There is a QR encoder in here
 
