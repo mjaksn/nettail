@@ -450,7 +450,7 @@ its absence is not news.
 ## Keyboard controls
 
 While the collector is running it also takes single keypresses. Nothing has to
-be enabled: if stdout is a terminal and `--json` is off, the keys are live and
+be enabled: if stdin is a terminal and `--json` is off, the keys are live and
 one line under the startup banner says so:
 
 ```
@@ -485,12 +485,12 @@ keyboard has no reason to press anything, `?` included.
 | `?` | List every key and what it does, without stopping |
 
 Every key prints one line saying what changed, so there is no guessing about
-which mode you are now in. The exceptions are `s`, `l` and `?`, whose output is
-its own confirmation and needs nothing said on top of it. What `s` prints is
-exactly the report the program prints on the way out, as a snapshot of the
-moment it was asked for, and the collector keeps running. Press it as often as
-you like; press `c` first if you want the next one to cover only what happens
-from now on.
+which mode you are now in. The exceptions are `s`, `l`, `q` and `?`, whose
+output is its own confirmation and needs nothing said on top of it. What `s`
+prints is exactly the report the program prints on the way out, as a snapshot
+of the moment it was asked for, and the collector keeps running. Press it as
+often as you like; press `c` first if you want the next one to cover only what
+happens from now on.
 
 `b` gives the two bottom rows back to the flows and takes them again on the next
 press. Turning it off releases the scroll region; turning it back on scrolls up
@@ -583,8 +583,8 @@ every exporter look as though it had restarted.
 `d` honours whatever `--size-scale-window` was set to, so re-ranging is over the
 last N flows if a window was given and over the whole run otherwise. Turning it
 off returns the scale to its previous fixed top rather than to the default. `m`
-accepts the same `K`, `M`, `G` suffixes as `--size-scale-max`; escape cancels,
-and anything unparseable leaves the scale as it was.
+accepts the same `K`, `M`, `G`, `T` suffixes as `--size-scale-max`; escape
+cancels, and anything unparseable leaves the scale as it was.
 
 `h` and `f` both affect what gets looked up from that moment on. Switching to
 `dns` or `all` from `off` starts the lookup threads, which a collector started
@@ -1743,13 +1743,16 @@ which is above 1024 and so needs no privilege to bind.
 ### The console display, if you want it
 
 ```
-docker run -it --rm --network host ghcr.io/mjaksn/nettail:latest
+docker run -it --rm --network host ghcr.io/mjaksn/nettail:latest --port 2055
 ```
 
-`-it` is not optional. Without a terminal the keyboard controls turn themselves
-off and the sticky header has nothing to stick to. For anything longer than a
-look, install it locally instead: this is a console program, and a container is
-a poor terminal.
+An argument after the image name is not optional. The image's default command
+is `--web --web-bind 0.0.0.0`, so a run with nothing after the image name
+starts the browser view on every address the host has rather than a bare
+collector. `-it` is not optional either: without a terminal the keyboard
+controls turn themselves off and the sticky header has nothing to stick to. For
+anything longer than a look, install it locally instead: this is a console
+program, and a container is a poor terminal.
 
 For a machine readable stream, `--json` needs no terminal and pipes as usual:
 
@@ -1775,9 +1778,10 @@ IPFIX variable-length fields are handled: a declared length of `0xFFFF` means th
 value is prefixed by a one-byte length, or by `0xFF` followed by a two-byte length
 for values 255 bytes or longer.
 
-Options templates are parsed and stored even though their contents are not currently
-interpreted. This is necessary so that options data sets can be walked without
-desyncing the parser mid-message.
+Options templates are parsed and stored so that options data sets can be walked
+without desyncing the parser mid-message. What is read out of the data itself is
+the sampling rate; the rest, interface names and application ID mappings among
+it, is decoded and not displayed.
 
 ### Layout
 
@@ -1814,6 +1818,7 @@ subprocesses. Everything else is the package:
 | `display.py` | laying one flow out as a line of text |
 | `sticky.py` | pinning the column header to the top of the window |
 | `statusbar.py` | the two-line bar along the foot of the window |
+| `qr.py` | the web interface URL, encoded and drawn as a QR code |
 | `feed.py` | the events a browser watches, and the bounded queues they wait in |
 | `web.py` | serving those events over HTTP, and taking keys back from a browser |
 | `web.html` | the page itself, shipped as package data |
@@ -1934,7 +1939,7 @@ python tests/run.py tally keys    # only suites whose name contains either
 python tests/run.py -v            # print every check, not only failures
 ```
 
-1192 checks across 32 suites, in well under a minute. No test dependencies and
+1412 checks across 34 suites, in well under a minute. No test dependencies and
 no test runner to learn: the suites need only netflume and lanname, the same as
 the collector.
 
@@ -1982,6 +1987,7 @@ another suite's result.
 | `test_summary_key` | the traffic summary printed on demand, and the clock it is dated by |
 | `test_sticky_with_gradient` | the pinned header and the size ramp sharing one screen |
 | `test_services` | the supplemental port names, the parser behind them, the system database keeping precedence, and the ephemeral floor pinned to where netflume actually puts it |
+| `test_qr` | the encoder against pinned symbols: the format information and its BCH check, the mask that was chosen, and the padding codewords no reader ever looks at |
 | `test_readme_samples` | the transcripts this README quotes, against what the program prints today |
 | `test_endpoints`, `test_top_talkers` | one definition of a flow's ends, both directions counted, and each address table split by direction |
 | `test_web_feed` | the event bus: what it publishes, what it drops when a browser falls behind, and the greeting a late arrival gets |
@@ -1991,6 +1997,7 @@ another suite's result.
 | `test_container_warning` | which of the two web bind warnings is printed, and that guessing at a container only ever chooses prose |
 | `test_size_end_to_end` | a real collector on loopback, fed real v5 datagrams, with the scale fixed and re-ranging |
 | `test_version` | `--version`, and the package, pyproject and changelog agreeing about the number |
+| `test_installer` | the real install script run into a temporary directory against fakes, and the command line each file it writes carries put back through nettail's own parser |
 
 Nothing reaches the network except `test_size_end_to_end`, which starts a real
 collector on the loopback interface, waits to be told the socket is bound, and
@@ -2073,4 +2080,4 @@ appear on a blocklist. Worth building, in rough order of yield:
 
 ## License
 
-Do what you want with it.
+MIT. Do what you want with it, and keep the notice. See [LICENSE](LICENSE).
