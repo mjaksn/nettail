@@ -578,9 +578,18 @@ def write_summary(stats, tally, resolver, sequences, sampling, args,
                         with_names([(pair[1], None) for pair, _figure in pairs])))
 
     def halves_width(halves, arrow, default, overhead):
-        """The endpoint column of a two-ended table, sized to its rows."""
-        needed = max(len(left) + len(arrow[0]) + len(right)
-                     for (left, _lp), (right, _rp) in halves)
+        """The endpoint column of a two-ended table, sized to its rows.
+
+        Measured as the widest first half plus the widest second half, and
+        not as the widest row: every first half is padded out to the widest
+        one so that the arrows line up, so a row whose name is on the right
+        is as wide as the widest name on the left plus its own. A pair of
+        flows in opposite directions, named at the local end of each, is
+        exactly that shape, and measuring row by row trimmed both.
+        """
+        needed = (max(len(left) for (left, _lp), _right in halves)
+                  + len(arrow[0])
+                  + max(len(right) for _left, (right, _rp) in halves))
         return table_width(needed, default, overhead)
 
     if pairs_by_bytes:

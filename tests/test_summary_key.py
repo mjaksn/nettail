@@ -174,6 +174,7 @@ check("a wider address with no name does not push the names out",
 
 class LongNames(Names):
     KNOWN = {"10.0.0.1": "homeassistant", "172.16.30.100": "homeassistant",
+             "192.168.1.5": "homeassistant",
              "9.9.9.9": "quad9-resolver", "203.0.113.9": "documentation"}
 
 
@@ -195,6 +196,31 @@ check("with room, every name is shown whole",
 check("and no row runs past the window",
       all(len(ln) <= 140 for ln in roomy.splitlines()),
       str(max(len(ln) for ln in roomy.splitlines())))
+# The same conversation seen both ways, named at the local end of each, is the
+# shape that puts the name on the left in one row and on the right in the
+# other. No single row is as wide as the table, since every first half is
+# padded to the widest one, and measuring row by row trimmed both names.
+both_ways = main.Tally()
+for src, sport, dst, dport in (("192.168.1.5", 49296, "17.57.152.35", 993),
+                               ("17.57.152.35", 993, "192.168.1.5", 49296)):
+    both_ways.add({"src_addr": src, "dst_addr": dst, "proto": 6,
+                   "octets": 5000, "packets": 10, "src_port": sport,
+                   "dst_port": dport, "flow_start_ms": int(NOW * 1000),
+                   "flow_end_ms": int((NOW + 3) * 1000)}, WIDE_HDR)
+os.environ["COLUMNS"] = "120"
+try:
+    buf = io.StringIO()
+    cli.write_summary(stats, both_ways, LongNames(), sequences, sampling, args,
+                      time.time() - 42, out=buf)
+finally:
+    del os.environ["COLUMNS"]
+two_way = plain(buf.getvalue())
+check("a name on the right of one row and the left of the other is shown whole",
+      "..." not in two_way
+      and "(homeassistant) -> 17.57.152.35:993" in two_way
+      and "-> 192.168.1.5:49296   (homeassistant)" in two_way,
+      repr([ln for ln in two_way.splitlines() if cli.FLOW_ARROW in ln]))
+
 # Ninety columns is room for the pair rows whole and not for the longest-flow
 # rows, which carry a port on each end; narrower than a column's old width
 # there is no trimming to do, since a column never draws narrower than that.
