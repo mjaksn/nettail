@@ -219,7 +219,7 @@ that could obviously have been a dependency and deliberately is not, so the
 reasoning is worth keeping.
 
 What it would have cost is not what a dependency costs elsewhere. This program
-installs two pure Python packages and nothing else, the suite has no
+installs three pure Python packages and nothing else, the suite has no
 dependencies and is not meant to grow one, and the image pins every byte by
 hash. The obvious library also carries `importlib-metadata`, and `zipp` behind
 it, on the 3.9 that CI gates on, which would have made three statements about

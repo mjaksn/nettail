@@ -2,9 +2,9 @@
 
 Why there is a QR encoder in this repository at all, when a good one is a pip
 install away: the answer is what a dependency costs here rather than what it is
-worth anywhere else. This program installs two pure Python packages and nothing
-else, its suite has no dependencies and is not meant to grow one, and the
-container image pins every byte it installs by hash. The encoder below is
+worth anywhere else. This program installs three pure Python packages and
+nothing else, its suite has no dependencies and is not meant to grow one, and
+the container image pins every byte it installs by hash. The encoder below is
 write-once code against a standard that was fixed in 2015 and is not going to
 move. Paying for it once in lines is cheaper here than paying for it forever in
 supply chain.
