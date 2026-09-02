@@ -11,7 +11,7 @@ but it is a program rather than a library, and the names inside it may move
 without that being a breaking change. `--json` output is the part meant to be
 parsed, and it is treated as public.
 
-## [0.7.0] - 2026-09-01
+## [0.7.0] - 2026-09-02
 
 ### Added
 
