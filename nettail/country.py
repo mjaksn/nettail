@@ -843,6 +843,54 @@ def find_online():
             "is." % (DBIP_PAGE, MAXMIND_PAGE, somewhere_to_put_one()))
 
 
+def update_target(named=None, platform=None, env=None):
+    """Where an asked-for refresh may write, or why it may not.
+
+    A pair, and exactly one half of it is set: the path to fetch into, or the
+    line saying there is no such path and what to do instead.
+
+    A reader who named a file has named the file. That is where a refresh
+    goes, whatever the search would have said, and whether it can be written
+    to is the download's answer to give rather than a guess to make here.
+
+    Otherwise the search order decides it, and the rule is that a refresh
+    writes only where the next run will read. `destination` is the first
+    searched path this program could write to, and every path above it on Unix
+    belongs to root; so a machine whose `geoipupdate` keeps `/usr/share/GeoIP`
+    current would take a fetched copy into the writable path below it and go
+    on reading the old one for ever, having been told it had just been given a
+    new one. That is the trap `missing` avoids one door along, and the answer
+    is the same: name the file that is winning rather than put a second one
+    behind it.
+
+    The two are compared by their place in the list rather than as paths,
+    which needs no rule about case, separators or symbolic links: whatever
+    `destination` answers came out of `search_paths` in the first place. A
+    file found below the destination is no obstacle, since the fetched one
+    lands above it and is what every later run reads.
+
+    The platform and the environment are arguments for the reason
+    `search_paths` takes them, and are passed down to both halves of the
+    question so that the answer cannot be drawn from two different machines.
+    """
+    if named:
+        return named, None
+    places = search_paths(platform, env)
+    where = destination(platform, env)
+    if where is None:
+        return None, ("there is nowhere to put a country database: none of %s "
+                      "can be written to. %s"
+                      % (looked_in(places), find_online()))
+    found = next((c for c in places if os.path.exists(c)), None)
+    if found is not None and places.index(found) < places.index(where):
+        return None, ("%s is searched before %s and is what every run here "
+                      "reads, so a database fetched into the second would "
+                      "never be looked at. Refresh that file however it is "
+                      "kept, or point --country-db at the one to replace."
+                      % (found, where))
+    return where, None
+
+
 def load(path=None):
     """Open a country database, replacing whatever was open before.
 
@@ -959,6 +1007,36 @@ def credit():
     return DBIP_CREDIT, DBIP_HOME
 
 
+def kind():
+    """What the database in hand calls itself, or None.
+
+    The name out of the file's own metadata, DBIP-Country-Lite or
+    GeoLite2-Country or whatever a City build says. `credit` reads the same
+    field to decide whose terms apply and answers with the terms; this answers
+    with the name, which is what a line naming a file about to be replaced
+    wants. A reader who put a GeoLite2 file where this program writes is owed
+    the word for it before it goes.
+    """
+    if _database is None:
+        return None
+    return _database.database_type or None
+
+
+def built():
+    """The day the database in hand was built, as a date, or None.
+
+    The same field `describe` puts in the startup line, on its own. What wants
+    it separately is the line naming a file about to be replaced, which needs
+    the date and must not have the rest of that sentence: `describe` ends an
+    old file's line by saying which flag would fetch a newer one, and printing
+    that to somebody who has just typed the flag would be answering a question
+    they have already acted on.
+    """
+    if _database is None or not _database.build_epoch:
+        return None
+    return time.strftime("%Y-%m-%d", time.gmtime(_database.build_epoch))
+
+
 def describe():
     """A line naming the database in hand, for the startup notice."""
     if _database is None:
@@ -969,8 +1047,12 @@ def describe():
         built = ", built %s" % time.strftime(
             "%Y-%m-%d", time.gmtime(_database.build_epoch))
         if age > STALE_AFTER:
+            # And what to do about it, because a reader told their file is old
+            # and left there has been given a complaint rather than a way out.
+            # This is the line that names the flag: it is the one place the
+            # program already knows the file is worth replacing.
             built += (", which is old enough that some of what it says has "
-                      "since moved")
+                      "since moved. --update-country-db fetches a current one")
     owed = credit()
     return "countries from %s%s%s" % (
         _database.path, built,

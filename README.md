@@ -228,9 +228,10 @@ usage: nettail [-h] [--version] [--config FILE | --save-config [FILE]]
                [--web-bind ADDR] [--web-host NAME] [--web-token TOKEN]
                [--web-colour WHEN] [--web-readonly] [--size-scale-max BYTES |
                --size-scale-dynamic] [--size-scale-window FLOWS] [--country]
-               [--country-db FILE] [--country-style {auto,flag,code}]
-               [--resolve {off,dns,all}] [--hosts FILE] [--resolve-public]
-               [--fqdn] [--resolve-workers RESOLVE_WORKERS]
+               [--country-db FILE] [--update-country-db]
+               [--country-style {auto,flag,code}] [--resolve {off,dns,all}]
+               [--hosts FILE] [--resolve-public] [--fqdn]
+               [--resolve-workers RESOLVE_WORKERS]
                [--resolve-timeout RESOLVE_TIMEOUT]
 ```
 
@@ -311,6 +312,7 @@ See [Size colour scale](#size-colour-scale) for what the colours mean.
 | --- | --- | --- |
 | `--country` | off | Mark every public address with the country it is in. Implied by `--country-db` |
 | `--country-db FILE` | searched | The database to read. Without it, the first of `/etc/nettail/country.mmdb`, `/usr/share/GeoIP/GeoLite2-Country.mmdb` and `/var/lib/GeoIP/GeoLite2-Country.mmdb` that exists, and a few more besides |
+| `--update-country-db` | off | Fetch DB-IP's free country database, put it where the next run will read it, and exit without collecting anything. Replaces the database that is there, or fetches a first one where there is none. With `--country-db` it refreshes that file instead of searching |
 | `--country-style {auto,flag,code}` | `auto` | How **this terminal** is shown a country: `flag` for the emoji, `code` for the two letters, `auto` for the letters wherever a flag is known not to be drawn. The browser is sent the flag whatever this says, and draws it or not by its own fonts |
 
 See [Country marking](#country-marking) for where the database comes from and
@@ -1821,8 +1823,58 @@ Finding none where the question cannot be put is one line at startup saying
 where it looked, and the collector runs on unmarked. So is a file that will not
 open or does not read as a database, so is a declined offer, and so is a fetch
 that fails. A successful load says which file it read and when the file was
-built, and says so out loud when that was more than a year ago, since a country
-assignment that has moved since looks exactly like one that has not.
+built, and says so out loud when that was more than a year ago, naming the flag
+in the next section that fetches a current one, since a country assignment that
+has moved since looks exactly like one that has not.
+
+### Asking for one outright
+
+`--update-country-db` fetches the same file without waiting to be offered it.
+It is the other half of the prompt above, and it covers the two cases that
+prompt cannot reach: a database that is already there and has gone old, and a
+machine with nobody sitting at it.
+
+```
+$ nettail --update-country-db
+replacing the DBIP-Country-Lite at /home/you/.local/share/nettail/country.mmdb, built 2025-09-01
+DB-IP publish a free country database, IP to Country Lite, under the Creative
+Commons Attribution 4.0 licence. Fetching it to
+/home/you/.local/share/nettail/country.mmdb. No address goes anywhere either
+way: a country is read out of the file on this machine, then and afterwards.
+countries from /home/you/.local/share/nettail/country.mmdb, built 2026-09-01.
+IP Geolocation by DB-IP, https://db-ip.com
+```
+
+Nothing is collected. It fetches, says what it did, and exits with a status a
+script can read. The first line is absent where there was no database to
+replace, and where there was one it names the build and the day it was made, so
+that swapping a GeoLite2 file you put there by hand for a DB-IP one is
+something you are told about rather than something you find out later. What
+lands is opened and read as a database before any of this reports success.
+
+No question is put and no terminal is looked for. Every guard on the offer
+above is there to avoid mistaking an empty pipe for a yes, and typing the flag
+is the yes: a run from cron that types it meant it. That is also why it is the
+one country option a settings file cannot hold. An errand written into a file
+would reach out to db-ip.com and exit on every run for ever after, which is the
+one thing this whole feature is arranged to make impossible without somebody
+saying so.
+
+Where it writes is the part worth knowing. With `--country-db` it refreshes
+that file and nothing else. Without it the file goes where the next run will
+read it, which is the writable path in the list above; and a database sitting
+*higher* in that list stops it rather than being quietly shadowed:
+
+```
+/usr/share/GeoIP/dbip-country-lite.mmdb is searched before
+/home/you/.local/share/nettail/country.mmdb and is what every run here reads,
+so a database fetched into the second would never be looked at. Refresh that
+file however it is kept, or point --country-db at the one to replace.
+```
+
+That is the machine whose `geoipupdate` already keeps a copy current. Fetching
+underneath it would have left you with a new file, an old answer, and nothing
+on screen to say which of the two you were being shown.
 
 Running as a service or in a container, `/etc/nettail/country.mmdb` is the path
 to use: it is first in the list above, the installer already owns that

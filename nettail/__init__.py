@@ -64,6 +64,7 @@ from .cli import (
     report_events,
     should_show,
     tee,
+    update_country_db,
     write_hosts,
     write_summary,
 )
@@ -192,6 +193,7 @@ __all__ = [
     "proto_colour", "write_summary", "write_hosts", "SpanScale",
     "enable_windows_vt", "endpoint",
     "ask_yes_no", "at_a_terminal", "build_parser", "offer_country_db",
+    "update_country_db",
     "human_bytes", "human_count", "main", "render", "report_events",
     "should_show", "size_scale_arg", "size_window_arg",
     "COLUMNS", "row_cells", "tee", "flow_record",
