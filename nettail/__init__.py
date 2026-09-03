@@ -55,6 +55,7 @@ module collides.
 __version__ = "0.12.0"
 
 from .cli import (
+    WatchedTemplates,
     ask_yes_no,
     at_a_terminal,
     build_parser,
@@ -62,6 +63,7 @@ from .cli import (
     main,
     offer_country_db,
     report_events,
+    report_templates,
     should_show,
     tee,
     update_country_db,
@@ -195,6 +197,7 @@ __all__ = [
     "ask_yes_no", "at_a_terminal", "build_parser", "offer_country_db",
     "update_country_db",
     "human_bytes", "human_count", "main", "render", "report_events",
+    "WatchedTemplates", "report_templates",
     "should_show", "size_scale_arg", "size_window_arg",
     "COLUMNS", "row_cells", "tee", "flow_record",
     "CLIENT_BACKLOG", "EVENTS", "PROSE_KINDS", "Feed",

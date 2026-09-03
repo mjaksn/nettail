@@ -815,6 +815,25 @@ feature means reading both, and their suites.
   bare `Resolver()` from looking nothing up to querying reverse DNS, with
   nothing raised and nothing warned. Explicit modes are why that release was a
   non-event here. Keep it true.
+- **`WatchedTemplates` rests on `put` returning True, and that is the only
+  thing it rests on.** netflume raises an object for a sampling rate, an
+  export gap and a datagram it could not read; a template it has just learned
+  is not one of them, and the store's return value is where the fact lives.
+  `--verbose` stands a subclass in the decoder's way to hear about it rather
+  than parsing the datagram again. A `TemplateLearned` event upstream would be
+  the better home, and if one ever arrives this should move onto it.
+  `test_templates` pins the store's side of the deal separately from the block
+  it feeds, so an upstream change shows up as the store failing rather than as
+  a run that quietly says nothing.
+
+  Every `put` is recorded and not only the ones that return True, because a
+  template resent unchanged is worth a line too: how often one comes round is
+  visible nowhere else in this program. The two are one list carrying a flag
+  rather than two lists, so that a set holding one of each is reported in the
+  order the exporter wrote it, and `report_templates` is the one place that
+  decides which of the two lengths a template gets. Both are prose, so both go
+  to stderr and both are teed to the browser, under a prose kind of their own:
+  `template` is not `notice`, because a notice is something gone wrong.
 - **Dependency direction runs one way**, from `cli` down towards `colour` and
   `values`. There are no import cycles and there should not be.
 

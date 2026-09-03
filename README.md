@@ -94,7 +94,7 @@ nettail --port 2055 --external-only
 # Passive name resolution plus your own static mappings
 nettail --resolve dns --hosts ./lan-hosts
 
-# Dump every decoded field under each flow
+# Dump every decoded field under each flow, and the templates as they arrive
 nettail --verbose
 
 # Machine readable, one object per line
@@ -247,7 +247,7 @@ usage: nettail [-h] [--version] [--config FILE | --save-config [FILE]]
 | `--external-only` | off | Only display flows where the source or destination is a public IP. Everything is still counted in the summary |
 | `--names` | off | Show a host by its name in place of its address, where a name is known. The `n` key turns it off and on while running |
 | `--macs` | off | Show hardware addresses on a line under each flow, on the exporters that send them. The `p` key turns it off and on while running |
-| `--verbose` | off | Print every decoded field on an indented line under each flow. Also surfaces parse errors |
+| `--verbose` | off | Print every decoded field on an indented line under each flow. Also spells out each template the first time an exporter sends it, notes in one line each time a template is sent again, and surfaces parse errors |
 | `--json` | off | Emit one JSON object per flow on stdout instead of the table |
 | `--colour WHEN` | `auto` | When to use ANSI colour **on this terminal**: `auto`, `always` or `never`. Under `auto` a terminal gets colour and a redirected stream does not, and `NO_COLOR` in the environment turns it off. The browser view has its own switch, `--web-colour`, and is not decided by this one. `--color` is accepted too |
 | `--no-color` | off | The same as `--colour never`, and like it, about this terminal |
@@ -501,7 +501,8 @@ changes later still reaches somebody who never touched that option.
 # only show flows involving a public IP
 external-only = true
 
-# print every decoded field under each flow
+# print every decoded field under each flow, spell out each template the
+# first time an exporter sends it, and note each time one is sent again
 #verbose = false
 ```
 

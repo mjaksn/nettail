@@ -15,6 +15,33 @@ parsed, and it is treated as public.
 
 ### Added
 
+- **`--verbose` now spells out each template the first time it arrives.** A v9
+  or IPFIX exporter says what its records look like before it sends any, and
+  every field this collector reads afterwards is read through that. Until now
+  the shape was invisible: a field that came out under a bare `ie150`, or a
+  count that looked wrong, left nothing to look at but the flows themselves.
+  Each template is printed once, as the exporter, the observation domain, the
+  template ID, how many fields it holds and how many bytes a record takes,
+  with the fields under it as `name:kind/bytes`. An options template says that
+  it is one, and a variable length field reads `var`, which is also why the
+  record size on such a template is given as a floor rather than a figure.
+
+  The fields are spelled out once and not once per datagram: exporters
+  resend the same template every few minutes and a reader wants the shape
+  rather than the drumbeat. Each resend does get a line of its own saying
+  which template came round again and that it was unchanged, because how
+  often one arrives is worth seeing and is visible nowhere else. A template
+  that arrives changed under an ID already in use is spelled out in full
+  again, since every record behind it is now read differently. v5 carries no
+  templates and says nothing.
+
+  The browser view is sent the same block, under a prose kind of its own so
+  that it does not read as something gone wrong.
+
+## [0.12.0] - 2026-09-03
+
+### Added
+
 - **`--update-country-db` fetches a country database because you asked for
   one**, rather than because a prompt caught you at a terminal with none. It is
   the other half of the offer added in 0.11.0, and it reaches the two cases
