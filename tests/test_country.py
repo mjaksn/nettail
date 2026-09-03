@@ -1321,11 +1321,30 @@ UPDATE_DEST = os.path.join(UPDATE_DIR, "run", "country.mmdb")
 HELD.append(UPDATE_DEST)
 os.makedirs(os.path.dirname(UPDATE_DEST))
 
+# A fixed build date, so that the line naming a file about to be replaced can
+# be read for the date as well as for the path. `Counted` stamps the day it
+# ran, which says nothing about whether the date came off the file.
+BUILT_EPOCH = 1788307200
+BUILT_ON = time.strftime("%Y-%m-%d", time.gmtime(BUILT_EPOCH))
+
+
+class Dated(Counted):
+    """A fetch that leaves a database built on a day of the suite's choosing."""
+
+    def __call__(self, where, urls=None):
+        self.asked.append(where)
+        self.urls = urls
+        with io.open(where, "wb") as handle:
+            handle.write(build(NETWORKS, kind="DBIP-Country-Lite",
+                               built=BUILT_EPOCH))
+        return None
+
+
 country.close()
 try:
     country.search_paths = lambda *_: (UPDATE_DEST,)
 
-    fetch = Counted()
+    fetch = Dated()
     out = FakeTTY()
     status = main.update_country_db(stream=out, fetch=fetch)
     printed = plain(out.getvalue())
@@ -1349,7 +1368,7 @@ try:
     # Again, over the file the first one left. This is the case the flag
     # exists for: a database that is there and is old.
     country.close()
-    fetch = Counted()
+    fetch = Dated()
     out = FakeTTY()
     status = main.update_country_db(stream=out, fetch=fetch)
     printed = plain(out.getvalue())
@@ -1360,6 +1379,11 @@ try:
     check("and says so before it goes", line != "", printed)
     check("naming the file", UPDATE_DEST in line, repr(line))
     check("and whose build it was", "DBIP-Country-Lite" in line, repr(line))
+    check("and the day that build was made", ", built " in line, repr(line))
+    check("which is the date the file itself carries, not today's",
+          BUILT_ON in line, repr(line))
+    check("and not the sentence naming the flag that was just typed",
+          "--update-country-db" not in line, repr(line))
 
     # A file somebody put there by hand from the other publisher. Swapping one
     # for the other without saying which is going is the wrong shape for a
@@ -1523,5 +1547,6 @@ for path in HELD:
 # The fetch directory has files under it that the loop above cannot take, so
 # it goes whole and last.
 shutil.rmtree(FETCH_DIR, ignore_errors=True)
+shutil.rmtree(UPDATE_DIR, ignore_errors=True)
 
 finish("country")
