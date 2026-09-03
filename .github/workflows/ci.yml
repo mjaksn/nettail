@@ -175,9 +175,11 @@ jobs:
         # With host networking the local address is the host's and it matches.
         # The README says the same thing at more length.
         run: |
-          docker run --detach --name probe --network host             nettail:ci --web --web-bind 127.0.0.1 --web-token ci-token
+          docker run --detach --name probe --network host \
+            nettail:ci --web --web-bind 127.0.0.1 --web-token ci-token
           for attempt in $(seq 1 30); do
-            if curl --silent --fail --header 'Host: 127.0.0.1:2056'                  http://127.0.0.1:2056/t/ci-token/ > page.html; then
+            if curl --silent --fail --header 'Host: 127.0.0.1:2056' \
+                 http://127.0.0.1:2056/t/ci-token/ > page.html; then
               break
             fi
             sleep 1

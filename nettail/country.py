@@ -67,8 +67,8 @@ _MARKER = b"\xab\xcd\xefMaxMind.com"
 
 # The format caps the metadata at 128 KiB, so the marker is looked for in the
 # tail of the file rather than the whole of it. A search over the whole file
-# is not merely slower: those twelve bytes could occur inside the data section
-# of a large database, and the last occurrence there would be found in
+# is not merely slower: those fourteen bytes could occur inside the data
+# section of a large database, and the last occurrence there would be found in
 # preference to the real one only if the real one were missing, but bounding
 # the search says what is meant.
 _METADATA_MAX = 128 * 1024
@@ -797,7 +797,7 @@ def looked_in(places=None):
 
     Directories rather than files, and each named once however many files in
     it were tried, because a reader who is about to go and put a database
-    somewhere wants the places rather than the seven names this looked for.
+    somewhere wants the places rather than every file name this looked for.
     """
     places = search_paths() if places is None else places
     where = dict.fromkeys(os.path.dirname(candidate) or candidate

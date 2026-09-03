@@ -71,13 +71,12 @@ parsed, and it is treated as public.
   letters out wherever a flag is known not to be drawn: Windows, macOS
   Terminal, the Linux console, a terminal with no TERM to speak of, a stream
   that is not a terminal at all, and an encoding that cannot carry the
-  characters. `flag` and `code` settle it without
-  guessing. The browser is sent the flag whatever this says, which is arranged
-  the way colour is: painted once where the row is built, and spelled back out
-  at the terminal that cannot draw it. Whether a browser then draws a flag or
-  the two boxed letters is its own fonts' business, Windows having no flag
-  glyph on it at all, so the page names the fonts that can before the one that
-  cannot.
+  characters. `flag` and `code` settle it without guessing. The browser is
+  sent the flag whatever this says, which is arranged the way colour is:
+  painted once where the row is built, and spelled back out at the terminal
+  that cannot draw it. Whether a browser then draws a flag or the two boxed
+  letters is its own fonts' business, Windows having no flag glyph on it at
+  all, so the page names the fonts that can before the one that cannot.
 - **The browser view ships the flags it draws.** A flag is two regional
   indicator letters, no monospace font has a glyph for the pair, and Windows
   has no emoji font that draws one at all, so Chrome and Edge there showed the
@@ -101,15 +100,19 @@ parsed, and it is treated as public.
   for that end. Absent otherwise, which is every run that did not ask for one,
   the way `src_host` is absent when no name is known.
 
-## [0.10.0] - 2026-09-02
+## 0.10.0 - 2026-09-02
+
+Never released on its own. 0.11.0 landed before a tag was cut and carries
+everything below, so there is no `v0.10.0` for this heading to link at, and
+it is written plainly for that reason.
 
 ### Added
 
 - **Anything the command line takes, a settings file takes too.** `nettail.conf`
-  holds the same options under the same names without their dashes, and there
-  is no second list of what can be set: the file is read against the same
-  parser the command line is, so an option that exists is settable and one that
-  does not is reported as an unknown key. A `[nettail]` section header is
+  holds the same options under the same names without their leading dashes,
+  and there is no second list of what can be set: the file is read against the
+  same parser the command line is, so an option that exists is settable and one
+  that does not is reported as an unknown key. A `[nettail]` section header is
   allowed and not needed, a key may be spelled with dashes or underscores, a
   switch takes true or false, and an option that may be repeated takes one
   value a line.
@@ -634,7 +637,6 @@ console: the part that decides what a flow should look like on a terminal.
   two-hundred-character list that wrapped and then scrolled away.
 
 [0.11.0]: https://github.com/mjaksn/nettail/releases/tag/v0.11.0
-[0.10.0]: https://github.com/mjaksn/nettail/releases/tag/v0.10.0
 [0.8.0]: https://github.com/mjaksn/nettail/releases/tag/v0.8.0
 [0.7.0]: https://github.com/mjaksn/nettail/releases/tag/v0.7.0
 [0.6.0]: https://github.com/mjaksn/nettail/releases/tag/v0.6.0
