@@ -11,6 +11,33 @@ but it is a program rather than a library, and the names inside it may move
 without that being a breaking change. `--json` output is the part meant to be
 parsed, and it is treated as public.
 
+## [0.13.0] - 2026-09-03
+
+### Added
+
+- **`--verbose` now spells out each template the first time it arrives.** A v9
+  or IPFIX exporter says what its records look like before it sends any, and
+  every field this collector reads afterwards is read through that. Until now
+  the shape was invisible: a field that came out under a bare `ie150`, or a
+  count that looked wrong, left nothing to look at but the flows themselves.
+  Each template is printed once, as the exporter, the observation domain, the
+  template ID, how many fields it holds and how many bytes a record takes,
+  with the fields under it as `name:kind/bytes`. An options template says that
+  it is one, and a variable length field reads `var`, which is also why the
+  record size on such a template is given as a floor rather than a figure.
+
+  The fields are spelled out once and not once per datagram: exporters
+  resend the same template every few minutes and a reader wants the shape
+  rather than the drumbeat. Each resend does get a line of its own saying
+  which template came round again and that it was unchanged, because how
+  often one arrives is worth seeing and is visible nowhere else. A template
+  that arrives changed under an ID already in use is spelled out in full
+  again, since every record behind it is now read differently. v5 carries no
+  templates and says nothing.
+
+  The browser view is sent the same block, under a prose kind of its own so
+  that it does not read as something gone wrong.
+
 ## [0.12.0] - 2026-09-03
 
 ### Added
@@ -677,6 +704,7 @@ console: the part that decides what a flow should look like on a terminal.
   reminder line under the startup banner can be a pointer rather than a
   two-hundred-character list that wrapped and then scrolled away.
 
+[0.13.0]: https://github.com/mjaksn/nettail/releases/tag/v0.13.0
 [0.12.0]: https://github.com/mjaksn/nettail/releases/tag/v0.12.0
 [0.11.0]: https://github.com/mjaksn/nettail/releases/tag/v0.11.0
 [0.8.0]: https://github.com/mjaksn/nettail/releases/tag/v0.8.0

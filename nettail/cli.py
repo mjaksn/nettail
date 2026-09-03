@@ -9,6 +9,7 @@ import queue
 import signal
 import socket
 import sys
+import textwrap
 import time
 from collections import Counter
 
@@ -19,6 +20,7 @@ from netflume import (
     Decoder,
     ExportGap,
     SamplingChange,
+    TemplateStore,
     addr_kind,
     flow_endpoints,
     flow_timestamp,
@@ -333,6 +335,120 @@ def _endpoints(left, arrow, right, column):
     right_plain, right_painted = right
     return (f"{left_plain}{text}{right_plain}",
             f"{left_painted}{colour}{text}{C.RESET}{right_painted}")
+
+
+class WatchedTemplates(TemplateStore):
+    """A template store that remembers every template it was handed.
+
+    netflume raises an object for a sampling rate, an export gap and a
+    datagram it could not read, and a template it has just learned is not one
+    of them. The fact exists in exactly one place, which is `put` returning
+    True, so standing a subclass in the decoder's way is how this program
+    hears about it without parsing the datagram a second time. An event
+    upstream would be the better home for it, and this is the seam until
+    there is one.
+
+    A template resent unchanged is remembered too, and marked as such rather
+    than dropped. Both are worth saying and they are not worth saying at the
+    same length: the shape is news once, and after that the news is only that
+    the exporter is still refreshing it, which is a line.
+
+    Only `--verbose` installs one, so a run that would never print a template
+    does not remember one either. That is also what bounds the list: the
+    receive loop drains it after every datagram, and nothing accumulates
+    between two of them.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._seen = []
+
+    def put(self, exporter, domain, tid, fields, options=False):
+        fresh = super().put(exporter, domain, tid, fields, options=options)
+        self._seen.append((exporter, domain, tid, fields, options, fresh))
+        return fresh
+
+    def take_templates(self):
+        """Hand over the templates seen since the last call, and forget them.
+
+        A list of (exporter, domain, template id, fields, is options, is new),
+        in the order the datagrams put them, so that a set carrying one of
+        each is reported the way the exporter wrote it. The last of the six is
+        what tells a template nobody has seen before, or one whose fields have
+        changed under an ID already in use, from one being refreshed.
+        """
+        seen = self._seen
+        self._seen = []
+        return seen
+
+
+def field_spec(field):
+    """One field specification, as name, kind and width in one token.
+
+    The three are what a template actually says: which information element,
+    how netflume will read it, and how many bytes it takes in a record. An
+    element this build has no name for arrives as `ie<id>` already, and an
+    enterprise one as `e<pen>.<id>`, so an unknown field still says which it
+    was. 0xFFFF is IPFIX's "the record says", which is a width no number
+    could stand for.
+    """
+    name, kind, length = field
+    return f"{name}:{kind}/{'var' if length == 0xFFFF else length}"
+
+
+def report_templates(seen, out=None):
+    """Spell a template out the first time it arrives, and note it after that.
+
+    A template is the shape every later record from that exporter is read
+    through, so a run that cannot make sense of what it is showing is usually
+    a run where the template is the thing to look at. The fields are spelled
+    out once rather than once per datagram, because exporters resend the same
+    template every few minutes and a reader wants the shape, not the drumbeat.
+    A template that arrives changed under an ID already in use is spelled out
+    again, which is the case worth seeing most: every record behind it is now
+    read differently.
+
+    A refresh gets a line and no field list. Saying nothing at all would be
+    the other reasonable answer and is the worse one, because how often a
+    template comes round is itself a thing to look at: an exporter refreshing
+    far more often than it needs to, or one that has stopped, shows up here
+    and nowhere else. Saying it in full would drown the flows, which is what
+    the two lengths are for.
+
+    The fields are wrapped to the reader's window rather than run off the
+    right of it, since a template of thirty fields is ordinary and the whole
+    point is that it can be read. Colour goes on a wrapped line at a time, so
+    the widths measured are the characters a reader sees.
+    """
+    out = out if out is not None else sys.stderr
+    room = (qr_window(out)[0] or qr_window(sys.stderr)[0] or SUMMARY_WIDTH)
+    for exporter, domain, tid, fields, options, fresh in seen:
+        kind = "options template" if options else "template"
+        if not fresh:
+            print(f"{C.GREY}{exporter} (domain {domain}) resent {kind} {tid}, "
+                  f"unchanged{C.RESET}", file=out)
+            continue
+        # A variable length field has no width until a record declares one,
+        # so what the template fixes is a floor rather than a size. The floor
+        # is not the fixed fields alone: every such field costs at least the
+        # one byte of length prefix the record has to carry in front of it,
+        # which is netflume's own rule in `record_min_length`. That is
+        # repeated here rather than imported, because the name left netflume's
+        # public surface in 0.2.0 and is documented as free to move, but the
+        # arithmetic has to agree with it or this says a record can be shorter
+        # than the decoder will ever accept.
+        variable = any(length == 0xFFFF for _name, _kind, length in fields)
+        size = sum(1 if length == 0xFFFF else length
+                   for _name, _kind, length in fields)
+        print(f"{C.BLUE}{exporter} (domain {domain}) sent {kind} {tid}: "
+              f"{len(fields)} field{'' if len(fields) == 1 else 's'}, "
+              f"{'at least ' if variable else ''}{size} bytes a record"
+              f"{C.RESET}", file=out)
+        spelled = " ".join(field_spec(field) for field in fields)
+        for line in textwrap.wrap(spelled, width=max(room - 4, 20),
+                                  break_long_words=False,
+                                  break_on_hyphens=False):
+            print(f"    {C.GREY}{line}{C.RESET}", file=out)
 
 
 def report_events(events, args, out=None):
@@ -1099,7 +1215,9 @@ def build_parser():
                          "on the exporters that send them. The p key turns it "
                          "off and on while running")
     ap.add_argument("--verbose", action="store_true",
-                    help="print every decoded field under each flow")
+                    help="print every decoded field under each flow, spell "
+                         "out each template the first time an exporter sends "
+                         "it, and note each time one is sent again")
     ap.add_argument("--json", action="store_true",
                     help="emit one JSON object per flow instead of a table")
     ap.add_argument("--colour", "--color", choices=("auto", "always", "never"),
@@ -1547,6 +1665,11 @@ def main():
     # three. Held under the old names so the summary, the status bar and the
     # keys go on asking the same questions of the same objects.
     decoder = Decoder()
+    # The one thing on that list the decoder notices and says nothing about.
+    # Swapped in before a byte is read, so that an exporter's opening burst of
+    # templates, which is what its first datagrams usually are, is caught.
+    if args.verbose:
+        decoder.templates = WatchedTemplates()
     stats = decoder.stats
     sampling = decoder.sampling
     sequences = decoder.sequence
@@ -2023,6 +2146,17 @@ def main():
             if noticed:
                 tee(bus, "notice",
                     lambda out, seen=noticed: report_events(seen, args, out=out))
+            # Drained on the same terms, and before the None below rather than
+            # after it: a datagram whose later set is malformed has still
+            # taught this collector the template in its earlier one, and the
+            # shape of what is about to be read is worth more on a datagram
+            # that went wrong than on one that did not.
+            if args.verbose:
+                shapes = decoder.templates.take_templates()
+                if shapes:
+                    tee(bus, "template",
+                        lambda out, seen=shapes: report_templates(seen,
+                                                                  out=out))
             # None means the datagram held nothing this collector can read.
             # Testing the message itself would not do: one carrying only
             # templates or only option records is a normal thing to receive.

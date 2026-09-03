@@ -51,8 +51,11 @@ EVENTS = (
 
 # The prose kinds, in the order a session tends to produce them. The page
 # styles a summary differently from a one-line reply, so the kind travels with
-# the text rather than being guessed at from its shape.
-PROSE_KINDS = ("banner", "notice", "reply", "summary", "hosts", "keys")
+# the text rather than being guessed at from its shape. A template listing is
+# its own kind rather than a notice, because a notice is something gone wrong
+# and a template is only the shape of what is arriving.
+PROSE_KINDS = ("banner", "notice", "template", "reply", "summary", "hosts",
+               "keys")
 
 
 class Client:
