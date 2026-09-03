@@ -873,7 +873,7 @@ def update_target(named=None, platform=None, env=None):
     `search_paths` takes them, and are passed down to both halves of the
     question so that the answer cannot be drawn from two different machines.
     """
-    if named:
+    if named is not None:
         return named, None
     places = search_paths(platform, env)
     where = destination(platform, env)
