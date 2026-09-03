@@ -68,6 +68,11 @@ services:
       #- --web-readonly
       # Only flows that touch the internet, which is usually what is wanted.
       #- --external-only
+      # Mark public addresses with the country a database says they are in.
+      # No country data is in the image, so this wants the mount at the foot
+      # of this file as well; with nothing to read it says so once at startup
+      # and marks nothing.
+      #- --country
 
     # Pin the token so a bookmark survives a restart. Leave it out and a
     # fresh random one is printed at every start. It goes in a file rather
@@ -80,8 +85,14 @@ services:
     # what it is showing in memory and writes nothing, so there is no volume to
     # lose and a restart simply starts counting again.
     #
-    # The one thing worth mounting is your own static name mappings, if you
-    # keep any. Read-only, because it is only ever read, and paired with
-    # `--hosts /etc/nettail/lan-hosts` in the command above.
+    # Two things are worth mounting, both read-only because both are only ever
+    # read. Your own static name mappings, if you keep any, paired with
+    # `--hosts /etc/nettail/lan-hosts` in the command above. And a country
+    # database for `--country`, which is a file you fetch rather than one this
+    # image could ship; /etc/nettail/country.mmdb is the first place nettail
+    # looks, so nothing has to name it twice. A run at a terminal is offered
+    # one and this is not that: a detached container has nobody to ask, so it
+    # goes without a database rather than fetching one unasked.
     #volumes:
     #  - ./lan-hosts:/etc/nettail/lan-hosts:ro
+    #  - ./dbip-country-lite.mmdb:/etc/nettail/country.mmdb:ro

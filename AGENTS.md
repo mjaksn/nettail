@@ -120,7 +120,191 @@ a port keeps its own answer.
 
 The data file has to stay listed in `[tool.setuptools.package-data]`. Left
 out, the wheel ships without it and every supplemental name silently becomes a
-bare port number.
+bare port number. Three other files are listed there for the same kind of
+reason: `web.html`, `flags.woff2` and `flags-licence`. CI installs the wheel
+and asserts all four are in it.
+
+## Countries
+
+`country.py` reads a MaxMind format database and answers "what country is this
+address in". It is off unless `--country` asks for it and silent unless there
+is a file to read, and no country data ships with this program, which is the
+whole shape of the feature: what a flag says is whatever the reader's file
+says. Since 0.11.0 it will fetch one, and only ever after somebody at a
+terminal has said yes.
+
+Reading the format rather than depending on `maxminddb` is the same trade
+`qr.py` makes, and rests on the same three facts: this installs three pure
+Python packages and nothing else, the suite has no dependencies, and the image
+pins every byte by hash. The whole format is decoded rather than the part a
+country database uses, because people will point this at a City database they
+already have and being told to fetch a second file would be absurd.
+
+Five things about it are easy to break and quiet when broken.
+
+- **The flag is painted at the source and spelled out at the boundary.** A
+  terminal that cannot draw one is behind `country.CodeStream`, which turns
+  each regional indicator back into its letter, exactly as `PlainStream` takes
+  colour out for a reader who is not having it. The reason it has to be a
+  boundary and not a setting is `write_summary`: the report is rendered once
+  and read by a terminal and a browser together, and `tee`'s `per_reader` is
+  not available to it for the reasons written on `tee`. A style threaded
+  through `row_cells`, the summary and the bar would also be a fourth thing
+  for the two views to disagree about.
+- **The browser is sent a flag, and is now also sent something to draw it
+  with.** Nothing on the feed's route passes a terminal, so nothing spells a
+  flag out there. What a browser then draws was for a while not this program's
+  to decide: no monospace font has a glyph for a regional indicator pair, and
+  Windows has no emoji font that draws a flag at all, so Chrome and Edge there
+  drew the two letters in boxes. `flags.woff2` is the answer and is the one
+  exception to the page being a single file; the reasoning sits on `FONT_FILE`
+  in `web.py`. Three things about it are easy to undo: the page asks for it
+  through `BASE`, because a relative url in CSS resolves against whichever of
+  the page's two addresses the reader arrived by; it asks only when a status
+  frame says `countries`, because `FontFace.load()` fetches when it is called
+  and a face built at startup sent 78 KB to every browser watching a run that
+  would never draw a flag; and
+  the emoji families still named after the monospace ones are the fallback for
+  a build with the font left out. The `unicodeRange` on the face is what keeps
+  it off every other character once it is there. `flags-licence` has to stay
+  in the wheel
+  beside it, since the artwork is CC BY 4.0 and the credit travels with the
+  material. `test_country` holds the licence's checksum to the font that is
+  actually there, and `test_web_server` fetches the route.
+- **Both forms are two characters wide**, on screen and to `len`, and every
+  column in the program measures its contents with `len`. That is what lets
+  `endpoint`, `with_names` and the status bar go on padding as they always
+  did. A marker is three characters, the space included, in either form. A
+  change that made one form wider than the other would leave every column
+  that holds an address a character out, and only in one of the two views.
+- **`_record` packs 28 bit records with the high nibble to the left.** Get
+  that backwards and the tree still walks perfectly and answers with somebody
+  else's country. `test_country` builds the same database at all three widths
+  and asks it the same questions, which is the only thing that catches it,
+  since 24 and 32 have no nibble to get wrong. It is the one width no real
+  file has confirmed here: the free country databases are 24 bit, so what the
+  packing rests on is the specification and the suite's own three way
+  agreement.
+- **An IPv4 address in an IPv6 database is at ::/96**, which is ninety six
+  zero bits before the address itself. `_bits` arranges that by reading the
+  same number as 128 bits wide rather than 32, which puts the zeros there
+  already. A reader that skipped them answers from whatever sits at the top of
+  the v6 tree, for every address.
+- **Whether a database is loaded and whether the display is marking are two
+  questions.** `--json` carries `src_country` and `dst_country` whenever one
+  is loaded, the way it carries `src_host` whatever the n key is doing; the g
+  key moves the second and not the first. Both live on the module rather than
+  on `args`, where the other display switches live, because `display`, `cli`
+  and `statusbar` all ask and share no arguments. It is what `services` does
+  and the reasoning is written where the state is.
+
+### Fetching one
+
+A run that searches and finds nothing offers to fetch a database. Seven things
+about that are worth knowing before touching it.
+
+- **A HEAD settles whether there is an offer to make, and it goes after both
+  guards rather than before them.** `probe` asks db-ip.com for the headers of
+  both months and hands back the URL that answered, the size it named and what
+  went wrong. It exists so that nobody is put a question whose yes could not
+  have been carried out: a reader with no route out would otherwise say yes,
+  wait, and be told it failed, when the useful answer was always the two
+  download pages, which is what `find_online` gives them. Two things about its
+  position are load-bearing. It is the only request this program makes before
+  anybody has agreed to anything, so it is announced on the line above itself,
+  the way `config` prints which file it read: the line is the mitigation, not
+  decoration. And it sits below the terminal check, so a run under systemd or
+  cron or docker makes no request at all rather than merely asking no question;
+  `test_country` pins that with a probe that counts its calls. `PROBE_TIMEOUT`
+  is shorter than `DOWNLOAD_TIMEOUT` on purpose, because the machine this
+  matters on is the one that drops packets rather than refusing them, and
+  thirty seconds of that in front of a collector that runs perfectly well
+  anyway looks like a program that has hung.
+
+- **The licence decides which publisher can be offered, and there is only
+  one.** DB-IP's lite build is a plain URL under Creative Commons Attribution
+  4.0, and their terms of service put the free files outside their own terms
+  and under that licence expressly. MaxMind's GeoLite2 wants an account and a
+  licence key before a byte moves, and obliges a holder to delete a database
+  within thirty days of a newer one. Neither is a thing a yes at a prompt can
+  stand in for, so GeoLite2 is named in the declined message and nowhere else.
+  A change that added a second publisher here is a licence question before it
+  is a code question.
+- **That licence asks for a credit, and this program pays it rather than
+  leaving it to the reader.** `credit()` answers the words and the address for
+  a DB-IP file, `describe()` puts them on the startup line, and `web_status`
+  sends the pair so the page can make the link DB-IP's own wording asks a web
+  page for. It is decided from `database_type` and not from whether this
+  program did the fetching: a DB-IP file somebody installed by hand is under
+  the same terms. The page hardcodes neither the words nor the address, for
+  the reason it hardcodes no column and no key, and `test_country` greps it
+  for both.
+- **`missing()` is not `not loaded()`.** Only a search that found nothing is
+  worth offering a fetch for. A `--country-db` naming a file that is not there
+  is a typo, and a file that was found and would not read is a file to name
+  rather than a reason to fetch another: the broken one is still first in the
+  search order, so a copy fetched into some other directory would be found
+  second by every later run and never read.
+- **Both stdin and stderr have to be a terminal before anything is asked.**
+  This program runs from systemd, from cron and inside a container far more
+  often than it runs from a keyboard, and a question written where nobody is
+  reading and answered by whatever a pipe held is a program that downloads a
+  file because it was run from cron. The question goes to stderr and not
+  through `input`, whose prompt goes to stdout, which is where the flow rows
+  go. Nothing is asked either when `destination()` answers None, since a yes
+  could only have been followed by a refusal.
+- **The Unix search list ends with a per-user path, and that is what makes a
+  yes mean anything.** Every path above it belongs to root. It is last rather
+  than first so that a machine syncing a database into `/usr/share/GeoIP` goes
+  on reading the copy something else keeps current. `destination()` is what
+  both the fetch and the "put one at" hint name, so the two cannot disagree,
+  and it creates nothing on its way past: a hint that made `/etc/nettail`
+  would be doing something nobody asked for.
+- **What is fetched is opened before it is moved into place.** The bytes came
+  off the network, and a half written or plainly wrong file left under a name
+  the search looks in would be found by every later run and refused by every
+  one of them, which is worse than the state it started in. That check is also
+  why `Database.__init__` closes its mapping when it raises: on Windows a
+  mapped file cannot be deleted or replaced, so without it the very caller
+  that opens a file to decide whether to throw it away cannot then throw it
+  away.
+
+`download` and `probe` both take their opener, so the suite exercises the
+fetch, the probe, both months, every failure and the offer around them without
+touching the network. There is no check that the real URL is still there and
+there should not be one: a suite that fails when db-ip.com is down is a suite
+that fails for reasons that are none of this program's business. What the fake
+opener stands in for was checked by hand against the real server, and is worth
+rechecking if any of it is changed: a month that is there answers a HEAD with
+200 and a `Content-Length`, and a month that is not answers a plain 404 rather
+than a 403 or a redirect, which is what makes the fall back to the previous
+month work.
+
+The size in the offer comes from that `Content-Length` rather than from a
+figure in the source. That is deliberate and worth keeping: the file grows
+every month, and a number written into the prose would be wrong within a year
+and wrong in the two places the prose lives. The size in the README's sample
+run is a snapshot of one run and reads as one, which is what a transcript is
+for; it is not a second claim about the file. Where the server names no length
+the whole clause goes, destination included, because "about twice that" with
+no size before it is a sentence about nothing, and that is what `test_country`
+pins rather than merely the absence of a figure.
+
+Nothing in the suite draws on a terminal or opens a browser, so the manual
+check is the real acceptance step, as it is for the QR code. Run with
+`--country` at a real terminal and confirm the columns still line up with a
+flag in them, and open `--web` beside a `--country-style code` terminal to see
+the two views differ in the one way they are meant to. The offer has a manual
+step of its own, and it is the only place a real fetch happens: move whatever
+database this machine has out of the way, run `--country`, say yes, and check
+that what comes down reads and that the credit is on the startup line and in
+the browser's status bar.
+
+`terminal_flags` is a guess and may only choose prose, in the sense
+`in_container` may: there is no query for "can you draw a flag", so what it
+knows is where one is certainly not drawn. It takes the environment and the
+platform as arguments so that every branch can be asked about from a runner
+that is none of them.
 
 ## Settings from a file
 
@@ -550,10 +734,15 @@ feature means reading both, and their suites.
   **The stripper takes SGR and nothing else.** `sticky.py` and `statusbar.py`
   write scroll margins, cursor moves and erases to the same stream, and a
   general ANSI strip would leave the display drawing over itself while looking
-  right in a file. `tee` renders twice when the two disagree, which is the one
-  concession: the host list marks a superseded name with a star when there is
-  no colour to dim it with, so a reader without colour is shown different
-  words and not the same words undressed. `colour_on(stream)` is what that
+  right in a file. There is a second boundary of the same shape now, the one
+  that spells a country flag out as two letters, so `FilterStream` is the
+  plumbing under both and `colour_on` asks the stream rather than testing it
+  with `isinstance`: two wrappers can sit around one terminal in either order,
+  and the outermost is not the one with the answer. `tee` renders twice when
+  the two disagree, which is the one concession: the host list marks a
+  superseded name with a star when there is no colour to dim it with, so a
+  reader without colour is shown different words and not the same words
+  undressed. `colour_on(stream)` is what that
   site asks, never `C.enabled()`. One switch for both is what this replaced,
   and the case it got wrong was the one the image exists for: a detached
   container has no terminal, so the browser view came out white.

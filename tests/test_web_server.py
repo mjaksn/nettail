@@ -123,6 +123,60 @@ try:
     check("nor a selector out of what it was given",
           re.search(r"querySelector(All)?\s*\([^)]*\+", body) is None)
 
+    # -- the flags font ---------------------------------------------------
+    # The one thing this interface serves besides the page, and the exception
+    # to its being a single file. It is asked for through BASE like the stream
+    # and the key route, because the page answers at two addresses, with and
+    # without the trailing slash, and a relative url in CSS would resolve
+    # against whichever one the reader arrived by.
+    check("the page asks for the font through BASE, not relatively",
+          re.search(r"BASE\s*\+\s*['\"]/flags\.woff2", body) is not None,
+          "a relative url breaks on one of the two addresses the page "
+          "answers at")
+    check("and registers it for the flag letters and nothing else",
+          "U+1F1E6-1F1FF" in body)
+    # And asks for it only when the collector says it is marking countries. An
+    # eager load is what this replaced: FontFace.load() fetches when it is
+    # called, so a page that built the face at startup sent 78 KB to every
+    # browser watching a run that will never draw a flag.
+    check("and asks for it only when there are flags to draw",
+          re.search(r"payload\.countries\s*\)\s*\{\s*wantFlags\(\)", body)
+          is not None, "the fetch has to hang off the status")
+    check("and asks in one place, so there is one place to be wrong",
+          body.count("new FontFace(") == 1, str(body.count("new FontFace(")))
+    check("the policy lets it fetch that font, and only from here",
+          "font-src 'self'" in page.headers["Content-Security-Policy"])
+
+    font = urllib.request.urlopen(
+        urllib.request.Request("http://%s/t/%s/flags.woff2" % (host, site.token),
+                               headers={"Host": host}), timeout=TIMEOUT)
+    body_font = font.read()
+    check("the font is served", font.status == 200)
+    check("as a woff2", font.headers["Content-Type"] == "font/woff2")
+    check("and is one", body_font[:4] == b"wOF2", repr(body_font[:4]))
+    check("and is the whole of it, rather than a truncated read",
+          len(body_font) == len(site.font) > 20000, str(len(body_font)))
+    # Everything else here is no-store, which is right for a live view. This
+    # is part of the release rather than the run: it cannot change while the
+    # process lives, and a new one comes with a new version and a new token.
+    check("it is cached, unlike everything else here",
+          "immutable" in (font.headers["Cache-Control"] or ""),
+          repr(font.headers["Cache-Control"]))
+    check("and is not sniffed for a type of its own",
+          font.headers["X-Content-Type-Options"] == "nosniff")
+
+    # Behind the token like every other route. A font is only a font, but an
+    # unguarded one answers a scanner that never had the token and says what
+    # this is.
+    try:
+        urllib.request.urlopen(
+            urllib.request.Request(
+                "http://%s/t/%s/flags.woff2" % (host, "not-the-token"),
+                headers={"Host": host}), timeout=TIMEOUT)
+        check("the font is behind the token", False, "it was served")
+    except urllib.error.HTTPError as exc:
+        check("the font is behind the token", exc.code == 404, str(exc.code))
+
     # A response that is not a 200 fails an EventSource permanently: the state
     # goes to CLOSED rather than CONNECTING, so the retry branch never sees it.
     # Handling only CONNECTING left the reader on "connecting" for ever with

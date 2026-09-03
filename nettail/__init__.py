@@ -18,6 +18,7 @@ draws what the terminal draws rather than deciding anything of its own.
 
     colour      ANSI codes and the switch that disables them
     config      settings read from a file, and one written back out
+    country     what country an external address is in, and its flag
     values      sizes, rates and durations, written for a column
     sizescale   the colour ramp behind the BYTES column
     services    port names, the system database first and a shipped list after
@@ -39,10 +40,10 @@ which is not netflume's function but this package's wrapper around it.
 
 Loading and parsing the supplemental service list are left on the module rather
 than lifted out of it: ``services.load()`` says what it loads and a bare
-``load`` in this namespace would not. The config module keeps most of itself
-back for the same reason: ``config.read``, ``config.write``, ``config.find``
-and ``config.search_paths`` all say what they are about where they are, and
-none of those words says anything at all here.
+``load`` in this namespace would not. The config and country modules keep most
+of themselves back for the same reason: ``config.read``, ``config.write``,
+``country.load``, ``country.mark`` and ``country.Database`` all say what they
+are about where they are, and none of those words says anything at all here.
 
 ``qr.render`` is the one name below that could not be brought up, because
 ``display.render`` is already here and means something else entirely: one lays
@@ -51,12 +52,15 @@ caller wanting the second asks ``qr.render`` for it. Nothing else in that
 module collides.
 """
 
-__version__ = "0.10.0"
+__version__ = "0.11.0"
 
 from .cli import (
+    ask_yes_no,
+    at_a_terminal,
     build_parser,
     flow_record,
     main,
+    offer_country_db,
     report_events,
     should_show,
     tee,
@@ -65,6 +69,30 @@ from .cli import (
 )
 from .colour import C
 from .config import CONFIG_NAME, SECTION, settable
+from .country import (
+    CACHE_MAX,
+    DBIP_CREDIT,
+    DBIP_HOME,
+    DBIP_LICENCE,
+    DBIP_PAGE,
+    DOWNLOAD_TIMEOUT,
+    MAXMIND_PAGE,
+    PROBE_TIMEOUT,
+    UNIX_PATHS,
+    WINDOWS_PATHS,
+    BadDatabase,
+    CodeStream,
+    country_of,
+    credit,
+    destination,
+    download,
+    download_urls,
+    find_online,
+    probe,
+    search_paths,
+    spell_flags,
+    terminal_flags,
+)
 from .display import (
     COLUMNS,
     ENDPOINT_INDENT,
@@ -141,6 +169,12 @@ from .web import (
 __all__ = [
     "C", "CONFIG_NAME", "Controls", "DEFAULT_SIZE_SCALE_MAX",
     "ENDPOINT_INDENT", "SECTION", "settable",
+    "CACHE_MAX", "UNIX_PATHS", "WINDOWS_PATHS", "BadDatabase", "CodeStream",
+    "country_of", "search_paths", "spell_flags", "terminal_flags",
+    "DBIP_CREDIT", "DBIP_HOME", "DBIP_LICENCE", "DBIP_PAGE",
+    "DOWNLOAD_TIMEOUT", "MAXMIND_PAGE", "PROBE_TIMEOUT",
+    "credit", "destination", "download", "download_urls", "find_online",
+    "probe",
     "ENDPOINT_WIDTH", "WAY_WIDTH", "flow_macs", "human_clock", "way",
     "HELP_KEY", "KEY_HELP", "KEY_WIDTH", "KEYS", "Keyboard",
     "PAUSE_BUFFER", "QR_KEY",
@@ -157,7 +191,7 @@ __all__ = [
     "EPHEMERAL_FLOOR", "SUPPLEMENTAL_SERVICES", "service_name",
     "proto_colour", "write_summary", "write_hosts", "SpanScale",
     "enable_windows_vt", "endpoint",
-    "build_parser",
+    "ask_yes_no", "at_a_terminal", "build_parser", "offer_country_db",
     "human_bytes", "human_count", "main", "render", "report_events",
     "should_show", "size_scale_arg", "size_window_arg",
     "COLUMNS", "row_cells", "tee", "flow_record",

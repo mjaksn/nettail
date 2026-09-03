@@ -14,6 +14,7 @@ from collections import deque
 
 from lanname import MODE_DESC, Resolver
 
+from . import country
 from .colour import C
 from .display import HEADER_LINE
 from .sizescale import size_scale_arg
@@ -53,6 +54,7 @@ KEYS = (
     ("p", "show hardware addresses on a line under each flow"),
     ("f", "show full domain names instead of the first label"),
     ("e", "show only flows with a public endpoint, or show all"),
+    ("g", "mark external addresses with the country they are in, or stop"),
     (QR_KEY, "print a QR code for the web interface URL, and the URL under it"),
     (HELP_KEY, "this list"),
     ("esc", "close the program, printing the exit summary"),
@@ -363,6 +365,7 @@ class Controls:
             "h": self._resolve_mode,
             "f": self._fqdn,
             "e": self._external,
+            "g": self._country,
             QR_KEY: self._qr,
             HELP_KEY: self._help,
         }
@@ -594,3 +597,23 @@ class Controls:
         self.args.external_only = not self.args.external_only
         return ("showing only flows with a public endpoint"
                 if self.args.external_only else "showing every flow")
+
+    def _country(self):
+        """Mark external addresses with the country they are in, or stop.
+
+        The one key whose answer depends on something outside the program.
+        Without a database there is nothing to turn on, and a key that
+        silently did nothing would be read as a display that knows no
+        countries rather than as a run that was never given a file to read
+        them out of, so it says which.
+
+        Whether it is on lives in `country` rather than on `args`, where the
+        other display switches live. Three modules with no arguments in common
+        ask the question, and the reasoning is written where the state is.
+        """
+        if not country.loaded():
+            return ("no country database is loaded: start with --country, or "
+                    "--country-db pointing at a MaxMind format file")
+        if country.show(not country.showing()):
+            return "marking external addresses with their country"
+        return "no longer marking countries"

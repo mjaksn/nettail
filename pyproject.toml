@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nettail"
-version = "0.10.0"
+version = "0.11.0"
 description = "A NetFlow v5, NetFlow v9 and IPFIX collector that prints flows to a console, with hostnames, colour, a live status bar and an optional browser view"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -62,16 +62,21 @@ Changelog = "https://github.com/mjaksn/nettail/blob/main/CHANGELOG.md"
 packages = ["nettail"]
 
 [tool.setuptools.package-data]
-# Two files the program reads at startup rather than imports, so nothing would
-# pull either into the wheel by itself. Both fail quietly and confusingly when
-# left out, which is why they are named here and checked by the build job in
-# CI rather than trusted to stay listed.
+# Files the program reads at startup rather than imports, so nothing would pull
+# any of them into the wheel by itself. Each fails quietly and confusingly when
+# left out, which is why they are named here and checked by the build job in CI
+# rather than trusted to stay listed.
 #
 # Without the supplemental service list, every port the system services
 # database does not know prints as a bare number, and the collector says so
 # once at startup. Without web.html there is nothing to serve, so a collector
 # started with --web prints a URL that answers every request with an error.
-nettail = ["supplemental-services", "web.html"]
+# Without flags.woff2 the browser view falls back to whatever emoji font the
+# machine has, which on Windows draws a country's two letters in boxes rather
+# than its flag; flags-licence says where that font came from and under what
+# terms, and has to travel with it, since the artwork is CC BY 4.0 and asks
+# for the credit to go wherever the material does.
+nettail = ["supplemental-services", "web.html", "flags.woff2", "flags-licence"]
 
 [tool.ruff]
 line-length = 88

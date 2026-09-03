@@ -129,6 +129,13 @@ jobs:
           page = here / "web.html"
           assert page.exists(), "web.html missing from the wheel"
           assert "<title>nettail</title>" in web.load_page(), "the page did not load"
+          # And the font the page asks for, with the licence that has to
+          # travel beside it. Left out, the browser view quietly loses its
+          # flags on any machine whose own fonts have none.
+          font = web.load_font()
+          assert font is not None, "flags.woff2 missing from the wheel"
+          assert font[:4] == b"wOF2", "flags.woff2 is not a woff2 file"
+          assert (here / "flags-licence").exists(), "flags-licence missing"
           print("ran", nettail.__version__, "from", here)
           PY
 

@@ -44,6 +44,7 @@ TIME         EXPORTER        PROTO  SOURCE                                     D
 - [The traffic summary](#the-traffic-summary)
 - [Output format](#output-format)
 - [Hostname resolution](#hostname-resolution)
+- [Country marking](#country-marking)
 - [JSON output](#json-output)
 - [Installing it](#installing-it)
 - [Running as a service](#running-as-a-service)
@@ -226,7 +227,8 @@ usage: nettail [-h] [--version] [--config FILE | --save-config [FILE]]
                [--no-supplemental-services] [--web] [--web-port PORT]
                [--web-bind ADDR] [--web-host NAME] [--web-token TOKEN]
                [--web-colour WHEN] [--web-readonly] [--size-scale-max BYTES |
-               --size-scale-dynamic] [--size-scale-window FLOWS]
+               --size-scale-dynamic] [--size-scale-window FLOWS] [--country]
+               [--country-db FILE] [--country-style {auto,flag,code}]
                [--resolve {off,dns,all}] [--hosts FILE] [--resolve-public]
                [--fqdn] [--resolve-workers RESOLVE_WORKERS]
                [--resolve-timeout RESOLVE_TIMEOUT]
@@ -302,6 +304,17 @@ the header is pinned, since the repeats would be redundant.
 | `--size-scale-window FLOWS` | off | Scope the dynamic scale to the last N flows instead of the whole run. Implies `--size-scale-dynamic`, so it cannot be combined with `--size-scale-max` |
 
 See [Size colour scale](#size-colour-scale) for what the colours mean.
+
+### Country marking
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `--country` | off | Mark every public address with the country it is in. Implied by `--country-db` |
+| `--country-db FILE` | searched | The database to read. Without it, the first of `/etc/nettail/country.mmdb`, `/usr/share/GeoIP/GeoLite2-Country.mmdb` and `/var/lib/GeoIP/GeoLite2-Country.mmdb` that exists, and a few more besides |
+| `--country-style {auto,flag,code}` | `auto` | How **this terminal** is shown a country: `flag` for the emoji, `code` for the two letters, `auto` for the letters wherever a flag is known not to be drawn. The browser is sent the flag whatever this says, and draws it or not by its own fonts |
+
+See [Country marking](#country-marking) for where the database comes from and
+what is marked.
 
 ### Hostname resolution
 
@@ -657,8 +670,8 @@ one line under the startup banner says so:
 keys: the collector takes single keypresses; press ? to list them
 ```
 
-That is the whole of it. The line used to name all sixteen keys, which ran to
-two hundred characters and wrapped on any ordinary terminal, and it scrolled
+That is the whole of it. The line used to name every key, which ran to two
+hundred characters and wrapped on any ordinary terminal, and it scrolled
 away with the banner regardless, so the reader who wanted it an hour later was
 no better off for its having been thorough. `?` answers that reader instead,
 whenever they ask. What the line still has to say for itself is that there are
@@ -681,6 +694,7 @@ keyboard has no reason to press anything, `?` included.
 | `p` | Show hardware (MAC) addresses on a line under the flow |
 | `f` | Toggle full domain names |
 | `e` | Toggle showing only flows with a public endpoint |
+| `g` | Mark public addresses with the country they are in, or stop. See [Country marking](#country-marking) |
 | `q` | Print a QR code for the `--web` URL, with the URL under it. See [The web interface](#the-web-interface) |
 | `?` | List every key and what it does, without stopping |
 
@@ -718,6 +732,12 @@ leave them out. Where a flow carries none the line is not printed at all rather
 than printed empty, so turning `p` on costs nothing on an exporter that cannot
 answer. Where only one end is known the other reads `-`.
 
+`g` is the country marking, and it is the one key whose answer depends on
+something outside the program: with no database loaded there is nothing to turn
+on, and it says so rather than appearing to work. A run started with
+`--country` has it on already, so the key is there for turning it off, which is
+worth having when a wide column and a long hostname are competing for the room.
+
 `l` lists every local address that has answered to a name at any point in the
 session, not what happens to be cached, since names expire and the cache
 evicts, and the useful question hours later is still "what did you see". Where
@@ -754,6 +774,7 @@ Keyboard controls
       p  show hardware addresses on a line under each flow
       f  show full domain names instead of the first label
       e  show only flows with a public endpoint, or show all
+      g  mark external addresses with the country they are in, or stop
       q  print a QR code for the web interface URL, and the URL under it
       ?  this list
     esc  close the program, printing the exit summary
@@ -1080,6 +1101,9 @@ of stdout. `--web-colour off` is how a run says otherwise.
 - The page keeps the last few thousand rows and trims the rest, saying so when
   it does. A tab left open on a busy link would otherwise become unusable.
 - IPv4 only, matching the collector socket.
+- The page fetches one thing besides itself, `flags.woff2`, and only when
+  there are country flags on it to draw. Everything else it needs is inside
+  it, and it reaches for nothing off this machine at all.
 
 ---
 
@@ -1649,6 +1673,252 @@ The lookup queue holds 4096 pending addresses; overflow is counted as
 
 ---
 
+## Country marking
+
+Off unless asked for. With `--country`, every public address is marked with the
+flag of the country a database says it sits in, everywhere an address is shown:
+in the flow rows, in the summary's tables, and in the top talker on the status
+bar.
+
+```
+140.82.114.4:443/https 🇺🇸 (github)
+```
+
+The flag goes after the port and the service name and in front of the brackets,
+which mean a resolved hostname and nothing else. Under the `n` key, which shows
+a host by its name instead of its address, it rides along with the name: it is
+the same host, and the country is a fact about the host rather than about the
+notation. Where a narrow column has to choose, the service name is dropped
+before the flag is.
+
+An address on this network is never marked, whatever a database says about the
+range it belongs to. A private address has no country to be in, and the
+question the mark answers is about the far end of a flow. That is why the
+summary's internal table has no flags in it while the external one does, and
+why only one end of most rows carries one.
+
+### Where the data comes from
+
+Nothing ships with this program, and nothing is fetched unless you say so at
+the keyboard. No address ever leaves this machine to be asked about: a country
+is read out of a file that is already here. What a flag says is whatever that
+file says.
+
+The file is a MaxMind format database, `.mmdb`, which is what the free country
+databases are distributed as. Any of these does:
+
+- **DB-IP IP to Country Lite**, no account needed, updated monthly, CC BY 4.0:
+  <https://db-ip.com/db/download/ip-to-country-lite>
+- **MaxMind GeoLite2 Country**, free with an account:
+  <https://dev.maxmind.com/geoip/geolite2-free-geolocation-data>
+- Whatever `geoipupdate` or your distribution's `geoip-database` package has
+  already put in `/usr/share/GeoIP`, which is where a machine that syncs one
+  keeps it current for you.
+
+A City database answers the country question too and is read the same way, so
+a machine that already has one needs no second file.
+
+With no `--country-db` the first of these that exists is read:
+
+```
+/etc/nettail/country.mmdb
+/usr/share/GeoIP/GeoLite2-Country.mmdb
+/var/lib/GeoIP/GeoLite2-Country.mmdb
+/usr/local/share/GeoIP/GeoLite2-Country.mmdb
+/usr/share/GeoIP/dbip-country-lite.mmdb
+/usr/share/GeoIP/GeoLite2-City.mmdb
+/var/lib/GeoIP/GeoLite2-City.mmdb
+```
+
+On Windows none of those exists or ever could, so two of this program's own
+are looked at instead, the per-user one first because it is the one you can
+create without being an administrator:
+
+```
+%LOCALAPPDATA%\nettail\country.mmdb
+%PROGRAMDATA%\nettail\country.mmdb
+```
+
+There is one more place on Unix, after all of those: whichever of
+`$XDG_DATA_HOME/nettail/country.mmdb` and
+`~/.local/share/nettail/country.mmdb` your environment settles on. It is last
+so that a machine already syncing a database into `/usr/share/GeoIP` goes on
+reading the copy something else keeps current, and it exists because every
+path above it belongs to root, which is no use for a database you fetched for
+yourself.
+
+### Being offered one
+
+Finding none, at a terminal, you are asked whether to fetch one:
+
+```
+no country database found. Looked in /etc/nettail, /usr/share/GeoIP,
+/var/lib/GeoIP, /usr/local/share/GeoIP, /home/you/.local/share/nettail.
+asking db-ip.com whether there is one to fetch
+DB-IP publish a free one, IP to Country Lite, under the Creative Commons
+Attribution 4.0 licence. It is 3.9M to fetch and about twice that unpacked,
+at /home/you/.local/share/nettail/country.mmdb. No address goes anywhere
+either way: a country is read out of the file on this machine, then and
+afterwards.
+fetch it now? [y/N]
+```
+
+The default is no, and so is a bare return, an end of input and anything that
+is not `y` or `yes`. Ctrl-C ends the run rather than answering it. Say yes and
+the file is fetched, unpacked, opened to check that it really is a database,
+and only then moved into place, so an interrupted fetch leaves nothing behind
+for a later run to trip over.
+
+The middle line is the one request that goes out before you have agreed to
+anything. It is a HEAD, so it fetches no file: it asks whether there is one
+there and how big it is, and the size you are quoted is the server's own
+answer rather than a figure written down here. It is printed rather than done
+quietly because it is the only time this program contacts anybody without
+being told to, and a run that reached out silently would be worse than one
+that did not reach out at all.
+
+That question is also what decides whether you are asked at all. A machine
+with no route out, behind a proxy that refuses, or on a network that drops the
+request gets no prompt, because a yes there was never going to work. It is
+told what went wrong and where to go instead:
+
+```
+no address will be marked: db-ip.com could not be reached (...). A country
+database is a MaxMind format .mmdb file, and either of the free ones does:
+DB-IP's IP to Country Lite at https://db-ip.com/db/download/ip-to-country-lite,
+which needs no account, or MaxMind's GeoLite2 Country at
+https://dev.maxmind.com/geoip/geolite2-free-geolocation-data, which needs a
+free one. Put it at /home/you/.local/share/nettail/country.mmdb, or point
+--country-db at it wherever it is.
+```
+
+The collector then runs on exactly as it would have, with no address marked.
+
+DB-IP is the only publisher this can offer, because it is the only one that
+can be fetched at all. Their lite build sits behind a plain URL under a licence
+that asks for a credit and nothing else, while GeoLite2 wants an account and a
+licence key before a byte moves and obliges you to delete a copy within thirty
+days of a newer one. Neither of those is a thing a yes or no at a prompt can
+stand in for, so a GeoLite2 file is one you fetch yourself and point
+`--country-db` at.
+
+The credit that licence asks for is this program's to pay rather than yours. A
+run reading a DB-IP database says `IP Geolocation by DB-IP, https://db-ip.com`
+on its startup line, and the browser view, which is the reader DB-IP's own
+wording asks for a link, puts one at the end of its status bar. Both come from
+what the file says it is rather than from how it arrived, so a DB-IP file you
+fetched by hand is credited exactly as one fetched here is.
+
+Nothing is asked where nobody could answer. Both stdin and stderr have to be a
+terminal, which they are not under systemd, cron, a pipe or a container. Those
+runs make no request either: the terminal check comes before the HEAD, not
+after it, so a collector running as a service never contacts db-ip.com at all.
+Nothing is asked either when there is nowhere writable to put a file, since a
+yes there could only have been followed by a refusal.
+
+Finding none where the question cannot be put is one line at startup saying
+where it looked, and the collector runs on unmarked. So is a file that will not
+open or does not read as a database, so is a declined offer, and so is a fetch
+that fails. A successful load says which file it read and when the file was
+built, and says so out loud when that was more than a year ago, since a country
+assignment that has moved since looks exactly like one that has not.
+
+Running as a service or in a container, `/etc/nettail/country.mmdb` is the path
+to use: it is first in the list above, the installer already owns that
+directory, and mounting a single file into a container is one line in the
+compose file. The unit and the compose file do not pass `--country` themselves,
+so adding the flag to either is what turns it on, the same decision `--web-bind`
+leaves to you.
+
+Reading the format is about two hundred lines in `country.py` rather than a
+dependency, for the same reasons the QR encoder is not one: this program
+installs three pure Python packages and nothing else, the test suite has no
+dependencies at all, and the container image pins every byte it fetches by
+hash. A library here would make all three false at once, for a file you have to
+supply either way.
+
+### Flags, and terminals that cannot draw them
+
+A flag emoji is not a picture in the font sense. It is the country's two
+letters written as regional indicator characters, and a terminal draws a flag
+if it has one and the two letters in boxes if it does not. Nothing can be asked
+which it will do.
+
+So `--country-style auto`, the default, gives the letters wherever a flag is
+known not to be drawn and the flag everywhere else:
+
+```
+140.82.114.4:443/https US (github)
+```
+
+Known not to be drawn means Windows, which ships no flag in any of its fonts;
+macOS Terminal, which does not draw one dependably and is the one terminal that
+says who it is in the environment; the Linux console, `TERM=dumb`, and no `TERM`
+at all; a stream that is not a terminal, since letters survive a file, a pipe
+and a paste into anything; and a stream whose encoding cannot carry the
+characters. Everything else is given the flag. `--country-style flag` and `--country-style code` settle it either way
+without guessing.
+
+Both forms are two characters wide, which is why the columns line up the same
+under either.
+
+The browser is always sent the flag, whatever this terminal was judged able to
+draw, and `--country-style` does not decide for it. The two are shown the same
+characters everywhere else, so this is arranged the way colour is: the flag is
+painted once where the row is built, and spelled back out as two letters on the
+way to a terminal that cannot draw it.
+
+Sent is not the same as drawn, and for a while that was the end of it. A flag
+is two regional indicator letters, no monospace font has a glyph for the pair,
+and the browser falls back to whatever emoji font the machine has. Windows has
+none that draws a flag, by a decision that has held for a decade, so Chrome and
+Edge there drew the country's two letters in a pair of boxes and nothing about
+the page could change it.
+
+So the collector ships the font and serves it. `flags.woff2` is 78 KB of
+colour vector flags and nothing else, fetched from the token's own URL and used
+for the regional indicator letters alone, so a machine that already draws flags
+goes on using its own font for every other character on the page. It is the one
+thing the page asks for besides itself, and the one exception to its being a
+single file. A build without it falls back to the machine's emoji fonts exactly
+as before, which is what the fonts named after it in the stylesheet are for.
+
+It is fetched only by a page that has flags to draw. The collector says in
+every status frame whether it is marking countries, and the page asks for the
+font on the strength of that and nothing else, once: a run without `--country`
+never sends it, and pressing `g` mid-run has the browser fetch it within a
+repaint interval. It is served with a year's caching and marked immutable,
+since it changes only with a new version of this program, under a URL whose
+token has changed as well.
+
+The font is Twemoji artwork, used under CC BY 4.0 and taken from TalkJS's
+[country-flag-emoji-polyfill](https://github.com/talkjs/country-flag-emoji-polyfill)
+unchanged. `nettail/flags-licence` ships beside it and says so, with the source
+and the checksum; the test suite holds the two to each other so the file cannot
+come to describe a font that is not there.
+
+### What it is worth
+
+Not much, taken literally, and it is worth knowing which questions it can
+answer. A country database records where an address block is registered or
+routed, which is not where the machine is and not where the person is. A CDN
+answers from wherever it likes, an anycast address is in every country at once,
+a VPN puts everybody in whichever country the exit is in, and a block that
+changed hands answers with whoever the file was built before.
+
+What it is good for is noticing: a home network that suddenly has flows to a
+country nothing on it has ever talked to is worth a second look, and that is a
+question a rough answer answers perfectly well. It is not evidence of anything
+on its own.
+
+`--json` carries the two letter code rather than the flag, in `src_country` and
+`dst_country`, and carries it whenever a database is loaded. See
+[JSON output](#json-output).
+
+The `g` key turns the marking off and on while the collector runs.
+
+---
+
 ## JSON output
 
 `--json` writes one object per line to stdout, flushed immediately, suitable for
@@ -1670,7 +1940,11 @@ are added with a leading underscore:
 | `_timestamp` | Flow start as a unix float |
 
 `src_host` and `dst_host` are present only when a hostname is known, so their absence
-is normal and not a schema change.
+is normal and not a schema change. `src_country` and `dst_country` are the same:
+present when a country database is loaded and has an answer for that end, and
+absent otherwise, which is every run that did not ask for one. They carry the
+two letter code and never the flag, because this is the half of the output
+meant to be parsed. See [Country marking](#country-marking).
 
 Example:
 
@@ -1947,13 +2221,21 @@ The collector keeps no state. It holds what it is showing in memory and writes
 nothing, so there is no volume to mount and nothing to lose. A restart starts
 counting again, which is the same thing `Ctrl-C` and a fresh run do.
 
-The one thing worth mounting is your own static name mappings:
+Two things are worth mounting. Your own static name mappings:
 
 ```
 -v ./lan-hosts:/etc/nettail/lan-hosts:ro
 ```
 
-and then `--hosts /etc/nettail/lan-hosts`.
+and then `--hosts /etc/nettail/lan-hosts`. And a country database, if you want
+`--country`, which is a file you fetch rather than one this image could ship:
+
+```
+-v ./dbip-country-lite.mmdb:/etc/nettail/country.mmdb:ro
+```
+
+and then `--country`, which needs no path since that is the first place it
+looks. See [Country marking](#country-marking).
 
 It runs as an unprivileged user, UID and GID 10001. The default port is 2055,
 which is above 1024 and so needs no privilege to bind.
@@ -2034,6 +2316,7 @@ subprocesses. Everything else is the package:
 | `sizescale.py` | the colour ramp behind the BYTES column |
 | `services.py` | port names, the system database first and a shipped list after |
 | `config.py` | settings read from a file, and one written back out |
+| `country.py` | reading a MaxMind format database, the flag an address is marked with, and spelling it out for a terminal that cannot draw one |
 | `display.py` | laying one flow out as a line of text |
 | `sticky.py` | pinning the column header to the top of the window |
 | `statusbar.py` | the two-line bar along the foot of the window |
@@ -2041,6 +2324,8 @@ subprocesses. Everything else is the package:
 | `feed.py` | the events a browser watches, and the bounded queues they wait in |
 | `web.py` | serving those events over HTTP, and taking keys back from a browser |
 | `web.html` | the page itself, shipped as package data |
+| `flags.woff2` | the country flags the browser view draws, shipped as package data, and the one thing the page fetches besides itself |
+| `flags-licence` | where that font came from and under what terms, which has to travel with it |
 | `cli.py` | argument parsing, the receive loop, and the exit summary |
 | `tally.py` | the running totals behind the traffic summary |
 | `keys.py` | reading keypresses, and what each one does |
@@ -2207,6 +2492,7 @@ another suite's result.
 | `test_sticky_with_gradient` | the pinned header and the size ramp sharing one screen |
 | `test_services` | the supplemental port names, the parser behind them, the system database keeping precedence, and the ephemeral floor pinned to where netflume actually puts it |
 | `test_config` | every option set in a file against the same option typed on the command line, the search order on platforms this machine is not, and a saved file read back |
+| `test_country` | the database reader against files the suite writes itself, at all three record widths, and the flag reaching a flow row, the summary and `--json` while never reaching an address on this network |
 | `test_qr` | the encoder against pinned symbols: the format information and its BCH check, the mask that was chosen, and the padding codewords no reader ever looks at |
 | `test_readme_samples` | the transcripts this README quotes, against what the program prints today |
 | `test_endpoints`, `test_top_talkers` | one definition of a flow's ends, both directions counted, and each address table split by direction |
@@ -2251,6 +2537,12 @@ human too.
   HTTP is enough for something bound to loopback and nowhere near enough for
   anything else. See [The web interface](#the-web-interface).
 - **No IOC matching.** By design. See below.
+- **Countries are as good as the file you supply, which is not very.** A
+  database records where a block is registered or routed, not where a machine
+  or a person is, and a CDN, an anycast address or a VPN each defeat it
+  completely. Nothing ships and nothing is looked up over the network, so a run
+  with no database marks nothing at all. See
+  [Country marking](#country-marking).
 - **Options data is read for sampling only.** Other exporter metadata carried in
   options records, such as interface names and application ID mappings, is
   decoded but not displayed.
@@ -2301,3 +2593,10 @@ appear on a blocklist. Worth building, in rough order of yield:
 ## License
 
 MIT. Do what you want with it, and keep the notice. See [LICENSE](LICENSE).
+
+One file in the package is somebody else's work. `nettail/flags.woff2`, the
+country flags the browser view draws, is Twemoji artwork used under
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), taken unchanged from
+TalkJS's [country-flag-emoji-polyfill](https://github.com/talkjs/country-flag-emoji-polyfill),
+whose build is MIT. `nettail/flags-licence` travels with it and says all of
+that where the font is, which is what that licence asks for.

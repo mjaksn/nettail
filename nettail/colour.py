@@ -10,6 +10,12 @@ So colour is painted once, at full strength, and taken out again on the way to
 whichever consumer is not having it. `PlainStream` is that boundary, and
 `strip_colour` is what it does. Painting once rather than twice is what keeps
 one flow's cells built once, which is the rule the display and the feed share.
+
+`FilterStream` underneath it is that boundary in the general: everything a
+real stream is asked for, with one method to override. Colour was the only
+thing the two readers disagreed about until a country flag became the second,
+and `country.CodeStream` stands on the same plumbing rather than on a second
+copy of it.
 """
 import re
 
@@ -62,25 +68,42 @@ def strip_colour(text):
     return _SGR.sub("", text)
 
 
-class PlainStream:
-    """A stream that takes what it is given without the colour.
+class FilterStream:
+    """A stream that rewrites what passes through it on its way to another.
 
-    Wrapped around stdout or stderr for a run whose terminal is not having
-    colour while the browser is. Everything downstream goes on painting as it
-    always did and this takes it out again on the way past, which is why
-    adding a second consumer did not mean threading a colour setting through
-    every function that prints.
+    There are two things a reader may be shown differently from the browser
+    watching the same collector, colour and a country flag, and neither is a
+    difference in what the text says. So the text is written once at full
+    strength and rewritten on the way to whichever reader is not having it,
+    and this is the plumbing both of those boundaries stand on: everything a
+    real stream is asked for, with one method to override.
 
-    It also answers `colour_on`, so the one place that changes its words
-    rather than only its escapes, the superseded-name marker in the host list,
-    can ask where it is writing to.
+    Two of these can be wrapped around one terminal, in either order, which is
+    why `colour` below asks through the wrapping rather than answering for
+    itself.
     """
 
     def __init__(self, stream):
         self.stream = stream
 
+    def transform(self, text):
+        """What this boundary takes out. The base takes out nothing."""
+        return text
+
+    @property
+    def colour(self):
+        """Whether colour written here still reaches the reader.
+
+        Read through whatever is wrapped, so that a stream spelling flags out
+        inside one taking colour out, or the same pair the other way round,
+        gives the one answer either way. A real stream has no such attribute
+        and is taken to be keeping the colour, which is what `colour_on`
+        assumes for anything it is handed.
+        """
+        return getattr(self.stream, "colour", True)
+
     def write(self, text):
-        self.stream.write(strip_colour(text))
+        self.stream.write(self.transform(text))
         # What the caller handed over, not what was written. A short count
         # would look to a caller like a stream that could not take it all.
         return len(text)
@@ -88,7 +111,7 @@ class PlainStream:
     def writelines(self, lines):
         # Its own rather than delegated, because a delegated one would reach
         # the stream underneath without passing what it carries through the
-        # stripping above, and colour would arrive at a reader that refused
+        # rewriting above, and colour would arrive at a reader that refused
         # it. Nothing here calls it; the wrapper stands in for a real stream
         # and has to behave like one.
         for line in lines:
@@ -112,7 +135,7 @@ class PlainStream:
         """Everything else a stream has, from the one underneath.
 
         This stands where `sys.stdout` and `sys.stderr` stood, so anything
-        reaching past the five methods above, for `encoding`, `buffer` or
+        reaching past the methods above, for `encoding`, `buffer` or
         `reconfigure`, should find what it would have found there. Without this
         the UTF-8 reconfigure that runs before the wrapping is installed would
         quietly not run at all on a second pass through `main` in one process,
@@ -128,6 +151,51 @@ class PlainStream:
         return getattr(self.stream, name)
 
 
+class PlainStream(FilterStream):
+    """A stream that takes what it is given without the colour.
+
+    Wrapped around stdout or stderr for a run whose terminal is not having
+    colour while the browser is. Everything downstream goes on painting as it
+    always did and this takes it out again on the way past, which is why
+    adding a second consumer did not mean threading a colour setting through
+    every function that prints.
+
+    It also answers `colour_on`, so the one place that changes its words
+    rather than only its escapes, the superseded-name marker in the host list,
+    can ask where it is writing to.
+    """
+
+    # Answered here rather than through whatever is wrapped: this is the
+    # boundary colour stops at, whatever else is in front of or behind it.
+    colour = False
+
+    def transform(self, text):
+        return strip_colour(text)
+
+
+def behind(stream, kind):
+    """Whether `stream` already has a wrapper of this kind somewhere in it.
+
+    `isinstance` answers for the outermost wrapper alone, and there can be
+    two: a terminal having neither colour nor flags is behind both. `main`
+    asks this before wrapping either, so that a second pass through it in one
+    process, which is a thing the suite does, does not put a second copy of
+    one around a stream that already has it.
+    """
+    while isinstance(stream, FilterStream):
+        if isinstance(stream, kind):
+            return True
+        stream = stream.stream
+    return False
+
+
 def colour_on(stream):
-    """Whether what is written to this stream keeps its colour."""
-    return C.enabled() and not isinstance(stream, PlainStream)
+    """Whether what is written to this stream keeps its colour.
+
+    Asked of the stream rather than by looking for a particular wrapper
+    around it, because there can be more than one: a terminal spelling flags
+    out as letters is behind a wrapper of its own, and a colour question that
+    only recognised the outermost would answer yes for a stream that takes
+    the colour straight back out.
+    """
+    return C.enabled() and getattr(stream, "colour", True)

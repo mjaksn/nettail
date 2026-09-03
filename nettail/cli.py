@@ -24,8 +24,8 @@ from netflume import (
     flow_timestamp,
 )
 
-from . import __version__, config, services
-from .colour import C, PlainStream, colour_on, strip_colour
+from . import __version__, config, country, services
+from .colour import C, PlainStream, behind, colour_on, strip_colour
 from .display import (
     COLUMNS,
     ENDPOINT_WIDTH,
@@ -111,6 +111,18 @@ def flow_record(rec, hdr, resolver):
         out["src_host"] = src_host
     if dst_host:
         out["dst_host"] = dst_host
+    # The two letter code rather than the flag the display draws. This is the
+    # half of the interface meant to be parsed, and a parser wants the fact
+    # rather than a picture of it; a reader who wants the flag can make one
+    # from the code and nobody can go the other way. Absent, as the hostnames
+    # above are, when there is nothing to say: no database, no country marking
+    # asked for, or an address the database had no answer to.
+    src_country = country.country_of(rec.get("src_addr"))
+    dst_country = country.country_of(rec.get("dst_addr"))
+    if src_country:
+        out["src_country"] = src_country
+    if dst_country:
+        out["dst_country"] = dst_country
     return out
 
 
@@ -452,10 +464,17 @@ def write_summary(stats, tally, resolver, sequences, sampling, args,
         `name_at` is the column the name's bracket opens in, which
         `with_names` works out for a whole column of addresses at once, and
         it is the only caller: where a name goes is never one row's to say.
+
+        A country, where one was asked for and known, is a fourth thing and
+        sits where the flow display puts it: after the port and in front of
+        the brackets. Grey, because it is the least of the four and because
+        a terminal spelling the flag out as two letters would otherwise have
+        them read as part of the address.
         """
         pieces = [(str(addr) if addr else "-", _address_colour(addr))]
         if port:
             pieces.append((f":{port}", C.GREY))
+        pieces.append((country.mark(addr), C.GREY))
         host = resolver.lookup(addr) if addr else None
         if host:
             gap = name_at - sum(len(text) for text, _colour in pieces)
@@ -477,6 +496,7 @@ def write_summary(stats, tally, resolver, sequences, sampling, args,
         """
         widest = max((len(str(addr) if addr else "-")
                       + (len(f":{port}") if port else 0)
+                      + len(country.mark(addr))
                       for addr, port in column
                       if addr and resolver.lookup(addr)), default=0)
         return [_painted(*address(addr, port, name_at=widest + 3))
@@ -806,6 +826,134 @@ def web_reach_note(bound_addr, hosts, contained=None):
             "place of 127.0.0.1.")
 
 
+def at_a_terminal(stream):
+    """Whether there is a person on the other end of this stream.
+
+    Asked of stdin and stderr both before anything is put to somebody, and
+    written to answer False for a stream that has been closed or replaced with
+    None, which is what a windowless Python on Windows hands over.
+    """
+    try:
+        return stream is not None and stream.isatty()
+    except (AttributeError, ValueError, OSError):
+        return False
+
+
+def ask_yes_no(question, stream, stdin):
+    """Put a question to a person, and take anything but yes for no.
+
+    Written out rather than handed to `input`, which puts its prompt on
+    stdout. Stdout here is the flow rows, and half the runs this program has
+    redirect it, so a question asked there is a question written into
+    somebody's data and never seen.
+
+    Anything that is not a plain yes is no, and so is the end of input: a
+    stdin that closed under somebody who has walked away must not be read as
+    consent. Ctrl-C is neither, and ends the run the way it ends any other
+    command asking this: the person meant to stop, not to answer.
+    """
+    stream.write("%s [y/N] " % question)
+    stream.flush()
+    try:
+        answer = stdin.readline()
+    except KeyboardInterrupt:
+        stream.write("\n")
+        stream.flush()
+        # 130 is what a shell reports for a command that took SIGINT, and
+        # raising rather than returning is what keeps a traceback off the
+        # screen: there is no handler for this anywhere above.
+        raise SystemExit(130) from None
+    except (EOFError, OSError):
+        answer = ""
+    if not answer.endswith("\n"):
+        # Nothing typed the newline that would have moved the cursor down, so
+        # the next line would otherwise start beside the question.
+        stream.write("\n")
+        stream.flush()
+    return answer.strip().lower() in ("y", "yes")
+
+
+def offer_country_db(note, stream=None, stdin=None, fetch=None, probe=None):
+    """Offer to fetch a country database, and fetch one if told to.
+
+    Hands back the line the caller is to print. That is `note` itself, the one
+    `country.load` already wrote, whenever nothing was fetched: a run that
+    could not ask, or asked and was told no, or tried and failed, is in the
+    state it was already in, and the whole consequence is that no address is
+    marked.
+
+    Both ends have to be a terminal before anything is asked. A question
+    written where nobody is reading and answered by whatever the pipe on stdin
+    happened to hold is a program that downloads a file because it was run
+    from cron, and this program runs from cron, from systemd and inside a
+    container far more often than it runs from a keyboard.
+
+    Nor is anything asked before the answer could be acted on. A machine with
+    nowhere writable is told what it was told before, since a yes there could
+    only have been followed by a refusal. Nor before db-ip.com has said there
+    is a file there: `country.probe` asks, and a reader who could not be
+    served is given the two pages to fetch one from instead of a question
+    whose yes was never going to work.
+
+    That probe is the one thing here that touches the network before anybody
+    has agreed to anything, so it is announced on the line above it and it
+    happens after both guards rather than before them. A run under systemd or
+    cron or docker is not asked, and must not reach out either: the terminal
+    check is what stops the second as well as the first, and it is why the
+    order of this function is not an accident.
+
+    What the offer says is as long as it is on purpose. It names the file, the
+    licence, the size the server just gave, the address it comes from and the
+    place it is going, because a program that reaches out to the network is a
+    program that has to say so before it does, and because a reader is
+    agreeing to somebody else's terms rather than only to a download.
+    """
+    stream = sys.stderr if stream is None else stream
+    stdin = sys.stdin if stdin is None else stdin
+    if not (at_a_terminal(stdin) and at_a_terminal(stream)):
+        return note
+    where = country.destination()
+    if where is None:
+        return note
+
+    print(f"{C.YELLOW}no country database found. Looked in "
+          f"{country.looked_in()}.{C.RESET}", file=stream)
+    print(f"{C.GREY}asking db-ip.com whether there is one to fetch{C.RESET}",
+          file=stream)
+    url, size, trouble = (country.probe if probe is None else probe)()
+    if url is None:
+        # Nothing to offer, so nothing is asked. A reader who has just been
+        # told the network is not going to help wants the two pages rather
+        # than a question, and the collector runs on unmarked either way.
+        return ("no address will be marked: db-ip.com could not be reached "
+                "(%s). %s" % (trouble, country.find_online()))
+
+    # What the server just said it weighs, rather than a figure written down
+    # here that would be right until the file grew. The whole clause goes when
+    # it named none, the destination included: "about twice that" with no size
+    # in front of it is a sentence about nothing.
+    weight = (f" It is {human_bytes(size)} to fetch and about twice that "
+              f"unpacked, at {where}." if size else f" It is put at {where}.")
+    print(f"{C.GREY}DB-IP publish a free one, IP to Country Lite, under the "
+          f"{country.DBIP_LICENCE} licence.{weight} No address goes anywhere "
+          f"either way: a country is read out of the file on this machine, "
+          f"then and afterwards.{C.RESET}", file=stream)
+    if not ask_yes_no("fetch it now?", stream, stdin):
+        return "no address will be marked. " + country.by_hand()
+
+    print(f"{C.GREY}fetching {url}{C.RESET}", file=stream)
+    trouble = (country.download if fetch is None
+               else fetch)(where, urls=(url,))
+    if trouble:
+        return ("could not fetch a country database: %s. %s"
+                % (trouble, country.by_hand()))
+    # The note for the file that is now there, which is None when it reads,
+    # and which `main` turns into the same describe() line every other run
+    # prints. The credit DB-IP's licence asks for is in that line, and this is
+    # the run that owes it most: nobody chose this file by hand.
+    return country.load(where)
+
+
 def build_parser():
     """The command line, as a parser, built here rather than inside `main`.
 
@@ -956,6 +1104,40 @@ def build_parser():
                           help="scope the dynamic scale to the last N flows "
                                "rather than the whole run. Implies "
                                "--size-scale-dynamic")
+
+    country_grp = ap.add_argument_group(
+        "country marking",
+        "Off unless asked for. Marks every public address with the country a "
+        "database says it is in, in the flow rows, the summary and the status "
+        "bar alike. No country data ships with this program: point it at a "
+        "MaxMind format file, which is what both of the free databases are "
+        "distributed as. A run at a terminal that finds none offers to fetch "
+        "DB-IP's free one, and fetches nothing without being told to.")
+    country_grp.add_argument("--country", action="store_true",
+                             help="mark public addresses with their country. "
+                                  "Implied by --country-db")
+    country_grp.add_argument("--country-db", default=None, metavar="FILE",
+                             help="the database to read. Without it the "
+                                  "usual places for this platform are "
+                                  "searched, %s among them, and a run that "
+                                  "finds none says where it looked and, at a "
+                                  "terminal, offers to fetch one"
+                                  % (country.search_paths()
+                                     or country.UNIX_PATHS)[0])
+    # The choices are shown rather than hidden behind a metavar, which is the
+    # opposite of what --colour does two groups up. WHEN is borrowed from every
+    # GNU tool that has a --color, and a reader who has never seen this program
+    # can still guess what goes after it. HOW is this program's own word and
+    # nothing follows from it: flag and code are not a list anybody would
+    # arrive at unaided. --resolve is spelled out for the same reason.
+    country_grp.add_argument("--country-style", choices=("auto", "flag", "code"),
+                             default="auto",
+                             help="how this terminal is shown a country: flag "
+                                  "for the emoji, code for the two letters, "
+                                  "auto (default) for the letters where a flag "
+                                  "is known not to be drawn. The browser view "
+                                  "is sent the flag whatever this says, and "
+                                  "draws it or not by its own fonts")
 
     grp = ap.add_argument_group("hostname resolution")
     grp.add_argument("--resolve", choices=Resolver.MODES, default="all",
@@ -1110,9 +1292,9 @@ def main():
         # in one process today except a test, and a stream wrapped twice
         # would work while saying, to anything that looked, that it had
         # already been dealt with.
-        if not isinstance(sys.stderr, PlainStream):
+        if not behind(sys.stderr, PlainStream):
             sys.stderr = PlainStream(sys.stderr)
-        if not args.json and not isinstance(sys.stdout, PlainStream):
+        if not args.json and not behind(sys.stdout, PlainStream):
             # Under --json stdout carries json.dumps output, which has never
             # had a colour code in it, so there is nothing to take out and no
             # reason to put a substitution in front of every flow.
@@ -1148,6 +1330,44 @@ def main():
         print(f"{C.GREY}settings written to {written}{C.RESET}",
               file=sys.stderr)
         return
+
+    # Countries, and the boundary that spells a flag out as two letters for a
+    # terminal that was judged unable to draw one. Here rather than down with
+    # the other startup work, for the reason the colour above is here: the
+    # wrapping has to be in place before anything is written, and the first
+    # thing written is the line at the end of this block.
+    #
+    # Asking for a database is asking for the marking, the way asking for a
+    # size window asks for a dynamic scale. Nobody names a file for a feature
+    # they did not want.
+    if args.country or args.country_db:
+        # Decided from stdout, as the colour question is, because there is one
+        # terminal and that is where the display goes. The browser is never
+        # asked: what it does with a flag is its own fonts' business, and it
+        # is sent one whatever this terminal can manage.
+        if not country.terminal_flags(args.country_style, sys.stdout):
+            if not behind(sys.stderr, country.CodeStream):
+                sys.stderr = country.CodeStream(sys.stderr)
+            if not args.json and not behind(sys.stdout, country.CodeStream):
+                # Under --json stdout carries the two letter code in a field of
+                # its own and never a flag, so there is nothing to spell out.
+                sys.stdout = country.CodeStream(sys.stdout)
+        note = country.load(args.country_db)
+        if country.missing():
+            # A search that came back with nothing is the one case worth
+            # offering a fetch for, and `offer_country_db` decides whether
+            # there is anybody to offer it to. A --country-db that names a
+            # file which is not there is a typo and gets the note it always
+            # got: fetching something else would be answering a question
+            # nobody asked.
+            note = offer_country_db(note)
+        print(f"{C.YELLOW}{note}{C.RESET}" if note
+              else f"{C.GREY}{country.describe()}{C.RESET}", file=sys.stderr)
+    else:
+        # A run that did not ask marks nothing, whatever a run before it in
+        # this process asked for. Only the suite reaches main twice, and this
+        # is what keeps its second run saying what a first run would have.
+        country.close()
 
     # Treat SIGTERM like Ctrl-C so the summary still prints under systemd.
     def _term(_signum, _frame):
@@ -1512,6 +1732,7 @@ def main():
         alongside, so anything the page wants to do arithmetic on it can.
         """
         talker = snap["top_talker"]
+        owed = country.credit()
         return {
             # How many flows have passed the display filter since the run
             # started, which is precisely how many a browser would have been
@@ -1523,6 +1744,22 @@ def main():
             # the point of the count is to say what was missed rather than
             # what happened.
             "flows_shown": shown_flows[0],
+            # Whether anything on the page will have a flag on it. The browser
+            # asks for the flags font when this is true and never otherwise,
+            # so a run without --country costs it nothing. It is here rather
+            # than in the greeting because the g key moves it, and a status
+            # frame follows any key within a repaint interval.
+            "countries": country.showing(),
+            # The credit the database in hand asks for, as the words and the
+            # address rather than as anything the page could mistake for
+            # markup, or null where none is owed. DB-IP's licence asks a page
+            # showing their data for a link back, and this is the only reader
+            # that can be given one, so the browser is told what to write and
+            # where to point it and the page writes down neither. Sent on a
+            # database being loaded rather than on the marking being on: a
+            # flag the g key turned off is still up in the rows above it.
+            "credit": ({"text": owed[0], "url": owed[1]}
+                       if owed else None),
             "snap": snap,
             "shown": {
                 "elapsed": human_clock(snap["elapsed"]),
@@ -1537,7 +1774,10 @@ def main():
                 "inbound": human_bytes(snap["inbound"]),
                 "outbound": human_bytes(snap["outbound"]),
                 "resolve": MODE_DESC[snap["resolve"]],
-                "talker": (f"{talker[0]}"
+                # The flag, always, whatever this terminal was judged able
+                # to draw: nothing on this route passes a terminal, so there
+                # is nothing here to spell it out for.
+                "talker": (f"{talker[0]}{country.mark(talker[0])}"
                            + (f" ({talker[1]})" if talker[1] else "")
                            + f"  {human_bytes(talker[2])}") if talker else "",
             },

@@ -11,6 +11,96 @@ but it is a program rather than a library, and the names inside it may move
 without that being a breaking change. `--json` output is the part meant to be
 parsed, and it is treated as public.
 
+## [0.11.0] - 2026-09-03
+
+### Added
+
+- **`--country` marks every public address with the country a database says it
+  is in**, as a flag emoji, wherever an address is shown: the flow rows, the
+  summary's tables and the top talker on the status bar. It rides after the
+  port and the service name and in front of the brackets, which go on meaning a
+  resolved hostname and nothing else, and under the `n` key it goes with the
+  name that replaced the address. An address on this network is never marked,
+  whatever a database says about the range it is in: the question is about the
+  far end of a flow, and a private address has no far end to be in.
+
+  No country data ships with this program, so no address leaves the machine to
+  be asked about. What a flag says is whatever the file you point at says: a
+  MaxMind format `.mmdb`, which is what both of the free country databases are
+  distributed as and what `geoipupdate` already keeps current in
+  `/usr/share/GeoIP` on a good many machines. `--country-db` names
+  one; without it the usual places for the platform are searched, the GeoIP
+  directories on Unix and `%LOCALAPPDATA%\nettail` on Windows, which has no
+  convention of its own, with a per-user place after all of them on Unix.
+  Finding none, the collector says where it looked and runs on unmarked. A
+  City database answers the same question and is read the same way.
+
+  Finding none at a terminal, it first asks whether to fetch one, `[y/N]` and
+  defaulting to no. Only DB-IP's file can be offered, because it is the only
+  one that can be fetched at all: their lite build is a plain URL under the
+  Creative Commons Attribution 4.0 licence, while GeoLite2 wants an account and
+  a licence key before a byte moves. The offer names the licence, the address,
+  the size and the destination before asking, nothing is fetched without a yes,
+  and nothing is asked at all where nobody could answer, which is every run
+  under systemd, cron, a pipe or a container. What is fetched is unpacked,
+  opened as a database and only then moved into place, so a fetch that fails
+  leaves nothing a later run would find and refuse.
+
+  A HEAD goes out first, and is announced on the line above itself, because it
+  is the one request this makes before anybody has agreed to anything. It
+  settles whether there is a file to offer and how big it is, so the size
+  quoted is the server's own answer rather than a number written down here.
+  A machine that cannot reach db-ip.com is not asked a question whose yes could
+  not have worked: it is told why and given both publishers' download pages,
+  and the collector runs on unmarked. The probe comes after the terminal check
+  rather than before it, so a run as a service makes no request either.
+
+  That licence asks for a credit and this program pays it: a run reading a
+  DB-IP database names them on its startup line, and the browser view, which is
+  the reader their wording asks for a link, puts one in its status bar. Decided
+  from what the file says it is rather than from how it arrived, so a file
+  fetched by hand is credited the same way.
+
+  Reading the format is two hundred lines rather than a dependency, for the
+  reasons the QR encoder is not one: this installs three pure Python packages
+  and nothing else, the suite has no dependencies, and the image pins every
+  byte by hash.
+- **`--country-style` decides what this terminal is shown**, since a flag emoji
+  is the country's two letters written as regional indicators and a terminal
+  draws a flag only if its font has one. `auto`, the default, spells the two
+  letters out wherever a flag is known not to be drawn: Windows, macOS
+  Terminal, the Linux console, a terminal with no TERM to speak of, a stream
+  that is not a terminal at all, and an encoding that cannot carry the
+  characters. `flag` and `code` settle it without
+  guessing. The browser is sent the flag whatever this says, which is arranged
+  the way colour is: painted once where the row is built, and spelled back out
+  at the terminal that cannot draw it. Whether a browser then draws a flag or
+  the two boxed letters is its own fonts' business, Windows having no flag
+  glyph on it at all, so the page names the fonts that can before the one that
+  cannot.
+- **The browser view ships the flags it draws.** A flag is two regional
+  indicator letters, no monospace font has a glyph for the pair, and Windows
+  has no emoji font that draws one at all, so Chrome and Edge there showed the
+  country's two letters in boxes. `flags.woff2`, 78 KB of colour vector flags
+  and nothing else, is served from the token's own URL and used for those
+  letters alone, so a browser that already had flags goes on using its own font
+  for everything else. It is fetched only by a page that has flags to draw:
+  every status frame says whether the collector is marking countries, and the
+  page asks on the strength of that and nothing else, so a run without
+  `--country` never sends it and pressing `g` mid-run fetches it within a
+  repaint interval. It is the one thing the page fetches besides itself and
+  the one exception to its being a single file, and a build without it falls
+  back to the machine's own emoji fonts exactly as before. The font is Twemoji
+  artwork under CC BY 4.0, taken unchanged from TalkJS's
+  country-flag-emoji-polyfill, and `flags-licence` ships beside it saying so.
+- **The `g` key** turns the marking off and on while the collector runs, and
+  says so rather than appearing to work when there is no database to mark
+  with.
+- **`--json` carries `src_country` and `dst_country`**, as the two letter code
+  and never the flag, present whenever a database is loaded and has an answer
+  for that end. Absent otherwise, which is every run that did not ask for one,
+  the way `src_host` is absent when no name is known.
+
 ## [0.10.0] - 2026-09-02
 
 ### Added
@@ -543,6 +633,7 @@ console: the part that decides what a flow should look like on a terminal.
   reminder line under the startup banner can be a pointer rather than a
   two-hundred-character list that wrapped and then scrolled away.
 
+[0.11.0]: https://github.com/mjaksn/nettail/releases/tag/v0.11.0
 [0.10.0]: https://github.com/mjaksn/nettail/releases/tag/v0.10.0
 [0.8.0]: https://github.com/mjaksn/nettail/releases/tag/v0.8.0
 [0.7.0]: https://github.com/mjaksn/nettail/releases/tag/v0.7.0

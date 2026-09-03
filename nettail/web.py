@@ -122,6 +122,30 @@ WEB_ENDPOINT_WIDTH = 96
 
 PAGE_FILE = "web.html"
 
+# The flags font, and the one thing this interface serves that is not the page.
+#
+# The page is otherwise a single file on purpose, and this is the exception it
+# is worth making. A country flag is two regional indicator letters and no
+# monospace font has a glyph for the pair, so the browser falls back to
+# whatever emoji font the machine has: Windows has none that draws a flag, by
+# a decision that has held for a decade, so Chrome and Edge there draw the two
+# letters in boxes and nothing about the page could change it. Shipping 78 KB
+# of colour vector flags is what makes the browser view show the same thing on
+# every machine, which is the whole point of it being a mirror of the terminal
+# rather than a second display with its own ideas.
+#
+# `flags-licence` beside it says where the font came from and under what
+# terms, and has to stay in the wheel with it: the artwork is CC BY 4.0, which
+# asks for the credit to travel with the material.
+FONT_FILE = "flags.woff2"
+
+# A year, and immutable. The font is part of the release rather than part of
+# the run: it cannot change while a process is alive, and a new one arrives
+# only with a new version of this package, under a URL whose token has changed
+# too. Everything else this interface serves is `no-store`, which is right for
+# a live view and wrong for eighty kilobytes that never change.
+FONT_CACHE = "public, max-age=31536000, immutable"
+
 # The inline script and style, pulled out of the page so their hashes can go in
 # the content security policy. Non-greedy, and anchored on the closing tag of
 # whichever of the two it matched, so the two blocks cannot run together.
@@ -140,6 +164,26 @@ def load_page():
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), PAGE_FILE)
     with open(path, "r", encoding="utf-8") as handle:
         return handle.read()
+
+
+def load_font():
+    """The flags font, read once from the package, or None if it is not there.
+
+    A missing font is not an error and must not be one. It means a wheel built
+    without the file listed as package data, and what it costs is that a
+    browser with no flag font of its own draws the two letters instead, which
+    is exactly what it drew before this was shipped. The page asks for the
+    font, is answered 404, and carries on.
+
+    Bytes rather than text, and held rather than opened per request, so that
+    nothing a request carries ever turns into a path on disk.
+    """
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), FONT_FILE)
+    try:
+        with open(path, "rb") as handle:
+            return handle.read()
+    except OSError:
+        return None
 
 
 def content_policy(page):
@@ -163,7 +207,9 @@ def content_policy(page):
         # The stream and the control route, and nothing else anywhere.
         "connect-src 'self'",
         "img-src 'none'",
-        "font-src 'none'",
+        # The flags font, which this interface serves itself. Nothing else:
+        # 'self' is the token-guarded route below and is not the internet.
+        "font-src 'self'",
         "base-uri 'none'",
         "form-action 'none'",
         "frame-ancestors 'none'",
@@ -644,6 +690,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._page()
         elif route == "events":
             self._stream()
+        elif route == FONT_FILE:
+            self._font()
         else:
             self._refuse(404, "not found")
 
@@ -658,6 +706,24 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
+
+    def _font(self):
+        """The flags font, or a 404 saying the wheel was built without it.
+
+        Behind the token like everything else here. It is only a font, but an
+        unguarded route would answer a scanner that never had the token and
+        say what this is, and the interface has exactly one door on purpose.
+        """
+        if self.site.font is None:
+            self._refuse(404, "no flags font in this build")
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "font/woff2")
+        self.send_header("Content-Length", str(len(self.site.font)))
+        self.send_header("Cache-Control", FONT_CACHE)
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+        self.wfile.write(self.site.font)
 
     def _stream(self):
         site = self.site
@@ -900,6 +966,7 @@ class WebInterface:
         self.token = token or new_token()
         self.readonly = readonly
         self.page = load_page()
+        self.font = load_font()
         self.policy = content_policy(self.page)
         self.watching = set()
         # A port some request named in its `Host` header that is not the one

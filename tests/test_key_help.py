@@ -182,6 +182,12 @@ ACTIONS = {
 SETTINGS = {
     "b": "hide_status",
     "d": "size_scale_dynamic",
+    # The one whose state is not kept on `args`. `country` holds it on the
+    # module, because `display`, `cli` and `statusbar` all ask and share no
+    # arguments between them, which is the arrangement `services` uses and is
+    # reasoned about where the state is declared. It is still one setting with
+    # one flag, which is what this table is for.
+    "g": "country",
     "h": "resolve",
     "n": "named_hosts",
     "p": "show_macs",
