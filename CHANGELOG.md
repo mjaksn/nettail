@@ -116,6 +116,20 @@ parsed, and it is treated as public.
   table behind the dialog rather than from a pair of counters of their own.
   What they print is unchanged.
 
+- **The browser lays its table out from the widths the terminal already
+  names.** The table was sized by what it held, under which a column is as
+  wide as the widest cell in it, so the browser could not place a new row
+  without measuring every row already on the page, and the cost of showing one
+  flow grew with the history behind it. A long session slowing to a stop
+  looked like the memory the history takes and was this. `COLUMNS` in
+  `display.py` already names a width for every column and the greeting already
+  carries that table to the page, so the page now builds a `colgroup` from it
+  and fixes the layout: a column is settled before any row is read, and an
+  append costs the same at ten rows as at ten thousand. The endpoint columns
+  are left to share what remains, so a hostname nobody expected still has the
+  width of a wide window and wraps rather than pushing the table past it.
+  Nothing about what a row says changes.
+
 ## [0.12.0] - 2026-09-03
 
 ### Added
