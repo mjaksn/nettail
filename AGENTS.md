@@ -119,7 +119,8 @@ and asserts all four are in it.
 address in". It is off unless `--country` asks for it and silent unless there
 is a file to read, and no country data ships with this program, which is the
 whole shape of the feature: what a flag says is whatever the reader's file
-says.
+says. Since 0.9.0 it will fetch one, and only ever after somebody at a
+terminal has said yes.
 
 Reading the format rather than depending on `maxminddb` is the same trade
 `qr.py` makes, and rests on the same three facts: this installs three pure
@@ -186,11 +187,74 @@ Five things about it are easy to break and quiet when broken.
   and `statusbar` all ask and share no arguments. It is what `services` does
   and the reasoning is written where the state is.
 
+### Fetching one
+
+A run that searches and finds nothing offers to fetch a database. Six things
+about that are worth knowing before touching it.
+
+- **The licence decides which publisher can be offered, and there is only
+  one.** DB-IP's lite build is a plain URL under Creative Commons Attribution
+  4.0, and their terms of service put the free files outside their own terms
+  and under that licence expressly. MaxMind's GeoLite2 wants an account and a
+  licence key before a byte moves, and obliges a holder to delete a database
+  within thirty days of a newer one. Neither is a thing a yes at a prompt can
+  stand in for, so GeoLite2 is named in the declined message and nowhere else.
+  A change that added a second publisher here is a licence question before it
+  is a code question.
+- **That licence asks for a credit, and this program pays it rather than
+  leaving it to the reader.** `credit()` answers the words and the address for
+  a DB-IP file, `describe()` puts them on the startup line, and `web_status`
+  sends the pair so the page can make the link DB-IP's own wording asks a web
+  page for. It is decided from `database_type` and not from whether this
+  program did the fetching: a DB-IP file somebody installed by hand is under
+  the same terms. The page hardcodes neither the words nor the address, for
+  the reason it hardcodes no column and no key, and `test_country` greps it
+  for both.
+- **`missing()` is not `not loaded()`.** Only a search that found nothing is
+  worth offering a fetch for. A `--country-db` naming a file that is not there
+  is a typo, and a file that was found and would not read is a file to name
+  rather than a reason to fetch another: the broken one is still first in the
+  search order, so a copy fetched into some other directory would be found
+  second by every later run and never read.
+- **Both stdin and stderr have to be a terminal before anything is asked.**
+  This program runs from systemd, from cron and inside a container far more
+  often than it runs from a keyboard, and a question written where nobody is
+  reading and answered by whatever a pipe held is a program that downloads a
+  file because it was run from cron. The question goes to stderr and not
+  through `input`, whose prompt goes to stdout, which is where the flow rows
+  go. Nothing is asked either when `destination()` answers None, since a yes
+  could only have been followed by a refusal.
+- **The Unix search list ends with a per-user path, and that is what makes a
+  yes mean anything.** Every path above it belongs to root. It is last rather
+  than first so that a machine syncing a database into `/usr/share/GeoIP` goes
+  on reading the copy something else keeps current. `destination()` is what
+  both the fetch and the "put one at" hint name, so the two cannot disagree,
+  and it creates nothing on its way past: a hint that made `/etc/nettail`
+  would be doing something nobody asked for.
+- **What is fetched is opened before it is moved into place.** The bytes came
+  off the network, and a half written or plainly wrong file left under a name
+  the search looks in would be found by every later run and refused by every
+  one of them, which is worse than the state it started in. That check is also
+  why `Database.__init__` closes its mapping when it raises: on Windows a
+  mapped file cannot be deleted or replaced, so without it the very caller
+  that opens a file to decide whether to throw it away cannot then throw it
+  away.
+
+`download` takes its opener, so the suite exercises the fetch, both months,
+every failure and the offer around them without touching the network. There is
+no check that the real URL is still there and there should not be one: a suite
+that fails when db-ip.com is down is a suite that fails for reasons that are
+none of this program's business.
+
 Nothing in the suite draws on a terminal or opens a browser, so the manual
 check is the real acceptance step, as it is for the QR code. Run with
 `--country` at a real terminal and confirm the columns still line up with a
 flag in them, and open `--web` beside a `--country-style code` terminal to see
-the two views differ in the one way they are meant to.
+the two views differ in the one way they are meant to. The offer has a manual
+step of its own, and it is the only place a real fetch happens: move whatever
+database this machine has out of the way, run `--country`, say yes, and check
+that what comes down reads and that the credit is on the startup line and in
+the browser's status bar.
 
 `terminal_flags` is a guess and may only choose prose, in the sense
 `in_container` may: there is no query for "can you draw a flag", so what it

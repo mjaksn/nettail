@@ -32,6 +32,7 @@ flow row, in the summary, on the status bar, in `--json`, and never on an
 address on this network.
 """
 import argparse
+import gzip
 import hashlib
 import io
 import ipaddress
@@ -41,6 +42,7 @@ import struct
 import sys
 import tempfile
 import time
+import urllib.error
 from collections import Counter
 
 from harness import ROOT, FakeTTY, check, finish, plain
@@ -140,7 +142,8 @@ class Tree:
             node = child
 
 
-def build(entries, record_size=24, ip_version=6, extras=None, built=None):
+def build(entries, record_size=24, ip_version=6, extras=None, built=None,
+          kind="GeoLite2-Country"):
     """A whole database, as bytes, for a list of (network, country code).
 
     `extras` is folded into every record, which is how a City database's
@@ -214,7 +217,7 @@ def build(entries, record_size=24, ip_version=6, extras=None, built=None):
         "node_count": node_count,
         "record_size": record_size,
         "ip_version": ip_version,
-        "database_type": "GeoLite2-Country",
+        "database_type": kind,
         "binary_format_major_version": 2,
         "binary_format_minor_version": 0,
         "build_epoch": int(time.time()) if built is None else built,
@@ -561,7 +564,9 @@ check("a Windows machine with neither variable set is looked at nowhere",
 # happens to have. `load` reads the list through the module, so replacing it
 # is enough.
 real_paths = country.search_paths
-country.search_paths = lambda: ("/nowhere/at/all/country.mmdb",)
+# Takes whatever it is handed, because `destination` asks the same function
+# for a platform and an environment and `load` asks it for neither.
+country.search_paths = lambda *_: ("/nowhere/at/all/country.mmdb",)
 try:
     note = country.load()
 finally:
@@ -796,6 +801,360 @@ check("with one it turns the marking off",
 check("and on again",
       "marking external addresses" in controls.handle("g"))
 resolver.shutdown()
+
+# ---------------------------------------------------------------------------
+# Being offered a database, and fetching one
+# ---------------------------------------------------------------------------
+#
+# Nothing here touches the network. `download` takes the opener it uses, so
+# the suite hands it one that answers out of memory, and every shape a real
+# fetch can come back in is written out here: the file, a month whose build is
+# not up yet, an HTTP error that is not that, a stream that is not gzip, and
+# gzip of something that is not a database.
+#
+# The other half is the offer, which is the part that decides whether a
+# program fetches anything at all. Both ends being a terminal is the whole of
+# that guard, and a run under systemd or cron or docker has neither, so the
+# checks below are as much about the runs that must not ask as the one that
+# does.
+
+
+class Fetched:
+    """What urlopen hands back, as much of it as gzip touches."""
+
+    def __init__(self, payload):
+        self.body = io.BytesIO(payload)
+        self.closed = False
+
+    def read(self, size=-1):
+        return self.body.read(size)
+
+    def close(self):
+        self.closed = True
+
+
+class Opener:
+    """A urlopen that answers from a table of URLs, and logs what it was asked.
+
+    A URL with no entry is a 404, which is what DB-IP answers for a month
+    whose build has not gone up, and is the case the second URL exists for.
+    """
+
+    def __init__(self, answers):
+        self.answers = answers
+        self.asked = []
+
+    def __call__(self, request, timeout=None):
+        self.asked.append(request)
+        self.timeout = timeout
+        payload = self.answers.get(request.full_url)
+        if payload is None:
+            raise urllib.error.HTTPError(
+                request.full_url, 404, "Not Found", {}, None)
+        if isinstance(payload, Exception):
+            raise payload
+        return Fetched(payload)
+
+
+def gzipped(payload):
+    out = io.BytesIO()
+    with gzip.GzipFile(fileobj=out, mode="wb") as handle:
+        handle.write(payload)
+    return out.getvalue()
+
+
+JANUARY = time.struct_time((2026, 1, 5, 0, 0, 0, 0, 5, 0))
+SEPTEMBER = time.struct_time((2026, 9, 2, 0, 0, 0, 0, 5, 0))
+
+urls = country.download_urls(SEPTEMBER)
+check("the current month's build is asked for first",
+      urls[0].endswith("dbip-country-lite-2026-09.mmdb.gz"), urls[0])
+check("and last month's after it",
+      urls[1].endswith("dbip-country-lite-2026-08.mmdb.gz"), urls[1])
+check("January falls back to December of the year before",
+      country.download_urls(JANUARY)[1].endswith("2025-12.mmdb.gz"),
+      country.download_urls(JANUARY)[1])
+check("both are db-ip's own https address",
+      all(url.startswith("https://download.db-ip.com/free/") for url in urls),
+      str(urls))
+
+FETCH_DIR = tempfile.mkdtemp()
+HELD.append(FETCH_DIR)
+DEST = os.path.join(FETCH_DIR, "fetched", "country.mmdb")
+HELD.append(DEST)
+REAL = gzipped(build(NETWORKS, kind="DBIP-Country-Lite"))
+
+opener = Opener({urls[0]: REAL})
+trouble = country.download(DEST, opener=opener, when=SEPTEMBER)
+check("a fetch that works says nothing", trouble is None, repr(trouble))
+check("and leaves a database where it was told to", os.path.exists(DEST))
+check("and the directory it needed was made", os.path.isdir(
+    os.path.dirname(DEST)))
+check("and nothing is left half written",
+      not os.path.exists(DEST + ".part"))
+check("and the response was closed", opener.asked and True)
+check("the request names this program and its version",
+      opener.asked[0].get_header("User-agent") == "nettail/" + main.__version__,
+      opener.asked[0].get_header("User-agent"))
+check("and a timeout was asked for", opener.timeout == country.DOWNLOAD_TIMEOUT,
+      repr(opener.timeout))
+check("what was fetched reads as a database", country.load(DEST) is None)
+check("and answers about an address in it",
+      country.country_of("140.82.114.4") == "US")
+
+# A month whose build is not up yet. The first URL is a 404 and the second is
+# the newest there is, which is the ordinary state of things on the first of
+# the month and the reason there are two.
+# The mapping has to be let go of before the file can be replaced, on Windows
+# at least, and a real run has nothing open here: it fetches because it found
+# nothing to open.
+country.close()
+opener = Opener({urls[1]: REAL})
+os.unlink(DEST)
+trouble = country.download(DEST, opener=opener, when=SEPTEMBER)
+check("a 404 on this month falls back to last month", trouble is None,
+      repr(trouble))
+check("and both were tried, in that order",
+      [request.full_url for request in opener.asked] == list(urls),
+      str([request.full_url for request in opener.asked]))
+check("and the fallback is what landed", os.path.exists(DEST))
+
+# Anything that is not a 404 is reported rather than retried. A 403 or a 500
+# says something about the server, and asking it for a second file it is
+# equally unable to serve is noise.
+opener = Opener({urls[0]: urllib.error.HTTPError(
+    urls[0], 503, "Service Unavailable", {}, None)})
+os.unlink(DEST)
+trouble = country.download(DEST, opener=opener, when=SEPTEMBER)
+check("an error that is not a 404 is reported", "503" in (trouble or ""),
+      repr(trouble))
+check("and stops there rather than trying the month before",
+      len(opener.asked) == 1, str(len(opener.asked)))
+check("and nothing was written", not os.path.exists(DEST))
+
+# A stream that is not gzip at all, which is what a captive portal or a proxy
+# with an opinion hands back.
+opener = Opener({urls[0]: b"<html>not what you asked for</html>"})
+trouble = country.download(DEST, opener=opener, when=SEPTEMBER)
+check("something that is not gzip is reported", trouble is not None,
+      repr(trouble))
+check("and leaves nothing behind", not os.path.exists(DEST))
+check("and no part file either", not os.path.exists(DEST + ".part"))
+
+# Gzip of something that is not a database. This is the check the move exists
+# for: a file left under a name the search looks in would be found by every
+# later run and refused by every one of them.
+opener = Opener({urls[0]: gzipped(b"nonsense" * 200)})
+trouble = country.download(DEST, opener=opener, when=SEPTEMBER)
+check("gzip of something that is not a database is reported",
+      "not a database" in (trouble or ""), repr(trouble))
+check("and is not put where a later run would find it",
+      not os.path.exists(DEST))
+check("and the part file went with it", not os.path.exists(DEST + ".part"))
+
+# ---------------------------------------------------------------------------
+# Where a fetched file is allowed to land
+# ---------------------------------------------------------------------------
+
+home = country.search_paths(platform="posix", env={"HOME": "/home/somebody"})
+check("a Unix home adds a place under it",
+      home[-1] == "/home/somebody/.local/share/nettail/country.mmdb", home[-1])
+check("and it goes last, so a system database still wins",
+      home[:len(country.UNIX_PATHS)] == country.UNIX_PATHS)
+check("XDG_DATA_HOME moves it",
+      country.search_paths(platform="posix",
+                           env={"HOME": "/home/somebody",
+                                "XDG_DATA_HOME": "/elsewhere"})[-1]
+      == "/elsewhere/nettail/country.mmdb")
+check("and a machine with neither is the list it always was",
+      country.search_paths(platform="posix", env={}) == country.UNIX_PATHS)
+
+real_paths = country.search_paths
+blocker = os.path.join(FETCH_DIR, "a-file-not-a-directory")
+io.open(blocker, "w").close()
+HELD.append(blocker)
+try:
+    country.search_paths = lambda *_: ()
+    check("nowhere to write is answered with nothing rather than a guess",
+          country.destination() is None)
+    country.search_paths = lambda *_: (
+        os.path.join(blocker, "country.mmdb"),
+        os.path.join(FETCH_DIR, "chosen", "country.mmdb"))
+    check("a path leading through a file is passed over",
+          country.destination()
+          == os.path.join(FETCH_DIR, "chosen", "country.mmdb"),
+          repr(country.destination()))
+    check("and a directory that does not exist yet is fine, since it is made",
+          not os.path.isdir(os.path.join(FETCH_DIR, "chosen")))
+finally:
+    country.search_paths = real_paths
+
+# ---------------------------------------------------------------------------
+# The offer
+# ---------------------------------------------------------------------------
+
+
+class Typed(io.StringIO):
+    """A stdin with somebody at it, holding whatever they typed."""
+
+    def isatty(self):
+        return True
+
+
+def offered(typed, fetch=None, stdin=None):
+    """Put the offer, and hand back what was printed and what came back."""
+    out = FakeTTY()
+    stdin = Typed(typed) if stdin is None else stdin
+    note = main.offer_country_db("the old note", stream=out, stdin=stdin,
+                                 fetch=fetch)
+    return plain(out.getvalue()), note
+
+
+class Counted:
+    """A download that logs rather than fetching, and can be told to fail."""
+
+    def __init__(self, trouble=None):
+        self.trouble = trouble
+        self.asked = []
+
+    def __call__(self, where):
+        self.asked.append(where)
+        if self.trouble:
+            return self.trouble
+        # What a real fetch leaves behind: a database at the place asked for.
+        with io.open(where, "wb") as handle:
+            handle.write(build(NETWORKS, kind="DBIP-Country-Lite"))
+        return None
+
+
+country.close()
+country.search_paths = lambda *_: (DEST,)
+try:
+    fetch = Counted()
+    printed, note = offered("", fetch=fetch, stdin=io.StringIO("y\n"))
+    check("a stdin that is not a terminal is never asked", printed == "",
+          repr(printed))
+    check("and nothing is fetched on its behalf", fetch.asked == [])
+    check("and the note it already had is what it keeps", note == "the old note")
+
+    fetch = Counted()
+    printed, note = offered("y\n", fetch=fetch)
+    check("a person is told where this looked", "Looked in" in printed, printed)
+    check("and which licence the file comes under",
+          country.DBIP_LICENCE in printed, printed)
+    check("and the address it would be fetched from",
+          "db-ip.com" in printed, printed)
+    check("and where it would be put", DEST in printed, printed)
+    check("and that no address goes anywhere either way",
+          "No address goes anywhere" in printed, printed)
+    check("the question defaults to no, out loud", "[y/N]" in printed, printed)
+    check("yes fetches it", fetch.asked == [DEST], str(fetch.asked))
+    check("and what came back is a database", note is None, repr(note))
+    check("which is the one that was fetched", country.loaded())
+
+    for answer, what in (("n\n", "no"), ("\n", "a bare return"),
+                         ("", "end of input"), ("yes please\n", "anything else")):
+        country.close()
+        fetch = Counted()
+        printed, note = offered(answer, fetch=fetch)
+        check("%s fetches nothing" % what, fetch.asked == [], str(fetch.asked))
+        check("and says how to get one by hand instead",
+              "--country-db" in (note or ""), repr(note))
+
+    country.close()
+    fetch = Counted()
+    printed, note = offered("yes\n", fetch=fetch)
+    check("a spelled out yes is a yes too", fetch.asked == [DEST])
+
+    country.close()
+    fetch = Counted(trouble="db-ip.com: timed out")
+    printed, note = offered("y\n", fetch=fetch)
+    check("a fetch that fails says what went wrong",
+          "timed out" in (note or ""), repr(note))
+    check("and says how to get one by hand after that",
+          "--country-db" in (note or ""), repr(note))
+    check("and leaves the run without a database", not country.loaded())
+finally:
+    country.search_paths = real_paths
+
+# Ctrl-C at the question ends the run rather than being read as an answer.
+
+
+class Interrupted(io.StringIO):
+    def isatty(self):
+        return True
+
+    def readline(self, *args):
+        raise KeyboardInterrupt
+
+
+try:
+    main.ask_yes_no("well?", FakeTTY(), Interrupted())
+    check("Ctrl-C at the question does not fall through as a no", False)
+except SystemExit as exc:
+    check("Ctrl-C at the question ends the run", exc.code == 130, repr(exc.code))
+
+# ---------------------------------------------------------------------------
+# The credit the licence asks for
+# ---------------------------------------------------------------------------
+#
+# Owed by whoever shows the data, which is this program, and decided from what
+# the file says it is rather than from how it got here: a DB-IP file somebody
+# fetched by hand is under the terms one this program fetched is under.
+
+country.load(written(build(NETWORKS, kind="DBIP-Country-Lite")))
+owed = country.credit()
+check("a DB-IP database asks for a credit", owed is not None)
+check("which names them", owed and owed[0] == country.DBIP_CREDIT, str(owed))
+check("and links to them", owed and owed[1] == country.DBIP_HOME, str(owed))
+check("and the startup line carries it", country.DBIP_CREDIT in
+      country.describe(), country.describe())
+check("with the address in it too", country.DBIP_HOME in country.describe(),
+      country.describe())
+
+country.load(written(build(NETWORKS, kind="DBIP-City-Lite")))
+check("their city build asks for the same one",
+      country.credit() == (country.DBIP_CREDIT, country.DBIP_HOME))
+
+country.load(PATH)
+check("a database from anywhere else asks for nothing",
+      country.credit() is None, str(country.credit()))
+check("and its startup line says nothing about db-ip",
+      "DB-IP" not in country.describe(), country.describe())
+
+# The browser is the reader whose licence terms name a link, and it is handed
+# the words and the address rather than writing either down. A page with
+# db-ip in it would go on crediting them for a database somebody else
+# published the moment --country-db pointed somewhere else.
+PAGE = io.open(os.path.join(ROOT, "nettail", "web.html"),
+               encoding="utf-8").read()
+check("the page reads the credit off the status frame",
+      "payload.credit" in PAGE)
+check("and writes down neither the words it shows",
+      country.DBIP_CREDIT not in PAGE)
+check("nor the address it points them at", country.DBIP_HOME not in PAGE)
+
+# ---------------------------------------------------------------------------
+# Which failure is worth offering a fetch for
+# ---------------------------------------------------------------------------
+
+country.search_paths = lambda *_: ("/nowhere/at/all/country.mmdb",)
+try:
+    country.load()
+    check("a search that found nothing is what the offer is for",
+          country.missing())
+finally:
+    country.search_paths = real_paths
+
+country.load(os.path.join(tempfile.gettempdir(), "nothing-is-here.mmdb"))
+check("a --country-db that names nothing is a typo, not a missing database",
+      not country.missing())
+country.load(written(b"nonsense" * 40))
+check("and a file that was found and would not read is neither",
+      not country.missing())
+country.load(PATH)
+check("nor is a database that loaded", not country.missing())
+
 
 # The mapping has to go before the files can, on Windows at least, where an
 # open mapping is a file that cannot be deleted.

@@ -255,6 +255,11 @@ footer {
 }
 footer span b { color: var(--ink); font-weight: 400; }
 footer span i { color: var(--ink-3); font-style: normal; }
+/* The country database's credit, which is owed rather than useful, so it is
+   dimmed to the weight of a label and sits after everything about this run. */
+footer span.credit { margin-left: auto; }
+footer span.credit a { color: var(--ink-3); text-decoration: none; }
+footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
 .paused { color: var(--warn); }
 /* The seven ANSI colours this program uses, with white beside them for a code
    it does not write today, plus the 256 colour ramp behind the BYTES column.
@@ -677,6 +682,25 @@ footer span i { color: var(--ink-3); font-style: normal; }
     return span;
   }
 
+  // The credit a country database's licence asks for, as a link at the end of
+  // the footer. Both the words and the address come from the collector, which
+  // reads them off the file it opened: a page that wrote either down would be
+  // crediting DB-IP for a database somebody else published the moment
+  // --country-db pointed somewhere else. Built through textContent and
+  // setAttribute for the reason everything here is, and pointed away with
+  // noreferrer so that following it says nothing about where this page was.
+  function creditLink(owed) {
+    var a = document.createElement("a");
+    a.textContent = owed.text;
+    a.setAttribute("href", owed.url);
+    a.setAttribute("target", "_blank");
+    a.setAttribute("rel", "noreferrer noopener");
+    var span = document.createElement("span");
+    span.className = "credit";
+    span.appendChild(a);
+    return span;
+  }
+
   function showStatus(payload) {
     if (!payload) { return; }
     if (typeof payload.flows_shown === "number") {
@@ -711,6 +735,10 @@ footer span i { color: var(--ink-3); font-style: normal; }
       statusBar.appendChild(field("paused", s.held + " held", "paused"));
     }
     if (trimmed) { statusBar.appendChild(field("rows dropped", trimmed.toLocaleString())); }
+    // Last, because it is the one thing down here that is not about this run.
+    if (payload.credit && payload.credit.text && payload.credit.url) {
+      statusBar.appendChild(creditLink(payload.credit));
+    }
     setToggles(s);
   }
 

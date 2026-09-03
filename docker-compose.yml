@@ -90,7 +90,9 @@ services:
     # `--hosts /etc/nettail/lan-hosts` in the command above. And a country
     # database for `--country`, which is a file you fetch rather than one this
     # image could ship; /etc/nettail/country.mmdb is the first place nettail
-    # looks, so nothing has to name it twice.
+    # looks, so nothing has to name it twice. A run at a terminal is offered
+    # one and this is not that: a detached container has nobody to ask, so it
+    # goes without a database rather than fetching one unasked.
     #volumes:
     #  - ./lan-hosts:/etc/nettail/lan-hosts:ro
     #  - ./dbip-country-lite.mmdb:/etc/nettail/country.mmdb:ro

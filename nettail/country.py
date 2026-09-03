@@ -1,17 +1,22 @@
 """What country an external address sits in, and the flag it prints as.
 
 Off unless `--country` asks for it, and silent unless there is a database to
-read. No country data ships with this program and none is fetched: what a flag
-says is whatever the file the reader pointed at says, which is the only honest
-arrangement for a fact this program cannot work out for itself. An address on
-this network is never marked, because the question is about the far end of a
-flow and a private address has no far end to be in.
+read. No country data ships with this program and none is fetched unless a
+person at the keyboard says so: what a flag says is whatever the file the
+reader pointed at says, which is the only honest arrangement for a fact this
+program cannot work out for itself. An address on this network is never
+marked, because the question is about the far end of a flow and a private
+address has no far end to be in.
 
 A database is a MaxMind format file, `.mmdb`. That is what both free country
 databases are distributed as, DB-IP's lite build and MaxMind's GeoLite2, and
 it is what a distribution's `geoipupdate` writes into `/usr/share/GeoIP`, so
 a machine that already syncs one needs nothing fetched. A City database
 answers the country question too and is read the same way.
+
+A run that searches and finds nothing offers to fetch one, and `download` is
+that offer carried out. Only DB-IP's file can be offered, for the reason set
+out beside `DBIP_URL`, and only after somebody has said yes at a terminal.
 
 Reading one is about two hundred lines against a format that has not changed
 since 2015, and the case for writing them rather than depending on
@@ -92,6 +97,23 @@ WINDOWS_PATHS = (
 )
 
 
+# The one place on the Unix list somebody who is not root can write.
+#
+# Every path above it belongs to the system, which is right for a file
+# geoipupdate or a package manager keeps current and useless for a file this
+# program fetches on behalf of whoever ran it. Without this a person says yes
+# to the offer, the write into /etc/nettail is refused, and there would have
+# been nowhere the next run looked in any case. XDG_DATA_HOME first because
+# that is the variable that moves it, then the default the specification gives
+# for an unset one.
+#
+# Last rather than first, so that a machine already syncing a database into
+# /usr/share/GeoIP goes on reading the file something else keeps current. A
+# fetched copy is only ever reached by a machine that had none, which is the
+# only situation it is offered in.
+UNIX_USER_TAIL = "nettail/country.mmdb"
+
+
 def search_paths(platform=None, env=None):
     """Where a database is looked for on this machine, in order.
 
@@ -101,10 +123,40 @@ def search_paths(platform=None, env=None):
     """
     platform = os.name if platform is None else platform
     env = os.environ if env is None else env
-    if platform != "nt":
+    if platform == "nt":
+        return tuple(env[variable].rstrip("\\/") + "\\" + tail
+                     for variable, tail in WINDOWS_PATHS if env.get(variable))
+    data = env.get("XDG_DATA_HOME") or (
+        env["HOME"].rstrip("/") + "/.local/share" if env.get("HOME") else "")
+    if not data:
         return UNIX_PATHS
-    return tuple(env[variable].rstrip("\\/") + "\\" + tail
-                 for variable, tail in WINDOWS_PATHS if env.get(variable))
+    return UNIX_PATHS + (data.rstrip("/") + "/" + UNIX_USER_TAIL,)
+
+
+def destination(platform=None, env=None):
+    """The first searched path a database could actually be written to.
+
+    None when there is no such place, which is what a machine with nothing
+    writable anywhere on its list gets. Nothing here creates a directory: this
+    answers the "put one at" hint as well as the download, and a hint that made
+    /etc/nettail on its way past would be doing something nobody asked for. A
+    directory that does not exist counts as writable when the nearest parent
+    that does exist is, since that is the one a download would make. What is
+    walked past is a name with nothing at it: the walk stops at the first
+    thing that exists, so a path leading through a regular file is refused
+    here rather than at the makedirs that would fail on it.
+    """
+    for candidate in search_paths(platform, env):
+        directory = os.path.dirname(candidate) or "."
+        while directory and not os.path.exists(directory):
+            parent = os.path.dirname(directory)
+            if parent == directory:
+                break
+            directory = parent
+        if os.path.isdir(directory) and os.access(directory, os.W_OK):
+            return candidate
+    return None
+
 
 # Addresses whose answer is remembered. A lookup walks up to 128 nodes and
 # then decodes a record that carries a continent and a country in a dozen
@@ -118,6 +170,43 @@ CACHE_MAX = 8192
 # for as long as the file is not refreshed, and nothing about a stale answer
 # looks stale on screen.
 STALE_AFTER = 365 * 24 * 3600
+
+# The free database this program offers to fetch, and the terms it comes on.
+#
+# One publisher rather than the choice of two the prose elsewhere offers,
+# because only one of the two can be fetched at all. DB-IP's lite build is a
+# plain URL under the Creative Commons Attribution 4.0 licence, which asks for
+# a credit and nothing else, and their terms of service put the free files
+# outside their own terms and under that licence expressly. MaxMind's GeoLite2
+# wants an account and a licence key before a byte moves, and obliges whoever
+# holds a copy to delete it within thirty days of a newer one; neither of those
+# is a thing a yes or no at a prompt can stand in for. Somebody who wants
+# GeoLite2 fetches it themselves and points --country-db at it, which is what
+# the declined message goes on saying.
+#
+# The credit is that licence's price, and this program pays it rather than
+# leaving it to the reader: nothing was asked for by hand, so nobody but this
+# program knows whose data is on the screen. `credit` is where that is decided.
+DBIP_URL = "https://download.db-ip.com/free/dbip-country-lite-%04d-%02d.mmdb.gz"
+DBIP_LICENCE = "Creative Commons Attribution 4.0"
+DBIP_CREDIT = "IP Geolocation by DB-IP"
+DBIP_HOME = "https://db-ip.com"
+
+# What a DB-IP file's metadata calls it. Their country build says
+# DBIP-Country-Lite and their city one DBIP-City-Lite, so what is matched is
+# the prefix rather than either name.
+DBIP_TYPE = "dbip"
+
+# How long to wait on a fetch, and how much of it to take.
+#
+# Nine megabytes unpacked is what the country file actually is, so the cap is
+# not a limit anybody meets. It is there because the decompressor is pointed
+# at a socket rather than at a file, and a gzip stream that never ends would
+# otherwise fill a disk quietly. The timeout is the one urlopen takes, which
+# bounds each read rather than the transfer.
+DOWNLOAD_TIMEOUT = 30
+DOWNLOAD_MAX = 64 * 1024 * 1024
+
 
 # The first regional indicator, which stands for A. A flag is the two letters
 # of the country code written in these.
@@ -237,7 +326,20 @@ class Database:
             # The mapping holds its own reference to the file, so the
             # descriptor has done its job as soon as it is made.
             handle.close()
+        try:
+            self._read_metadata()
+        except BaseException:
+            # A file that mapped and then made no sense, which is most of the
+            # ways one goes wrong. The mapping has to be let go of before the
+            # exception leaves, because on Windows a mapped file is one that
+            # cannot be deleted or replaced, and the caller with the worst
+            # need of both is `download`: it opens what it has just fetched
+            # precisely to find out whether to throw it away.
+            self._map.close()
+            raise
 
+    def _read_metadata(self):
+        """Everything after the mapping, which is everything that can raise."""
         start = self._map.rfind(
             _MARKER, max(0, len(self._map) - _METADATA_MAX - len(_MARKER)))
         if start < 0:
@@ -479,6 +581,164 @@ _database = None
 _showing = False
 _cache = {}
 
+# Whether the last load searched the usual places and came back empty handed.
+#
+# Only that case is worth offering a download for, and it is not the same
+# question as `loaded`. A file that was found and would not read leaves no
+# database in hand either, and answering that with a fetch into some other
+# directory would leave the broken file still first in the search order and
+# still what every later run reads. The right answer to a bad file is to say
+# which file, which is what happens now.
+_missing = False
+
+
+def download_urls(when=None):
+    """The files to try, this month's build and last month's.
+
+    DB-IP names each build for its month and puts it up early in that month,
+    so between the first and whenever it appears the current name answers 404
+    and the month before it is the newest there is. Trying both is the
+    difference between a fetch that works every day and one that works most
+    days. The clock is an argument for the reason `search_paths` takes the
+    platform: a suite cannot otherwise say what it expects.
+    """
+    when = time.gmtime() if when is None else when
+    before = ((when.tm_year - 1, 12) if when.tm_mon == 1
+              else (when.tm_year, when.tm_mon - 1))
+    return (DBIP_URL % (when.tm_year, when.tm_mon), DBIP_URL % before)
+
+
+def download(dest, opener=None, when=None):
+    """Fetch DB-IP's free country database to `dest`, unpacked.
+
+    Hands back None when there is a readable database at `dest` afterwards,
+    and a line saying what went wrong otherwise. Nothing here raises: a fetch
+    that fails costs a run its flags and nothing else, which is exactly what
+    finding no file at all costs it.
+
+    The bytes are written beside the destination and moved into place, and
+    they are opened as a database before the move. Both halves of that matter.
+    What is being unpacked came off the network, and a half written or plainly
+    wrong file left under a name the search looks in would be found by every
+    later run and refused by every one of them, which is a worse state than
+    the one this started in.
+
+    `opener` is urlopen unless a caller says otherwise, which is how the suite
+    exercises all of this without touching the network.
+    """
+    # Imported here rather than at the top of the module because this is the
+    # only thing in the program that speaks HTTP as a client, and
+    # urllib.request brings http.client, ssl and email in behind it. At the
+    # top every run pays for that at import, for something almost no run does.
+    import gzip
+    import urllib.error
+    import urllib.request
+
+    from . import __version__
+
+    opener = urllib.request.urlopen if opener is None else opener
+    directory = os.path.dirname(dest) or "."
+    try:
+        os.makedirs(directory, exist_ok=True)
+    except OSError as exc:
+        return "cannot make %s: %s" % (directory, exc.strerror or exc)
+
+    part = dest + ".part"
+    last = "nothing to fetch"
+    for url in download_urls(when):
+        request = urllib.request.Request(
+            url, headers={"User-Agent": "nettail/" + __version__})
+        try:
+            response = opener(request, timeout=DOWNLOAD_TIMEOUT)
+        except urllib.error.HTTPError as exc:
+            last = "%s: HTTP %s" % (url, exc.code)
+            if exc.code == 404:
+                # The month whose build is not up yet, which is the whole
+                # reason there is a second URL to try.
+                continue
+            return last
+        except OSError as exc:
+            # URLError is one of these, and so are a read that timed out and a
+            # certificate that would not verify.
+            return "%s: %s" % (url, getattr(exc, "reason", None) or exc)
+
+        try:
+            taken = 0
+            with gzip.GzipFile(fileobj=response) as unpacked:
+                with open(part, "wb") as out:
+                    while True:
+                        chunk = unpacked.read(65536)
+                        if not chunk:
+                            break
+                        taken += len(chunk)
+                        if taken > DOWNLOAD_MAX:
+                            raise ValueError(
+                                "more than %d bytes, which no country "
+                                "database is" % DOWNLOAD_MAX)
+                        out.write(chunk)
+        except (OSError, EOFError, ValueError) as exc:
+            # A truncated stream, something that was not gzip at all, a disk
+            # that filled, or the cap above.
+            _discard(part)
+            return "%s: %s" % (url, exc)
+        finally:
+            response.close()
+
+        try:
+            Database(part).close()
+        except (BadDatabase, OSError, IndexError, RecursionError, ValueError,
+                struct.error) as exc:
+            _discard(part)
+            return ("%s unpacked to something that is not a database (%s)"
+                    % (url, exc))
+        try:
+            os.replace(part, dest)
+        except OSError as exc:
+            _discard(part)
+            return "cannot put %s in place: %s" % (dest, exc.strerror or exc)
+        return None
+    return last
+
+
+def _discard(path):
+    """Take a part file away, and say nothing if it will not go.
+
+    A failed fetch is already being reported, and a second line about the
+    scrap it left would be reporting the same thing twice. The file is not
+    where anything looks in any case.
+    """
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def looked_in(places=None):
+    """The directories a search covers, written for a line about it.
+
+    Directories rather than files, and each named once however many files in
+    it were tried, because a reader who is about to go and put a database
+    somewhere wants the places rather than the seven names this looked for.
+    """
+    places = search_paths() if places is None else places
+    where = dict.fromkeys(os.path.dirname(candidate) or candidate
+                          for candidate in places)
+    return ", ".join(where) or ("nowhere, since this platform has no usual "
+                                "place for one")
+
+
+def by_hand():
+    """How to get a database without this program's help.
+
+    The whole of what a run that cannot ask says, and the tail of what a
+    declined offer says. The place it names is `destination` and not the head
+    of the search list: the head belongs to root on every Unix machine, and
+    advice that fails when the reader follows it is worse than none.
+    """
+    return ("DB-IP and MaxMind both publish a free one: put it at %s, or "
+            "point --country-db at it wherever it is."
+            % (destination() or (search_paths() or UNIX_PATHS)[0]))
+
 
 def load(path=None):
     """Open a country database, replacing whatever was open before.
@@ -495,26 +755,22 @@ def load(path=None):
     reader who asked for countries and got none has no other way to tell an
     absent file from an unreadable one.
     """
-    global _database, _showing
+    global _database, _showing, _missing
     _cache.clear()
     if _database is not None:
         _database.close()
     _database = None
     _showing = False
+    _missing = False
 
     if path is None:
         places = search_paths()
         found = [candidate for candidate in places if os.path.exists(candidate)]
         if not found:
-            where = dict.fromkeys(os.path.dirname(candidate) or candidate
-                                  for candidate in places)
+            _missing = True
             return ("no country database found, so no address will be "
-                    "marked. Looked in %s. DB-IP and MaxMind both publish a "
-                    "free one: put it at %s, or point --country-db at it "
-                    "wherever it is."
-                    % (", ".join(where) or "nowhere, since this platform has "
-                                           "no usual place for one",
-                       (places or UNIX_PATHS)[0]))
+                    "marked. Looked in %s. %s"
+                    % (looked_in(places), by_hand()))
         path = found[0]
 
     try:
@@ -541,17 +797,30 @@ def load(path=None):
 
 def close():
     """Forget the database. The state a run without --country is already in."""
-    global _database, _showing
+    global _database, _showing, _missing
     if _database is not None:
         _database.close()
     _database = None
     _showing = False
+    _missing = False
     _cache.clear()
 
 
 def loaded():
     """Whether there is a database to ask at all."""
     return _database is not None
+
+
+def missing():
+    """Whether the last load searched and found nothing to read.
+
+    False after a load that was given a path, whether or not the file was
+    there: naming a file that does not exist is a typo, and answering a typo
+    by offering to fetch something else would be answering a different
+    question. False too after a file was found and would not read, for the
+    reason set out where `_missing` is declared.
+    """
+    return _missing
 
 
 def showing():
@@ -566,6 +835,27 @@ def show(on):
     return _showing
 
 
+def credit():
+    """The attribution the database in hand asks for, or None.
+
+    A pair of the words and the address they point at. DB-IP's free builds are
+    Creative Commons Attribution 4.0, which asks whoever shows the data to say
+    where it came from, and their own wording asks a web page for a link. So
+    both readers are told: the startup line carries the words, and the browser
+    is sent the pair and makes a link of it.
+
+    Decided from what the file says it is rather than from how it arrived. A
+    file somebody fetched by hand is under exactly the terms one this program
+    fetched for them is under, and a credit that only appeared after a
+    download would have the obligation the wrong way round.
+    """
+    if _database is None:
+        return None
+    if not (_database.database_type or "").lower().startswith(DBIP_TYPE):
+        return None
+    return DBIP_CREDIT, DBIP_HOME
+
+
 def describe():
     """A line naming the database in hand, for the startup notice."""
     if _database is None:
@@ -578,7 +868,10 @@ def describe():
         if age > STALE_AFTER:
             built += (", which is old enough that some of what it says has "
                       "since moved")
-    return "countries from %s%s" % (_database.path, built)
+    owed = credit()
+    return "countries from %s%s%s" % (
+        _database.path, built,
+        ". %s, %s" % (owed[0], owed[1]) if owed else "")
 
 
 def country_of(addr):

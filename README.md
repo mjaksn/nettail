@@ -1494,9 +1494,10 @@ why only one end of most rows carries one.
 
 ### Where the data comes from
 
-Nothing. No country data ships with this program, and none is fetched: no
-address leaves this machine to be asked about, then or ever. What a flag says
-is whatever the file you point at says.
+Nothing ships with this program, and nothing is fetched unless you say so at
+the keyboard. No address ever leaves this machine to be asked about: a country
+is read out of a file that is already here. What a flag says is whatever that
+file says.
 
 The file is a MaxMind format database, `.mmdb`, which is what the free country
 databases are distributed as. Any of these does:
@@ -1533,9 +1534,59 @@ create without being an administrator:
 %PROGRAMDATA%\nettail\country.mmdb
 ```
 
-Finding none is one line at startup saying where it looked, and the collector
-runs on unmarked. So is a file that will not open or does not read as a
-database. A successful load says which file it read and when the file was
+There is one more place on Unix, after all of those: whichever of
+`$XDG_DATA_HOME/nettail/country.mmdb` and
+`~/.local/share/nettail/country.mmdb` your environment settles on. It is last
+so that a machine already syncing a database into `/usr/share/GeoIP` goes on
+reading the copy something else keeps current, and it exists because every
+path above it belongs to root, which is no use for a database you fetched for
+yourself.
+
+### Being offered one
+
+Finding none, at a terminal, you are asked whether to fetch one:
+
+```
+no country database found. Looked in /etc/nettail, /usr/share/GeoIP,
+/var/lib/GeoIP, /usr/local/share/GeoIP, /home/you/.local/share/nettail.
+DB-IP publish a free one, IP to Country Lite, under the Creative Commons
+Attribution 4.0 licence. Fetching it takes about four megabytes from
+db-ip.com and puts it at /home/you/.local/share/nettail/country.mmdb. No
+address goes anywhere either way: a country is read out of the file on this
+machine, then and afterwards.
+fetch it now? [y/N]
+```
+
+The default is no, and so is a bare return, an end of input and anything that
+is not `y` or `yes`. Ctrl-C ends the run rather than answering it. Say yes and
+the file is fetched, unpacked, opened to check that it really is a database,
+and only then moved into place, so an interrupted fetch leaves nothing behind
+for a later run to trip over.
+
+DB-IP is the only publisher this can offer, because it is the only one that
+can be fetched at all. Their lite build sits behind a plain URL under a licence
+that asks for a credit and nothing else, while GeoLite2 wants an account and a
+licence key before a byte moves and obliges you to delete a copy within thirty
+days of a newer one. Neither of those is a thing a yes or no at a prompt can
+stand in for, so a GeoLite2 file is one you fetch yourself and point
+`--country-db` at.
+
+The credit that licence asks for is this program's to pay rather than yours. A
+run reading a DB-IP database says `IP Geolocation by DB-IP, https://db-ip.com`
+on its startup line, and the browser view, which is the reader DB-IP's own
+wording asks for a link, puts one at the end of its status bar. Both come from
+what the file says it is rather than from how it arrived, so a DB-IP file you
+fetched by hand is credited exactly as one fetched here is.
+
+Nothing is asked where nobody could answer. Both stdin and stderr have to be a
+terminal, which they are not under systemd, cron, a pipe or a container.
+Nothing is asked either when there is nowhere writable to put a file, since a
+yes there could only have been followed by a refusal.
+
+Finding none where the question cannot be put is one line at startup saying
+where it looked, and the collector runs on unmarked. So is a file that will not
+open or does not read as a database, so is a declined offer, and so is a fetch
+that fails. A successful load says which file it read and when the file was
 built, and says so out loud when that was more than a year ago, since a country
 assignment that has moved since looks exactly like one that has not.
 

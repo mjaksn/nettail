@@ -24,16 +24,33 @@ parsed, and it is treated as public.
   whatever a database says about the range it is in: the question is about the
   far end of a flow, and a private address has no far end to be in.
 
-  No country data ships with this program and none is fetched, so no address
-  leaves the machine to be asked about. What a flag says is whatever the file
-  you point at says: a MaxMind format `.mmdb`, which is what both of the free
-  country databases are distributed as and what `geoipupdate` already keeps
-  current in `/usr/share/GeoIP` on a good many machines. `--country-db` names
+  No country data ships with this program, so no address leaves the machine to
+  be asked about. What a flag says is whatever the file you point at says: a
+  MaxMind format `.mmdb`, which is what both of the free country databases are
+  distributed as and what `geoipupdate` already keeps current in
+  `/usr/share/GeoIP` on a good many machines. `--country-db` names
   one; without it the usual places for the platform are searched, the GeoIP
   directories on Unix and `%LOCALAPPDATA%\nettail` on Windows, which has no
-  convention of its own. Finding none, the collector says where it looked and
-  where a free one can be had, and runs on unmarked. A City database answers
-  the same question and is read the same way.
+  convention of its own, with a per-user place after all of them on Unix.
+  Finding none, the collector says where it looked and runs on unmarked. A
+  City database answers the same question and is read the same way.
+
+  Finding none at a terminal, it first asks whether to fetch one, `[y/N]` and
+  defaulting to no. Only DB-IP's file can be offered, because it is the only
+  one that can be fetched at all: their lite build is a plain URL under the
+  Creative Commons Attribution 4.0 licence, while GeoLite2 wants an account and
+  a licence key before a byte moves. The offer names the licence, the address
+  and the destination before asking, nothing is fetched without a yes, and
+  nothing is asked at all where nobody could answer, which is every run under
+  systemd, cron, a pipe or a container. What is fetched is unpacked, opened as
+  a database and only then moved into place, so a fetch that fails leaves
+  nothing a later run would find and refuse.
+
+  That licence asks for a credit and this program pays it: a run reading a
+  DB-IP database names them on its startup line, and the browser view, which is
+  the reader their wording asks for a link, puts one in its status bar. Decided
+  from what the file says it is rather than from how it arrived, so a file
+  fetched by hand is credited the same way.
 
   Reading the format is two hundred lines rather than a dependency, for the
   reasons the QR encoder is not one: this installs three pure Python packages
