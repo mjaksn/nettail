@@ -954,6 +954,79 @@ def offer_country_db(note, stream=None, stdin=None, fetch=None, probe=None):
     return country.load(where)
 
 
+def update_country_db(named=None, stream=None, fetch=None):
+    """Fetch a country database because somebody asked outright, and report.
+
+    Hands back an exit status, since this is a thing to do rather than a
+    display to set up: nothing else in this run depends on how it went, and a
+    script that asks for a current database wants to know whether it got one.
+
+    Nothing is asked here and nothing looks for a terminal, which is the whole
+    difference between this and `offer_country_db`. That one has to get a yes
+    out of somebody who may not be there, and every guard on it is about not
+    mistaking an empty pipe for consent. Here the flag is the yes. A run from
+    cron that types it meant it, and refusing to act on it for want of a
+    keyboard would be refusing to do the only thing it was asked to do.
+
+    Nor is there a probe. It exists so that nobody is put a question whose yes
+    could not have been carried out, and there is no question; `download`
+    tries both months by itself, which is what the probe was standing in for.
+
+    What is being replaced is named before it goes. A database at the
+    destination need not be DB-IP's, since anybody may put a GeoLite2 file
+    there by hand, and swapping one publisher's data for another's without
+    saying so is the wrong shape for a module that says this much about whose
+    terms are being agreed to.
+    """
+    stream = sys.stderr if stream is None else stream
+    where, trouble = country.update_target(named)
+    if where is None:
+        print(f"{C.YELLOW}{trouble}{C.RESET}", file=stream)
+        return 1
+
+    # Whose build it is and what day it was made, which between them are the
+    # whole of what somebody needs to see that the right file is going. Not
+    # `describe`, though it holds both: that line ends an old file's report by
+    # naming the flag which would fetch a newer one, and saying so to a reader
+    # who has just typed that flag is answering a question they have already
+    # acted on.
+    #
+    # Opened to read them and closed again straight away, and the closing is
+    # not tidiness. On Windows a mapped file cannot be replaced, and a replace
+    # is how the download below ends.
+    replacing = None
+    if os.path.exists(where):
+        if country.load(where) is None:
+            replacing = "%s at %s%s" % (
+                country.kind() or "database", where,
+                ", built %s" % country.built() if country.built() else "")
+        country.close()
+    if replacing is not None:
+        print(f"{C.GREY}replacing the {replacing}{C.RESET}", file=stream)
+    print(f"{C.GREY}DB-IP publish a free country database, IP to Country "
+          f"Lite, under the {country.DBIP_LICENCE} licence. Fetching it to "
+          f"{where}. No address goes anywhere either way: a country is read "
+          f"out of the file on this machine, then and afterwards.{C.RESET}",
+          file=stream)
+
+    trouble = (country.download if fetch is None else fetch)(where)
+    if trouble:
+        print(f"{C.YELLOW}could not fetch a country database: {trouble}. "
+              f"{country.find_online()}{C.RESET}", file=stream)
+        return 1
+    # Opened before this says it worked. `download` has already opened it once
+    # to decide whether to put it in place at all, and this is the same file
+    # being read the way every later run will read it, which is the only thing
+    # that makes the line below a report rather than a hope. The credit DB-IP's
+    # licence asks for rides along in it.
+    note = country.load(where)
+    if note:
+        print(f"{C.YELLOW}{note}{C.RESET}", file=stream)
+        return 1
+    print(f"{C.GREY}{country.describe()}{C.RESET}", file=stream)
+    return 0
+
+
 def build_parser():
     """The command line, as a parser, built here rather than inside `main`.
 
@@ -1113,7 +1186,9 @@ def build_parser():
         "bar alike. No country data ships with this program: point it at a "
         "MaxMind format file, which is what both of the free databases are "
         "distributed as. A run at a terminal that finds none offers to fetch "
-        "DB-IP's free one, and fetches nothing without being told to.")
+        "DB-IP's free one, and fetches nothing without being told to. "
+        "--update-country-db asks for that same file outright, whether there "
+        "is a database already or not and whether there is a terminal or not.")
     country_grp.add_argument("--country", action="store_true",
                              help="mark public addresses with their country. "
                                   "Implied by --country-db")
@@ -1125,6 +1200,14 @@ def build_parser():
                                   "terminal, offers to fetch one"
                                   % (country.search_paths()
                                      or country.UNIX_PATHS)[0])
+    country_grp.add_argument("--update-country-db", action="store_true",
+                             help="fetch DB-IP's free country database, put "
+                                  "it where the next run will read it, and "
+                                  "exit without collecting anything. Replaces "
+                                  "the database that is there, or fetches a "
+                                  "first one where there is none. With "
+                                  "--country-db it refreshes that file "
+                                  "instead of searching")
     # The choices are shown rather than hidden behind a metavar, which is the
     # opposite of what --colour does two groups up. WHEN is borrowed from every
     # GNU tool that has a --color, and a reader who has never seen this program
@@ -1241,6 +1324,17 @@ def main():
         ap.error("--size-scale-window scopes the dynamic scale and cannot be "
                  "combined with --size-scale-max")
 
+    # And the two options that are things to do instead of collecting, which
+    # for that reason cannot both be done. Ours to check rather than a
+    # mutually exclusive group because --save-config is already in one, with
+    # --config, and argparse allows an option only one group. Widening that
+    # group is not the answer either: reading settings from a file while
+    # fetching a database contradicts nothing, and refusing it would refuse a
+    # command line there is nothing wrong with.
+    if args.save_config is not None and args.update_country_db:
+        ap.error("--save-config and --update-country-db are both done instead "
+                 "of collecting, so only one of them can be asked for")
+
     scale = SizeScale(
         top=DEFAULT_SIZE_SCALE_MAX if args.size_scale_max is None
         else args.size_scale_max,
@@ -1332,6 +1426,18 @@ def main():
         print(f"{C.GREY}settings written to {written}{C.RESET}",
               file=sys.stderr)
         return
+
+    # Fetching a database is the other thing done instead of collecting, and
+    # sits beside saving a file for the same reason: nothing is bound and
+    # nothing is started yet, so a run that only wanted a current database
+    # gets one and goes rather than having to be interrupted to stop.
+    #
+    # Before the marking block below rather than inside it, because this is
+    # not a run that marks anything and does not need --country to have been
+    # asked for. It hands its status straight out, which is what makes the
+    # flag usable from a script.
+    if args.update_country_db:
+        return update_country_db(args.country_db)
 
     # Countries, and the boundary that spells a flag out as two letters for a
     # terminal that was judged unable to draw one. Here rather than down with

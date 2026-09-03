@@ -40,13 +40,14 @@ import os
 import shutil
 import socket
 import struct
+import subprocess
 import sys
 import tempfile
 import time
 import urllib.error
 from collections import Counter
 
-from harness import ROOT, FakeTTY, check, finish, plain
+from harness import ROOT, SCRIPT, FakeTTY, check, finish, plain
 from lanname import Resolver
 from netflume import SequenceWatch
 
@@ -1244,6 +1245,233 @@ except SystemExit as exc:
     check("Ctrl-C at the question ends the run", exc.code == 130, repr(exc.code))
 
 # ---------------------------------------------------------------------------
+# The refresh, asked for outright
+# ---------------------------------------------------------------------------
+#
+# `--update-country-db` is the offer's other half: the same file from the same
+# publisher, fetched because somebody typed a flag rather than because they
+# answered a prompt. Every guard the offer carries is about not mistaking an
+# empty pipe for a yes, and none of them applies here, so what is left to pin
+# is the one thing that can go quietly wrong: where it is allowed to write. A
+# copy put behind the file the search already reads is a fetch that changes
+# nothing at all and then says it worked.
+
+UPDATE_DIR = tempfile.mkdtemp()
+HELD.append(UPDATE_DIR)
+FIRST = os.path.join(UPDATE_DIR, "first", "country.mmdb")
+SECOND = os.path.join(UPDATE_DIR, "second", "country.mmdb")
+os.makedirs(os.path.dirname(FIRST))
+os.makedirs(os.path.dirname(SECOND))
+
+real_destination = country.destination
+try:
+    country.search_paths = lambda *_: (FIRST, SECOND)
+    # Every directory in a temporary tree is writable, so the real
+    # `destination` would answer FIRST here and the case worth testing, a
+    # database sitting above the only place this may write, could never come
+    # up. Standing in for it is how the suite says "root owns the one above",
+    # which is what a Unix machine means by it and what no runner can arrange
+    # for itself.
+    country.destination = lambda *_: SECOND
+
+    where, trouble = country.update_target()
+    check("with no database anywhere the fetch goes where this may write",
+          where == SECOND and trouble is None, "%s %s" % (where, trouble))
+
+    named = os.path.join(UPDATE_DIR, "named.mmdb")
+    where, trouble = country.update_target(named)
+    check("a named file is where a refresh goes, whatever the search says",
+          where == named and trouble is None, "%s %s" % (where, trouble))
+
+    with io.open(SECOND, "wb") as handle:
+        handle.write(build(NETWORKS, kind="DBIP-Country-Lite"))
+    where, trouble = country.update_target()
+    check("a database already at that place is refreshed in place",
+          where == SECOND and trouble is None, "%s %s" % (where, trouble))
+
+    with io.open(FIRST, "wb") as handle:
+        handle.write(build(NETWORKS, kind="DBIP-Country-Lite"))
+    where, trouble = country.update_target()
+    check("a database searched before it is refused, not shadowed",
+          where is None, str(where))
+    check("and the file that would have gone on being read is named",
+          FIRST in (trouble or ""), repr(trouble))
+    check("and so is the one that would have been written and never opened",
+          SECOND in (trouble or ""), repr(trouble))
+    check("and the reader is told what to do instead",
+          "--country-db" in (trouble or ""), repr(trouble))
+
+    os.unlink(FIRST)
+    country.destination = lambda *_: None
+    where, trouble = country.update_target()
+    check("a machine with nowhere writable is refused too", where is None,
+          str(where))
+    check("and sent to both of the pages that publish a database",
+          country.DBIP_PAGE in (trouble or "")
+          and country.MAXMIND_PAGE in (trouble or ""), repr(trouble))
+finally:
+    country.search_paths = real_paths
+    country.destination = real_destination
+
+# And the errand itself. It answers with a status rather than a note, because
+# nothing else in the run depends on how it went and a script that asked for a
+# current database wants to know whether it got one.
+
+UPDATE_DEST = os.path.join(UPDATE_DIR, "run", "country.mmdb")
+HELD.append(UPDATE_DEST)
+os.makedirs(os.path.dirname(UPDATE_DEST))
+
+# A fixed build date, so that the line naming a file about to be replaced can
+# be read for the date as well as for the path. `Counted` stamps the day it
+# ran, which says nothing about whether the date came off the file.
+BUILT_EPOCH = 1788307200
+BUILT_ON = time.strftime("%Y-%m-%d", time.gmtime(BUILT_EPOCH))
+
+
+class Dated(Counted):
+    """A fetch that leaves a database built on a day of the suite's choosing."""
+
+    def __call__(self, where, urls=None):
+        self.asked.append(where)
+        self.urls = urls
+        with io.open(where, "wb") as handle:
+            handle.write(build(NETWORKS, kind="DBIP-Country-Lite",
+                               built=BUILT_EPOCH))
+        return None
+
+
+country.close()
+try:
+    country.search_paths = lambda *_: (UPDATE_DEST,)
+
+    fetch = Dated()
+    out = FakeTTY()
+    status = main.update_country_db(stream=out, fetch=fetch)
+    printed = plain(out.getvalue())
+    check("an errand with no database anywhere fetches one", status == 0,
+          str(status))
+    check("into the place the next run will look", fetch.asked == [UPDATE_DEST],
+          str(fetch.asked))
+    check("and is left free to try either month, having asked about neither",
+          fetch.urls is None, str(fetch.urls))
+    check("the reader is told whose data it is and on what terms",
+          country.DBIP_LICENCE in printed, printed)
+    check("and that no address goes anywhere either way",
+          "No address goes anywhere" in printed, printed)
+    check("and what landed, credit and all", country.DBIP_CREDIT in printed,
+          printed)
+    check("no question is put, since typing the flag was the answer",
+          "[y/N]" not in printed, printed)
+    check("and nothing is said about replacing a file that was not there",
+          "replacing" not in printed, printed)
+
+    # Again, over the file the first one left. This is the case the flag
+    # exists for: a database that is there and is old.
+    country.close()
+    fetch = Dated()
+    out = FakeTTY()
+    status = main.update_country_db(stream=out, fetch=fetch)
+    printed = plain(out.getvalue())
+    check("a second errand replaces what the first one left", status == 0,
+          str(status))
+    line = next((one for one in printed.splitlines()
+                 if one.startswith("replacing")), "")
+    check("and says so before it goes", line != "", printed)
+    check("naming the file", UPDATE_DEST in line, repr(line))
+    check("and whose build it was", "DBIP-Country-Lite" in line, repr(line))
+    check("and the day that build was made", ", built " in line, repr(line))
+    check("which is the date the file itself carries, not today's",
+          BUILT_ON in line, repr(line))
+    check("and not the sentence naming the flag that was just typed",
+          "--update-country-db" not in line, repr(line))
+
+    # A file somebody put there by hand from the other publisher. Swapping one
+    # for the other without saying which is going is the wrong shape for a
+    # feature this careful about whose terms are being agreed to.
+    country.close()
+    with io.open(UPDATE_DEST, "wb") as handle:
+        handle.write(build(NETWORKS, kind="GeoLite2-Country"))
+    fetch = Counted()
+    out = FakeTTY()
+    main.update_country_db(stream=out, fetch=fetch)
+    line = next((one for one in plain(out.getvalue()).splitlines()
+                 if one.startswith("replacing")), "")
+    check("a file from the other publisher is named before it is swapped out",
+          "GeoLite2-Country" in line, repr(line))
+
+    country.close()
+    fetch = Counted(trouble="db-ip.com: timed out")
+    out = FakeTTY()
+    status = main.update_country_db(stream=out, fetch=fetch)
+    printed = plain(out.getvalue())
+    check("a fetch that fails answers with a status a script can read",
+          status == 1, str(status))
+    check("and says what went wrong", "timed out" in printed, printed)
+    check("and where to go and find one instead",
+          country.DBIP_PAGE in printed, printed)
+
+    # What lands is opened before this says it worked, the way every later run
+    # will open it. A fetch that wrote something unreadable and reported
+    # success would be the one failure this errand cannot afford.
+    country.close()
+
+
+    class Nonsense:
+        """A fetch that leaves a file which is not a database."""
+
+        def __init__(self):
+            self.asked = []
+            self.urls = None
+
+        def __call__(self, where, urls=None):
+            self.asked.append(where)
+            with io.open(where, "wb") as handle:
+                handle.write(b"nonsense" * 40)
+            return None
+
+    out = FakeTTY()
+    status = main.update_country_db(stream=out, fetch=Nonsense())
+    check("a fetch that lands something unreadable is not a success",
+          status == 1, str(status))
+    check("and says which file it could not read",
+          UPDATE_DEST in plain(out.getvalue()), plain(out.getvalue()))
+
+    country.close()
+    fetch = Counted()
+    out = FakeTTY()
+    elsewhere = os.path.join(UPDATE_DIR, "elsewhere.mmdb")
+    status = main.update_country_db(elsewhere, stream=out, fetch=fetch)
+    check("a named file is fetched into rather than the searched one",
+          fetch.asked == [elsewhere], str(fetch.asked))
+    check("and that is a success like any other", status == 0, str(status))
+finally:
+    country.search_paths = real_paths
+    country.close()
+
+# The two errands cannot both be run, and argparse cannot say so for them:
+# --save-config is already in a mutually exclusive group with --config, and an
+# option may only be in one. Checked through a real process, which also says
+# that a status this program answers with reaches the shell.
+
+spare = os.path.join(UPDATE_DIR, "spare.conf")
+proc = subprocess.run([sys.executable, *SCRIPT, "--save-config", spare,
+                       "--update-country-db"],
+                      capture_output=True, text=True)
+check("asking for both errands at once is refused", proc.returncode == 2,
+      str(proc.returncode))
+check("and both are named in the refusal",
+      "--save-config" in proc.stderr and "--update-country-db" in proc.stderr,
+      proc.stderr)
+check("and nothing was written on the way to refusing",
+      not os.path.exists(spare))
+
+check("a config file cannot hold the errand either",
+      "update_country_db" not in
+      [action.dest for action in main.settable(main.build_parser())],
+      "update_country_db is settable from a file")
+
+
+# ---------------------------------------------------------------------------
 # The credit the licence asks for
 # ---------------------------------------------------------------------------
 #
@@ -1319,5 +1547,6 @@ for path in HELD:
 # The fetch directory has files under it that the loop above cannot take, so
 # it goes whole and last.
 shutil.rmtree(FETCH_DIR, ignore_errors=True)
+shutil.rmtree(UPDATE_DIR, ignore_errors=True)
 
 finish("country")

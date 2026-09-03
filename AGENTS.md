@@ -200,8 +200,9 @@ Six things about it are easy to break and quiet when broken.
 
 ### Fetching one
 
-A run that searches and finds nothing offers to fetch a database. Seven things
-about that are worth knowing before touching it.
+A run that searches and finds nothing offers to fetch a database, and
+`--update-country-db` asks for one outright. Eight things about that are worth
+knowing before touching it.
 
 - **A HEAD settles whether there is an offer to make, and it goes after both
   guards rather than before them.** `probe` asks db-ip.com for the headers of
@@ -268,6 +269,30 @@ about that are worth knowing before touching it.
   mapped file cannot be deleted or replaced, so without it the very caller
   that opens a file to decide whether to throw it away cannot then throw it
   away.
+- **A refresh writes only where the next run will read, and `update_target` is
+  the whole of that rule.** `--update-country-db` is the offer's other half:
+  the same file from the same publisher, fetched because somebody typed a flag
+  rather than because a prompt caught them. Every guard on `offer_country_db`
+  is about not mistaking an empty pipe for a yes, so none of them applies here
+  and none is kept: no question, no terminal check, and no probe either, since
+  the probe exists to avoid putting a question whose yes could not be carried
+  out and there is no question. What is left to get wrong is where it writes.
+  A named `--country-db` is the file, whatever the search would have said.
+  Otherwise the search order decides, and a database above `destination()`
+  refuses the fetch and is named, because a copy written below it would be
+  found second and opened never, which is the same trap `missing()` avoids one
+  door along. The two are compared by their index in `search_paths()` rather
+  than as paths, which needs no rule about case, separators or symbolic links:
+  whatever `destination()` answers came out of that list in the first place.
+  The errand answers with an exit status rather than a note, which is why
+  `__main__.py` raises `SystemExit(main())`, and it is in `config.UNSETTABLE`
+  beside `--save-config`, because an errand a settings file could hold would
+  reach out to db-ip.com and exit on every run for ever after. The line naming
+  a file about to be replaced is built from `kind()` and `built()` rather than
+  from `describe()`, and that is not an accident: `describe()` ends an old
+  file's line by naming the flag that would fetch a newer one, and printing
+  that to somebody who has just typed the flag answers a question they have
+  already acted on.
 
 `download` and `probe` both take their opener, so the suite exercises the
 fetch, the probe, both months, every failure and the offer around them without

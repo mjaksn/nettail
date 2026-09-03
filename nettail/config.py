@@ -68,8 +68,12 @@ SECTION = "nettail"
 # chain nobody asked for and a file that saves a file is nonsense. `--help`
 # and `--version` because they are questions rather than settings: a file that
 # turned either on would make the program answer it and exit, for ever, and
-# the reader would have no way to see why.
-UNSETTABLE = ("help", "version", "config", "save_config")
+# the reader would have no way to see why. `--update-country-db` for exactly
+# that last reason: it is an errand, not a preference, and a file holding it
+# would reach out to db-ip.com and exit on every run for ever after, which is
+# the one thing the whole feature is arranged to make impossible without
+# somebody saying so.
+UNSETTABLE = ("help", "version", "config", "save_config", "update_country_db")
 
 # The one setting that is read from a file and never written to one.
 #
