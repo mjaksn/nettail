@@ -33,23 +33,41 @@ class Tally:
         """Forget everything. What the c key does."""
         self.flows = 0
 
+        # "In" is what entered this network and "out" what left it, which is
+        # the reading the external traffic section uses, and every direction
+        # counter below splits its total that way. A flow from a public
+        # address arrived, a flow to one departed, and a flow between two
+        # public addresses did both and is counted in each half.
+        #
+        # A flow that never left this network crossed nothing, so it adds to
+        # neither half of a protocol or service row: there the two halves are
+        # what touched the edge, and the total less them is what stayed
+        # inside, bar a flow public at both ends, which is in both halves and
+        # so comes off twice. An address is the one thing with a side of its
+        # own to be read from, which is why its counters below say more.
         self.proto_flows = Counter()
         self.proto_bytes = Counter()
         self.proto_packets = Counter()
+        self.proto_in = Counter()
+        self.proto_out = Counter()
 
         self.service_bytes = Counter()
         self.service_flows = Counter()
+        self.service_in = Counter()
+        self.service_out = Counter()
 
         self.pair_bytes = Counter()
         self.pair_packets = Counter()
 
         # Bytes by address, one trio for each side of the network edge, with
-        # the direction counters beside the total they split. "In" is what
-        # entered this network and "out" what left it, from whichever end the
-        # address is on: bytes from a public address arrived and bytes to one
-        # departed, while a private address received what was sent to it and
-        # sent what it was the source of. That is the reading the external
-        # traffic section already uses, so the tables agree with it.
+        # the direction counters beside the total they split. The same words
+        # as above, read from whichever end the address is on: bytes from a
+        # public address arrived and bytes to one departed, while a private
+        # address received what was sent to it and sent what it was the
+        # source of. So an internal conversation, which is in neither half of
+        # a protocol row, is in both halves here, once on each of the two rows
+        # it has. That is not the tables disagreeing: a protocol is asked what
+        # crossed the edge, an address what it sent and received.
         self.talkers = Counter()
         self.talkers_in = Counter()
         self.talkers_out = Counter()
@@ -91,14 +109,29 @@ class Tally:
         proto_name = PROTO_NAMES.get(proto, str(proto) if proto is not None else "?")
         src, dst = flow_endpoints(rec)
 
+        # Which side of the edge each end is on, worked out before anything is
+        # counted because the protocol and service rows are split by it too.
+        src_kind = addr_kind(src) if src else "unknown"
+        dst_kind = addr_kind(dst) if dst else "unknown"
+        src_public = src_kind == "public"
+        dst_public = dst_kind == "public"
+
         self.flows += 1
         self.proto_flows[proto_name] += 1
         self.proto_bytes[proto_name] += octets
         self.proto_packets[proto_name] += packets
+        if src_public:
+            self.proto_in[proto_name] += octets
+        if dst_public:
+            self.proto_out[proto_name] += octets
 
         service = self.service_of(rec, proto)
         self.service_bytes[service] += octets
         self.service_flows[service] += 1
+        if src_public:
+            self.service_in[service] += octets
+        if dst_public:
+            self.service_out[service] += octets
 
         if src and dst:
             # Direction is collapsed: a conversation is a conversation whichever
@@ -107,10 +140,6 @@ class Tally:
             self.pair_bytes[pair] += octets
             self.pair_packets[pair] += packets
 
-        src_kind = addr_kind(src) if src else "unknown"
-        dst_kind = addr_kind(dst) if dst else "unknown"
-        src_public = src_kind == "public"
-        dst_public = dst_kind == "public"
         if dst_public:
             self.talkers[dst] += octets
             self.talkers_out[dst] += octets
@@ -143,7 +172,8 @@ class Tally:
                 self.outbound_bytes += octets
 
         self._prune((self.pair_bytes, self.pair_packets))
-        self._prune((self.service_bytes, self.service_flows))
+        self._prune((self.service_bytes, self.service_flows),
+                    (self.service_in, self.service_out))
         self._prune((self.talkers,), (self.talkers_in, self.talkers_out))
         self._prune((self.internal,), (self.internal_in, self.internal_out))
 
@@ -252,6 +282,21 @@ class Tally:
 
     def top_pairs_by_packets(self):
         return self.pair_packets.most_common(self.top)
+
+    def top_protocols(self, n):
+        """The busiest protocols, as (name, bytes, in, out).
+
+        Flows and packets are not in the tuple: they are looked up by name
+        where the row is drawn, as they always were, and only the figures the
+        ramp is stretched over need gathering here.
+        """
+        return self._by_bytes(self.proto_bytes, self.proto_in,
+                              self.proto_out, n)
+
+    def top_services(self, n):
+        """The busiest services, in the same shape."""
+        return self._by_bytes(self.service_bytes, self.service_in,
+                              self.service_out, n)
 
     def top_external(self, n):
         """The busiest public addresses, as (address, bytes, in, out)."""

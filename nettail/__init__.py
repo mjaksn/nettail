@@ -47,7 +47,7 @@ caller wanting the second asks ``qr.render`` for it. Nothing else in that
 module collides.
 """
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"
 
 from .cli import (
     build_parser,

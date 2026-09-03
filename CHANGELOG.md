@@ -11,6 +11,20 @@ but it is a program rather than a library, and the names inside it may move
 without that being a breaking change. `--json` output is the part meant to be
 parsed, and it is treated as public.
 
+## [0.8.0] - 2026-09-02
+
+### Added
+
+- **The Protocols and Services tables split each total by direction**, in the
+  same `in/out` column the address tables carry. In is what entered this
+  network and out is what left it, as everywhere else in the report. A
+  protocol has no side of the edge to be read from, so its two halves are
+  what crossed it and nothing more: a flow that stayed inside is in neither,
+  and a busy internal service reads `0B/0B` beside a total in the megabytes.
+  That is the point of the column rather than a gap in it, since traffic that
+  never left the building was until now indistinguishable from traffic that
+  did.
+
 ## [0.7.0] - 2026-09-02
 
 ### Added
@@ -450,6 +464,7 @@ console: the part that decides what a flow should look like on a terminal.
   reminder line under the startup banner can be a pointer rather than a
   two-hundred-character list that wrapped and then scrolled away.
 
+[0.8.0]: https://github.com/mjaksn/nettail/releases/tag/v0.8.0
 [0.7.0]: https://github.com/mjaksn/nettail/releases/tag/v0.7.0
 [0.6.0]: https://github.com/mjaksn/nettail/releases/tag/v0.6.0
 [0.5.1]: https://github.com/mjaksn/nettail/releases/tag/v0.5.1
