@@ -1176,8 +1176,7 @@ try:
     printed, note = offered("yes\n", fetch=fetch)
     check("a spelled out yes is a yes too", fetch.asked == [DEST])
 
-    country.close()
-        # A machine that cannot reach db-ip.com is not asked a question whose yes
+    # A machine that cannot reach db-ip.com is not asked a question whose yes
     # was never going to work. It is told why, and told where to go and find a
     # database for itself, and the collector runs on unmarked.
     country.close()
