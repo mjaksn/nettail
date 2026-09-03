@@ -11,7 +11,7 @@ but it is a program rather than a library, and the names inside it may move
 without that being a breaking change. `--json` output is the part meant to be
 parsed, and it is treated as public.
 
-## [0.10.0] - 2026-09-03
+## [0.10.0] - 2026-09-02
 
 ### Added
 
@@ -32,9 +32,12 @@ parsed, and it is treated as public.
   option, where typing `--hosts` adds to what the file listed rather than
   replacing it, because that is what repeatable means everywhere else here.
 
-  A file it cannot read, a key it does not know and a value it cannot use are
-  each reported and stepped over rather than being fatal. One bad line costs
-  its own line.
+  A key it does not know and a value it cannot use are reported and stepped
+  over, so that line costs its own line and the rest of the file is used. A
+  line the format itself cannot read is different, since an INI file is read
+  whole or not at all: a line with no equals in it, or a key written twice,
+  loses the file rather than the line, and the collector says so and starts on
+  its defaults.
 - **The first `nettail.conf` of these that exists is read**, and only that one:
   the working directory, `~/.nettail`, the home directory, then the usual place
   for a user's configuration on that platform, then the machine's. On Windows

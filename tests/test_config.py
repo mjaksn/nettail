@@ -25,7 +25,9 @@ The rest is the arrangement around it:
   arguments and both are checked here.
 - **A file is a thing people edit**, so a missing section header, an unknown
   key and an unusable value are each read as far as they can be and complained
-  about rather than raised over. One bad line costs its own line.
+  about rather than raised over. A line the format cannot read at all costs
+  the file rather than the line, which is pinned here too, because the
+  likeliest way to write one is to repeat a key that should have been a list.
 - **What is saved can be read back**. `--save-config` writes what a run would
   have used, and the file it writes is put back through the reader and has to
   produce the same run.
@@ -201,6 +203,16 @@ check("and nothing in it is used", written.port == typed([]).port)
 written, complaints = from_file("[nettail]\nport 9995\n")
 check("a line that is not a setting at all does not raise",
       complaints and "could not be read" in complaints[0], str(complaints))
+check("and costs the file, since an INI file is read whole or not at all",
+      written.port == typed([]).port)
+
+# The likeliest way to lose a file, which is why it is pinned: a repeated
+# option written the way it is typed rather than the way INI spells a list.
+written, complaints = from_file(
+    "[nettail]\nhosts = /etc/one\nhosts = /etc/two\nport = 9995\n")
+check("a key written twice is refused rather than quietly halved",
+      complaints and "could not be read" in complaints[0], str(complaints))
+check("and the file goes with it, loudly", written.port == typed([]).port)
 
 # The custom types are the parser's own, so a value they refuse is refused
 # here in the same words rather than reaching the program.
@@ -468,13 +480,13 @@ check("and what it says reaches the socket", "127.0.0.1:4321" in err, err)
 # not use.
 bad = os.path.join(work, "bad.conf")
 with io.open(bad, "w", encoding="utf-8") as handle:
-    handle.write("[nettail]\nport = ninety\nnonsense = 1\n"
-                 "bind = 127.0.0.1\n")
+    handle.write("[nettail]\nheader-every = ninety\nnonsense = 1\n"
+                 "bind = 127.0.0.1\nport = 19995\n")
 err = started(["--config", bad], work)
 check("a bad value is reported rather than fatal", "ninety" in err, err)
 check("and so is an unknown key", "nonsense" in err, err)
-check("and the collector starts anyway, on the port it always had",
-      "127.0.0.1:2055" in err, err)
+check("and the rest of the file is used, which is what starting on its port "
+      "says", "127.0.0.1:19995" in err, err)
 
 # Nothing found is nothing said, on a machine that happens to have no config
 # file anywhere the search reaches.

@@ -353,9 +353,15 @@ replacing it, because that is what repeatable means everywhere else here. A run
 that wants none of them wants `--config` pointed at a file that lists none.
 
 There is a second thing worth knowing before you rely on it: a switch turned on
-in a file cannot be turned off from the command line, because there is no
-`--no-` form of most of them. `--colour never` and `--no-color` are the
-exception. Anything else, and the answer is a different file.
+in a file cannot be turned off from the command line, because switches here
+have no `--no-` form. Colour is not quite an exception and is worth spelling
+out, since it is the setting most likely to be in a file: `colour` is a choice
+rather than a switch, so `colour = never` in a file still yields to `--colour
+always` like any other value. `no-color = true` is a switch, so it yields to
+nothing, and it beats `--colour always` besides, because `--no-color` means
+`--colour never` however it arrived. Set `colour`, not `no-color`, in a file
+you want to argue with later. Anything else, and the answer is a different
+file.
 
 ### Where it is looked for
 
@@ -397,10 +403,26 @@ settings from /home/you/.nettail/nettail.conf
 ```
 
 `--config FILE` reads that file instead of looking for one, and nothing is
-searched for. A file it cannot read, a key it does not know and a value it
-cannot use are each reported and stepped over rather than being fatal: one bad
-line costs its own line, and the collector starts with everything else the file
-said.
+searched for.
+
+A key it does not know and a value it cannot use are each reported and stepped
+over: that line costs its own line, and the collector starts with everything
+else the file said. A line the format itself cannot read is a different thing,
+because an INI file is read whole or not at all. A line with no `=` in it, or a
+key written twice, loses the file rather than the line, and the collector says
+so and starts on its defaults. Writing a repeated option twice is the way to
+meet that:
+
+```ini
+# wrong, and it costs the whole file
+hosts = /etc/hosts.lan
+hosts = /etc/hosts.iot
+
+# right
+hosts =
+    /etc/hosts.lan
+    /etc/hosts.iot
+```
 
 ### Saving one
 

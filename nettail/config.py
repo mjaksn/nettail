@@ -260,10 +260,18 @@ def parse(parser, text, source="the config file"):
     """Read config text against a parser: the settings, and the complaints.
 
     Nothing here raises. A file is something a person edits, often on a
-    machine they are not looking at, and one bad line should cost that line
-    rather than the collector's ability to start. Every complaint names the
-    file and the key, and the caller prints them; every key that did read is
-    in the settings regardless.
+    machine they are not looking at, and a line it cannot use should cost that
+    line rather than the collector's ability to start. Every complaint names
+    the file and the key, and the caller prints them; every key that did read
+    is in the settings regardless.
+
+    A line the format itself cannot read is not the same thing and cannot be
+    made into it: configparser reads a file whole or not at all, so a line
+    with no equals in it, or a key written twice, costs the file. That is the
+    likeliest way to lose one, since writing a repeated option on two lines is
+    the obvious thing to try, and it is left strict rather than quietly
+    keeping the last of the two: an ambiguity reported loudly is better than
+    an ambiguity resolved silently in the direction nobody meant.
 
     A missing section header is not a complaint. There is one section and a
     file with `port = 2055` in it means the obvious thing, so a header is
