@@ -171,10 +171,26 @@ def destination(platform=None, env=None):
 # cache occasionally and keeps this to a dictionary.
 CACHE_MAX = 8192
 
-# A database older than this is still read, and still said to be old. Country
-# assignments move: a block sold between registries answers with the seller
-# for as long as the file is not refreshed, and nothing about a stale answer
-# looks stale on screen.
+# A database older than this is still read, and still said to be old, with the
+# flag that would replace it named on the same line. Nothing about a stale
+# answer looks stale on screen, which is the whole reason for saying anything.
+#
+# A year rather than a month, and that was measured rather than felt. Over the
+# eleven monthly DB-IP builds from 2025-11 to 2026-09, counting only the space
+# the older build named a country for and that BGP actually announced, the ten
+# steps between them sum to 9.1% of that space changing country. Comparing the
+# first build directly against the last gives 2.3%. So about a quarter of a
+# month's movement is still there ten months later and the rest is undone, much
+# of it the publisher re-deciding how to attribute a hyperscaler's ranges
+# rather than anything moving: the 2026-06 build put 46 million addresses of
+# Amazon space in GB and 2026-07 put them back in US, and the distance from the
+# first build shrank that month rather than growing.
+#
+# A threshold of a month or two would therefore spend most of its warnings on
+# churn that reverts, and a line a reader meets every month is a line they
+# learn to skip. A year is about 2% of routed space, and roughly twice that
+# across the cloud ranges most external flows actually end at, which is worth
+# one clause at startup and is not worth more.
 STALE_AFTER = 365 * 24 * 3600
 
 # The free database this program offers to fetch, and the terms it comes on.
