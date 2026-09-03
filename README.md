@@ -305,7 +305,7 @@ the header is pinned, since the repeats would be redundant.
 
 See [Size colour scale](#size-colour-scale) for what the colours mean.
 
-### Country marking
+### Country marking options
 
 | Option | Default | Description |
 | --- | --- | --- |
@@ -316,7 +316,7 @@ See [Size colour scale](#size-colour-scale) for what the colours mean.
 See [Country marking](#country-marking) for where the database comes from and
 what is marked.
 
-### Hostname resolution
+### Hostname resolution options
 
 | Option | Default | Description |
 | --- | --- | --- |
@@ -455,7 +455,7 @@ hosts =
     /etc/hosts.iot
 ```
 
-Two things stop the collector rather than being stepped over, both of them
+Three things stop the collector rather than being stepped over, each of them
 about a file that has not said what it meant:
 
 - **A file named with `--config` that cannot be read.** One found by searching
@@ -2315,6 +2315,7 @@ subprocesses. Everything else is the package:
 | `values.py` | sizes, rates and durations, written for a column |
 | `sizescale.py` | the colour ramp behind the BYTES column |
 | `services.py` | port names, the system database first and a shipped list after |
+| `supplemental-services` | port names for what the system database does not know, shipped as package data |
 | `config.py` | settings read from a file, and one written back out |
 | `country.py` | reading a MaxMind format database, the flag an address is marked with, and spelling it out for a terminal that cannot draw one |
 | `display.py` | laying one flow out as a line of text |
@@ -2443,7 +2444,7 @@ python tests/run.py tally keys    # only suites whose name contains either
 python tests/run.py -v            # print every check, not only failures
 ```
 
-1427 checks across 34 suites, in about a minute. No test dependencies and
+1917 checks across 36 suites, in about a minute. No test dependencies and
 no test runner to learn: the suites need only netflume and lanname, the same as
 the collector.
 
@@ -2507,13 +2508,16 @@ another suite's result.
 
 Nothing reaches the network except `test_size_end_to_end`, which starts a real
 collector on the loopback interface, waits to be told the socket is bound, and
-sends it NetFlow v5 datagrams, and the two web suites, which bind a server on a
-port the operating system picks and talk to it over loopback. Nothing leaves the
-machine. Everything else drives the code in process with synthetic packets,
-which is also the honest limitation: the exporters are imaginary, and how the
-colours actually look still needs a human and a terminal. The page is checked
-for what it must not contain rather than rendered, so the browser half wants a
-human too.
+sends it NetFlow v5 datagrams; the two web suites, which bind a server on a
+port the operating system picks and talk to it over loopback; `test_colour`,
+which starts a real collector on a fixed loopback port and reads its greeting
+back off the event stream; and `test_config`, which starts one on a fixed
+loopback port to watch a setting reach the socket. Nothing leaves the machine.
+Everything else drives the code in process with synthetic packets, which is
+also the honest limitation: the exporters are imaginary, and how the colours
+actually look still needs a human and a terminal. The page is checked for what
+it must not contain rather than rendered, so the browser half wants a human
+too.
 
 ---
 

@@ -71,13 +71,12 @@ parsed, and it is treated as public.
   letters out wherever a flag is known not to be drawn: Windows, macOS
   Terminal, the Linux console, a terminal with no TERM to speak of, a stream
   that is not a terminal at all, and an encoding that cannot carry the
-  characters. `flag` and `code` settle it without
-  guessing. The browser is sent the flag whatever this says, which is arranged
-  the way colour is: painted once where the row is built, and spelled back out
-  at the terminal that cannot draw it. Whether a browser then draws a flag or
-  the two boxed letters is its own fonts' business, Windows having no flag
-  glyph on it at all, so the page names the fonts that can before the one that
-  cannot.
+  characters. `flag` and `code` settle it without guessing. The browser is
+  sent the flag whatever this says, which is arranged the way colour is:
+  painted once where the row is built, and spelled back out at the terminal
+  that cannot draw it. Whether a browser then draws a flag or the two boxed
+  letters is its own fonts' business, Windows having no flag glyph on it at
+  all, so the page names the fonts that can before the one that cannot.
 - **The browser view ships the flags it draws.** A flag is two regional
   indicator letters, no monospace font has a glyph for the pair, and Windows
   has no emoji font that draws one at all, so Chrome and Edge there showed the

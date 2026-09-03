@@ -140,7 +140,7 @@ pins every byte by hash. The whole format is decoded rather than the part a
 country database uses, because people will point this at a City database they
 already have and being told to fetch a second file would be absurd.
 
-Five things about it are easy to break and quiet when broken.
+Six things about it are easy to break and quiet when broken.
 
 - **The flag is painted at the source and spelled out at the boundary.** A
   terminal that cannot draw one is behind `country.CodeStream`, which turns
@@ -163,14 +163,13 @@ Five things about it are easy to break and quiet when broken.
   the page's two addresses the reader arrived by; it asks only when a status
   frame says `countries`, because `FontFace.load()` fetches when it is called
   and a face built at startup sent 78 KB to every browser watching a run that
-  would never draw a flag; and
-  the emoji families still named after the monospace ones are the fallback for
-  a build with the font left out. The `unicodeRange` on the face is what keeps
-  it off every other character once it is there. `flags-licence` has to stay
-  in the wheel
-  beside it, since the artwork is CC BY 4.0 and the credit travels with the
-  material. `test_country` holds the licence's checksum to the font that is
-  actually there, and `test_web_server` fetches the route.
+  would never draw a flag; and the emoji families still named after the
+  monospace ones are the fallback for a build with the font left out. The
+  `unicodeRange` on the face is what keeps it off every other character once
+  it is there. `flags-licence` has to stay in the wheel beside it, since the
+  artwork is CC BY 4.0 and the credit travels with the material.
+  `test_country` holds the licence's checksum to the font that is actually
+  there, and `test_web_server` fetches the route.
 - **Both forms are two characters wide**, on screen and to `len`, and every
   column in the program measures its contents with `len`. That is what lets
   `endpoint`, `with_names` and the status bar go on padding as they always
@@ -373,7 +372,7 @@ Six things about it are easy to break.
   The rule the code enforces is that a file which never had a secret never
   gets one.
 
-Three smaller things, each of which was a real defect before it was a rule.
+Four smaller things, each of which was a real defect before it was a rule.
 `read` opens with `utf-8-sig` and catches `UnicodeDecodeError`, because a
 mark left by Notepad became part of the first key and a file saved as UTF-16
 by PowerShell was a traceback out of `main` before the socket was bound.
@@ -409,7 +408,7 @@ the collector is doing happens on the receive thread, which drains the key
 queue between datagrams and hands each one to the same `Controls.handle` the
 terminal uses.
 
-Three things about it are easy to break and quiet when broken.
+Eight things about it are easy to break and quiet when broken.
 
 - **Nothing on an HTTP thread may print.** `sticky.py` and `statusbar.py` are
   managing a scroll region, and a line written from another thread lands inside
@@ -742,10 +741,10 @@ feature means reading both, and their suites.
   the two disagree, which is the one concession: the host list marks a
   superseded name with a star when there is no colour to dim it with, so a
   reader without colour is shown different words and not the same words
-  undressed. `colour_on(stream)` is what that
-  site asks, never `C.enabled()`. One switch for both is what this replaced,
-  and the case it got wrong was the one the image exists for: a detached
-  container has no terminal, so the browser view came out white.
+  undressed. `colour_on(stream)` is what that site asks, never `C.enabled()`.
+  One switch for both is what this replaced, and the case it got wrong was the
+  one the image exists for: a detached container has no terminal, so the
+  browser view came out white.
 - **Every `Resolver(...)` passes an explicit `mode`.** lanname 0.2.0 changed a
   bare `Resolver()` from looking nothing up to querying reverse DNS, with
   nothing raised and nothing warned. Explicit modes are why that release was a
