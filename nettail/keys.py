@@ -29,7 +29,7 @@ PAUSE_BUFFER = 2000      # flows held while paused before the oldest are dropped
 HELP_KEY = "?"
 
 # The key that draws the web interface URL as a QR code. Named once for the
-# same reason and for one more thing that has to agree: it is kept back from
+# same reason, and its fourth place is a different one: it is kept back from
 # the browser, so it appears in the table below, in the dispatch, in
 # WEB_EXCLUDED, and in the line under the banner that points a reader at it.
 QR_KEY = "q"
