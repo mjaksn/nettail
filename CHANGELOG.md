@@ -109,10 +109,10 @@ it is written plainly for that reason.
 ### Added
 
 - **Anything the command line takes, a settings file takes too.** `nettail.conf`
-  holds the same options under the same names without their dashes, and there
-  is no second list of what can be set: the file is read against the same
-  parser the command line is, so an option that exists is settable and one that
-  does not is reported as an unknown key. A `[nettail]` section header is
+  holds the same options under the same names without their leading dashes,
+  and there is no second list of what can be set: the file is read against the
+  same parser the command line is, so an option that exists is settable and one
+  that does not is reported as an unknown key. A `[nettail]` section header is
   allowed and not needed, a key may be spelled with dashes or underscores, a
   switch takes true or false, and an option that may be repeated takes one
   value a line.

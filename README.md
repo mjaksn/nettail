@@ -332,9 +332,10 @@ what is marked.
 ## Settings file
 
 Everything the collector takes on the command line it takes in a file instead,
-under the same name without its dashes. There is no second list of what can be
-set: the file is read against the same parser the command line is, so an option
-that exists is settable, and one that does not is reported as an unknown key.
+under the same name without its leading dashes. There is no second list of
+what can be set: the file is read against the same parser the command line is,
+so an option that exists is settable, and one that does not is reported as an
+unknown key.
 
 ```ini
 # nettail.conf
