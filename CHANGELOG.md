@@ -11,6 +11,49 @@ but it is a program rather than a library, and the names inside it may move
 without that being a breaking change. `--json` output is the part meant to be
 parsed, and it is treated as public.
 
+## [0.9.0] - 2026-09-02
+
+### Added
+
+- **`--country` marks every public address with the country a database says it
+  is in**, as a flag emoji, wherever an address is shown: the flow rows, the
+  summary's tables and the top talker on the status bar. It rides after the
+  port and the service name and in front of the brackets, which go on meaning a
+  resolved hostname and nothing else, and under the `n` key it goes with the
+  name that replaced the address. An address on this network is never marked,
+  whatever a database says about the range it is in: the question is about the
+  far end of a flow, and a private address has no far end to be in.
+
+  No country data ships with this program and none is fetched, so no address
+  leaves the machine to be asked about. What a flag says is whatever the file
+  you point at says: a MaxMind format `.mmdb`, which is what both of the free
+  country databases are distributed as and what `geoipupdate` already keeps
+  current in `/usr/share/GeoIP` on a good many machines. `--country-db` names
+  one; without it seven usual places are searched and, finding none, the
+  collector says where it looked and runs on unmarked. A City database answers
+  the same question and is read the same way.
+
+  Reading the format is two hundred lines rather than a dependency, for the
+  reasons the QR encoder is not one: this installs three pure Python packages
+  and nothing else, the suite has no dependencies, and the image pins every
+  byte by hash.
+- **`--country-style` decides what this terminal is shown**, since a flag emoji
+  is the country's two letters written as regional indicators and a terminal
+  draws a flag only if its font has one. `auto`, the default, spells the two
+  letters out wherever a flag is known not to be drawn: Windows, macOS
+  Terminal, the Linux console, a stream that is not a terminal, and an encoding
+  that cannot carry the characters. `flag` and `code` settle it without
+  guessing. The browser view is always shown the flag and this does not decide
+  for it, which is arranged the way colour is: painted once where the row is
+  built, and spelled back out at the terminal that cannot draw it.
+- **The `g` key** turns the marking off and on while the collector runs, and
+  says so rather than appearing to work when there is no database to mark
+  with.
+- **`--json` carries `src_country` and `dst_country`**, as the two letter code
+  and never the flag, present whenever a database is loaded and has an answer
+  for that end. Absent otherwise, which is every run that did not ask for one,
+  the way `src_host` is absent when no name is known.
+
 ## [0.8.0] - 2026-09-02
 
 ### Added

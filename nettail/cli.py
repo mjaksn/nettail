@@ -24,8 +24,8 @@ from netflume import (
     flow_timestamp,
 )
 
-from . import __version__, services
-from .colour import C, PlainStream, colour_on, strip_colour
+from . import __version__, country, services
+from .colour import C, PlainStream, behind, colour_on, strip_colour
 from .display import (
     COLUMNS,
     ENDPOINT_WIDTH,
@@ -111,6 +111,18 @@ def flow_record(rec, hdr, resolver):
         out["src_host"] = src_host
     if dst_host:
         out["dst_host"] = dst_host
+    # The two letter code rather than the flag the display draws. This is the
+    # half of the interface meant to be parsed, and a parser wants the fact
+    # rather than a picture of it; a reader who wants the flag can make one
+    # from the code and nobody can go the other way. Absent, as the hostnames
+    # above are, when there is nothing to say: no database, no country marking
+    # asked for, or an address the database had no answer to.
+    src_country = country.country_of(rec.get("src_addr"))
+    dst_country = country.country_of(rec.get("dst_addr"))
+    if src_country:
+        out["src_country"] = src_country
+    if dst_country:
+        out["dst_country"] = dst_country
     return out
 
 
@@ -452,10 +464,17 @@ def write_summary(stats, tally, resolver, sequences, sampling, args,
         `name_at` is the column the name's bracket opens in, which
         `with_names` works out for a whole column of addresses at once, and
         it is the only caller: where a name goes is never one row's to say.
+
+        A country, where one was asked for and known, is a fourth thing and
+        sits where the flow display puts it: after the port and in front of
+        the brackets. Grey, because it is the least of the four and because
+        a terminal spelling the flag out as two letters would otherwise have
+        them read as part of the address.
         """
         pieces = [(str(addr) if addr else "-", _address_colour(addr))]
         if port:
             pieces.append((f":{port}", C.GREY))
+        pieces.append((country.mark(addr), C.GREY))
         host = resolver.lookup(addr) if addr else None
         if host:
             gap = name_at - sum(len(text) for text, _colour in pieces)
@@ -477,6 +496,7 @@ def write_summary(stats, tally, resolver, sequences, sampling, args,
         """
         widest = max((len(str(addr) if addr else "-")
                       + (len(f":{port}") if port else 0)
+                      + len(country.mark(addr))
                       for addr, port in column
                       if addr and resolver.lookup(addr)), default=0)
         return [_painted(*address(addr, port, name_at=widest + 3))
@@ -928,6 +948,31 @@ def build_parser():
                                "rather than the whole run. Implies "
                                "--size-scale-dynamic")
 
+    country_grp = ap.add_argument_group(
+        "country marking",
+        "Off unless asked for. Marks every public address with the country a "
+        "database says it is in, in the flow rows, the summary and the status "
+        "bar alike. No country data ships with this program: point it at a "
+        "MaxMind format file, which is what both of the free databases are "
+        "distributed as.")
+    country_grp.add_argument("--country", action="store_true",
+                             help="mark public addresses with their country. "
+                                  "Implied by --country-db")
+    country_grp.add_argument("--country-db", default=None, metavar="FILE",
+                             help="the database to read. Without it the usual "
+                                  "places are searched, %s first and the rest "
+                                  "of /usr/share/GeoIP and /var/lib/GeoIP "
+                                  "after, and a run that finds none says where "
+                                  "it looked" % country.SEARCH_PATHS[0])
+    country_grp.add_argument("--country-style", choices=("auto", "flag", "code"),
+                             default="auto", metavar="HOW",
+                             help="how this terminal is shown a country: flag "
+                                  "for the emoji, code for the two letters, "
+                                  "auto (default) for the letters where a flag "
+                                  "is known not to be drawn. The browser view "
+                                  "is always shown the flag and this does not "
+                                  "decide for it")
+
     grp = ap.add_argument_group("hostname resolution")
     grp.add_argument("--resolve", choices=Resolver.MODES, default="all",
                      help="off: static entries only, nothing looked up. "
@@ -1037,13 +1082,43 @@ def main():
         # in one process today except a test, and a stream wrapped twice
         # would work while saying, to anything that looked, that it had
         # already been dealt with.
-        if not isinstance(sys.stderr, PlainStream):
+        if not behind(sys.stderr, PlainStream):
             sys.stderr = PlainStream(sys.stderr)
-        if not args.json and not isinstance(sys.stdout, PlainStream):
+        if not args.json and not behind(sys.stdout, PlainStream):
             # Under --json stdout carries json.dumps output, which has never
             # had a colour code in it, so there is nothing to take out and no
             # reason to put a substitution in front of every flow.
             sys.stdout = PlainStream(sys.stdout)
+
+    # Countries, and the boundary that spells a flag out as two letters for a
+    # terminal that was judged unable to draw one. Here rather than down with
+    # the other startup work, for the reason the colour above is here: the
+    # wrapping has to be in place before anything is written, and the first
+    # thing written is the line at the end of this block.
+    #
+    # Asking for a database is asking for the marking, the way asking for a
+    # size window asks for a dynamic scale. Nobody names a file for a feature
+    # they did not want.
+    if args.country or args.country_db:
+        # Decided from stdout, as the colour question is, because there is one
+        # terminal and that is where the display goes. The browser is never
+        # asked: it has the font, and it is shown the flag whatever this
+        # terminal can manage.
+        if not country.terminal_flags(args.country_style, sys.stdout):
+            if not behind(sys.stderr, country.CodeStream):
+                sys.stderr = country.CodeStream(sys.stderr)
+            if not args.json and not behind(sys.stdout, country.CodeStream):
+                # Under --json stdout carries the two letter code in a field of
+                # its own and never a flag, so there is nothing to spell out.
+                sys.stdout = country.CodeStream(sys.stdout)
+        note = country.load(args.country_db)
+        print(f"{C.YELLOW}{note}{C.RESET}" if note
+              else f"{C.GREY}{country.describe()}{C.RESET}", file=sys.stderr)
+    else:
+        # A run that did not ask marks nothing, whatever a run before it in
+        # this process asked for. Only the suite reaches main twice, and this
+        # is what keeps its second run saying what a first run would have.
+        country.close()
 
     # Treat SIGTERM like Ctrl-C so the summary still prints under systemd.
     def _term(_signum, _frame):
@@ -1433,7 +1508,10 @@ def main():
                 "inbound": human_bytes(snap["inbound"]),
                 "outbound": human_bytes(snap["outbound"]),
                 "resolve": MODE_DESC[snap["resolve"]],
-                "talker": (f"{talker[0]}"
+                # The flag, always, whatever this terminal was judged able
+                # to draw: nothing on this route passes a terminal, and a
+                # browser has the font.
+                "talker": (f"{talker[0]}{country.mark(talker[0])}"
                            + (f" ({talker[1]})" if talker[1] else "")
                            + f"  {human_bytes(talker[2])}") if talker else "",
             },

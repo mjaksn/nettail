@@ -14,6 +14,7 @@ from netflume import (
 )
 
 from .colour import C
+from .country import mark as country_mark
 from .services import service_name
 from .values import human_bytes, human_count
 
@@ -42,6 +43,16 @@ def endpoint(addr, port, proto, width, resolver=None, named=False):
     nothing is still an address, so a column under the n key is a mixture, and
     deliberately so: the alternative is hiding the hosts nothing is known about
     behind a blank, which are the ones worth noticing.
+
+    A public address carries its country after all of that and in front of
+    anything in brackets, when `--country` asked for one and a database had an
+    answer. After, because a flag wedged between an address and its port would
+    break up the one thing on the row that is read as a unit; in front of the
+    brackets, because those mean "resolved hostname" and nothing else. It
+    rides on the address rather than on the name for the same reason the
+    service name rides on the port: it describes what it sits beside, and
+    under the n key the name has taken the address's place and is describing
+    the same host.
     """
     if addr is None:
         return "-".ljust(width)
@@ -50,15 +61,21 @@ def endpoint(addr, port, proto, width, resolver=None, named=False):
         stem = f"{stem}:{port}"
 
     svc = service_name(port, proto)
-    base = f"{stem}/{svc}" if svc else stem
-
     host = resolver.lookup(addr) if resolver else None
 
     if named and host:
         stem = f"{host}:{port}" if port else host
-        base = f"{stem}/{svc}" if svc else stem
+    base = f"{stem}/{svc}" if svc else stem
+
+    # On both, so that dropping the service name below to make room keeps the
+    # country. Empty for every address on this network and for every run that
+    # did not ask, which is what leaves the arithmetic under it as it was.
+    marker = country_mark(addr)
+    stem, base = stem + marker, base + marker
+
+    if named and host:
         if len(base) > width:
-            base = f"{host}:{port}" if port else host
+            base = stem
     elif host:
         candidate = f"{base} ({host})"
         if len(candidate) > width:

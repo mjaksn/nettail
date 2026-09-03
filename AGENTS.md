@@ -111,6 +111,62 @@ The data file has to stay listed in `[tool.setuptools.package-data]`. Left
 out, the wheel ships without it and every supplemental name silently becomes a
 bare port number.
 
+## Countries
+
+`country.py` reads a MaxMind format database and answers "what country is this
+address in". It is off unless `--country` asks for it and silent unless there
+is a file to read, and no country data ships with this program, which is the
+whole shape of the feature: what a flag says is whatever the reader's file
+says.
+
+Reading the format rather than depending on `maxminddb` is the same trade
+`qr.py` makes, and rests on the same three facts: this installs three pure
+Python packages and nothing else, the suite has no dependencies, and the image
+pins every byte by hash. The whole format is decoded rather than the part a
+country database uses, because people will point this at a City database they
+already have and being told to fetch a second file would be absurd.
+
+Five things about it are easy to break and quiet when broken.
+
+- **The flag is painted at the source and spelled out at the boundary.** A
+  terminal that cannot draw one is behind `country.CodeStream`, which turns
+  each regional indicator back into its letter, exactly as `PlainStream` takes
+  colour out for a reader who is not having it. The reason it has to be a
+  boundary and not a setting is `write_summary`: the report is rendered once
+  and read by a terminal and a browser together, and `tee`'s `per_reader` is
+  not available to it for the reasons written on `tee`. A style threaded
+  through `row_cells`, the summary and the bar would also be a fourth thing
+  for the two views to disagree about.
+- **Both forms are two characters wide**, on screen and to `len`, and every
+  column in the program measures its contents with `len`. That is what lets
+  `endpoint`, `with_names` and the status bar go on padding as they always
+  did. A marker is three characters, the space included, in either form. A
+  change that made one form wider than the other would leave every column
+  that holds an address a character out, and only in one of the two views.
+- **`_record` packs 28 bit records with the high nibble to the left.** Get
+  that backwards and the tree still walks perfectly and answers with somebody
+  else's country. `test_country` builds the same database at all three widths
+  and asks it the same questions, which is the only thing that catches it,
+  since 24 and 32 have no nibble to get wrong.
+- **An IPv4 address in an IPv6 database is at ::/96**, which is ninety six
+  zero bits before the address itself. `_bits` arranges that by reading the
+  same number as 128 bits wide rather than 32, which puts the zeros there
+  already. A reader that skipped them answers from whatever sits at the top of
+  the v6 tree, for every address.
+- **Whether a database is loaded and whether the display is marking are two
+  questions.** `--json` carries `src_country` and `dst_country` whenever one
+  is loaded, the way it carries `src_host` whatever the n key is doing; the g
+  key moves the second and not the first. Both live on the module rather than
+  on `args`, where the other display switches live, because `display`, `cli`
+  and `statusbar` all ask and share no arguments. It is what `services` does
+  and the reasoning is written where the state is.
+
+`terminal_flags` is a guess and may only choose prose, in the sense
+`in_container` may: there is no query for "can you draw a flag", so what it
+knows is where one is certainly not drawn. It takes the environment and the
+platform as arguments so that every branch can be asked about from a runner
+that is none of them.
+
 ## The web interface
 
 `feed.py` is the bus and knows nothing about HTTP; `web.py` is the server and
@@ -446,10 +502,15 @@ feature means reading both, and their suites.
   **The stripper takes SGR and nothing else.** `sticky.py` and `statusbar.py`
   write scroll margins, cursor moves and erases to the same stream, and a
   general ANSI strip would leave the display drawing over itself while looking
-  right in a file. `tee` renders twice when the two disagree, which is the one
-  concession: the host list marks a superseded name with a star when there is
-  no colour to dim it with, so a reader without colour is shown different
-  words and not the same words undressed. `colour_on(stream)` is what that
+  right in a file. There is a second boundary of the same shape now, the one
+  that spells a country flag out as two letters, so `FilterStream` is the
+  plumbing under both and `colour_on` asks the stream rather than testing it
+  with `isinstance`: two wrappers can sit around one terminal in either order,
+  and the outermost is not the one with the answer. `tee` renders twice when
+  the two disagree, which is the one concession: the host list marks a
+  superseded name with a star when there is no colour to dim it with, so a
+  reader without colour is shown different words and not the same words
+  undressed. `colour_on(stream)` is what that
   site asks, never `C.enabled()`. One switch for both is what this replaced,
   and the case it got wrong was the one the image exists for: a detached
   container has no terminal, so the browser view came out white.

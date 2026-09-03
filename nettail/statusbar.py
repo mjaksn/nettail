@@ -23,6 +23,7 @@ import time
 from collections import deque
 
 from .colour import C
+from .country import mark as country_mark
 from .sticky import MIN_STICKY_ROWS, enable_windows_vt, scroll_region
 from .values import human_bits, human_bytes, human_count
 
@@ -278,7 +279,13 @@ def _wire_segments(snap):
         segments.append(_seg(7, "peak", human_bits(snap["peak"])))
     if snap["top_talker"]:
         addr, name, octets = snap["top_talker"]
-        named = f"{addr} ({name})" if name else str(addr)
+        # The busiest talker is a public address by definition, so it is the
+        # one field on the bar that can carry a country. Asked for here rather
+        # than put in the snapshot, because a snapshot is what the bar is
+        # rendered from in the suite and a marker is not a figure about the
+        # run: it is how an address is written wherever one is written.
+        marked = f"{addr}{country_mark(addr)}"
+        named = f"{marked} ({name})" if name else marked
         segments.append(_seg(6, "top", f"{named} {human_bytes(octets)}"))
     return segments
 

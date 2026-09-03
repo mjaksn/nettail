@@ -17,6 +17,7 @@ also mirror the same display into a browser, which is off unless asked for and
 draws what the terminal draws rather than deciding anything of its own.
 
     colour      ANSI codes and the switch that disables them
+    country     what country an external address is in, and its flag
     values      sizes, rates and durations, written for a column
     sizescale   the colour ramp behind the BYTES column
     services    port names, the system database first and a shipped list after
@@ -38,7 +39,10 @@ which is not netflume's function but this package's wrapper around it.
 
 Loading and parsing the supplemental service list are left on the module rather
 than lifted out of it: ``services.load()`` says what it loads and a bare
-``load`` in this namespace would not.
+``load`` in this namespace would not. The country module keeps most of itself
+back for the same reason: ``country.load``, ``country.mark``, ``country.show``
+and ``country.Database`` all say what they are about where they are, and none
+of those words says anything at all here.
 
 ``qr.render`` is the one name below that could not be brought up, because
 ``display.render`` is already here and means something else entirely: one lays
@@ -47,7 +51,7 @@ caller wanting the second asks ``qr.render`` for it. Nothing else in that
 module collides.
 """
 
-__version__ = "0.8.0"
+__version__ = "0.9.0"
 
 from .cli import (
     build_parser,
@@ -60,6 +64,15 @@ from .cli import (
     write_summary,
 )
 from .colour import C
+from .country import (
+    CACHE_MAX,
+    SEARCH_PATHS,
+    BadDatabase,
+    CodeStream,
+    country_of,
+    spell_flags,
+    terminal_flags,
+)
 from .display import (
     COLUMNS,
     ENDPOINT_INDENT,
@@ -135,6 +148,8 @@ from .web import (
 
 __all__ = [
     "C", "Controls", "DEFAULT_SIZE_SCALE_MAX", "ENDPOINT_INDENT",
+    "CACHE_MAX", "SEARCH_PATHS", "BadDatabase", "CodeStream", "country_of",
+    "spell_flags", "terminal_flags",
     "ENDPOINT_WIDTH", "WAY_WIDTH", "flow_macs", "human_clock", "way",
     "HELP_KEY", "KEY_HELP", "KEY_WIDTH", "KEYS", "Keyboard",
     "PAUSE_BUFFER", "QR_KEY",
