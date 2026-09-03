@@ -43,9 +43,10 @@ are not optional.
   decided.
 - **An `Origin` check on the control route**, refusing a request that names an
   origin other than this one.
-- **Three routes and no fourth.** No directory listing, no file handler,
-  nothing that turns part of a request into a path on disk. The page is read
-  once at startup and lives in memory.
+- **Four routes and no fifth.** The page, the stream, the flags font and the
+  control route, and nothing else. No directory listing, no file handler,
+  nothing that turns part of a request into a path on disk. The page and the
+  font are read once at startup and live in memory.
 - **A cap on connected browsers.** Each stream holds a thread for as long as
   the tab is open, so the count is bounded rather than left to whoever is
   opening tabs. That cap covers the stream only, which is why there is also
@@ -562,7 +563,7 @@ def _frame(event, payload):
 
 
 class _Handler(BaseHTTPRequestHandler):
-    """Three routes and nothing else."""
+    """Four routes and nothing else."""
 
     # Named so that a response says as little about what is running as it can.
     server_version = "nettail"

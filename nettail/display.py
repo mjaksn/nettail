@@ -39,10 +39,10 @@ def endpoint(addr, port, proto, width, resolver=None, named=False):
 
     With `named` set, which is what the n key turns on, a host that answered
     to a name is shown by that name instead of by its address, and the
-    parentheses go with the address they were explaining. An address that answered to
-    nothing is still an address, so a column under the n key is a mixture, and
-    deliberately so: the alternative is hiding the hosts nothing is known about
-    behind a blank, which are the ones worth noticing.
+    parentheses go with the address they were explaining. An address that
+    answered to nothing is still an address, so a column under the n key is a
+    mixture, and deliberately so: the alternative is hiding the hosts nothing
+    is known about behind a blank, which are the ones worth noticing.
 
     A public address carries its country after all of that and in front of
     anything in brackets, when `--country` asked for one and a database had an

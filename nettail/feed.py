@@ -42,7 +42,7 @@ CLIENT_BACKLOG = 4000
 # stream, and what the page dispatches on.
 EVENTS = (
     ("hello", "the collector's settings, the key table, the columns, a status"),
-    ("flow", "one flow record, the same shape --json prints"),
+    ("flow", "one flow's cells to draw, and the record --json prints"),
     ("status", "the status bar snapshot, on a clock"),
     ("prose", "a block of text the terminal also printed, ANSI intact"),
     ("clear", "the x key: throw away what is on screen"),
@@ -175,7 +175,7 @@ class Feed:
         return events, dropped
 
     def flow(self, record):
-        """One flow, already shaped the way --json prints it."""
+        """One flow as the browser needs it: its cells, and the --json record."""
         self.publish("flow", record)
 
     def prose(self, kind, text):

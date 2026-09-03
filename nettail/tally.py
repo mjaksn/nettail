@@ -17,7 +17,7 @@ from netflume import (
 
 from .services import service_name
 
-TOP_N = 5                    # rows in each of the "busiest" tables
+TOP_N = 5                    # rows in the busiest-pairs and longest-flows tables
 MAX_SPEED_EVENTS = 100000    # rate changes kept for the concurrency estimate
 MAX_TRACKED_KEYS = 50000     # pairs, services or addresses held at once
 

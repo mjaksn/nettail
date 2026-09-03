@@ -67,9 +67,10 @@ test:
   `test_key_help` holds them to each other in both directions: a key that
   works and is listed nowhere fails, and so does one listed and wired to
   nothing. `HELP_KEY` is `?` itself, named once and used by the table, the
-  dispatch and the startup reminder line. `QR_KEY` is `q` in the same way,
-  and has one thing more to agree with: it is kept back from the browser, so
-  it is named in `WEB_EXCLUDED` as well.
+  dispatch, the startup reminder line and `WEB_UNLISTED`, which keeps its
+  button off a browser while leaving the key pressable. `QR_KEY` is `q` in the
+  same way, and the thing it has to agree with is `WEB_EXCLUDED`, since it is
+  kept back from the browser altogether.
 
   A key that turns part of the display on also wants a flag beside it, and
   `test_key_help` holds that too: every key is either an act, which is
