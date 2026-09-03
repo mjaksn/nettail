@@ -88,7 +88,8 @@ t = tally_of([
     flow("192.168.1.2", "1.1.1.1", octets=9000, packets=3),
 ])
 check("direction is collapsed into one pair",
-      t.pair_bytes[("192.168.1.1", "8.8.8.8")] == 1500, str(dict(t.pair_bytes)))
+      t.traffic.pairs[("192.168.1.1", "8.8.8.8")].total.bytes == 1500,
+      str(sorted(t.traffic.pairs)))
 check("the busiest pair by volume comes first",
       t.top_pairs_by_bytes()[0] == (("1.1.1.1", "192.168.1.2"), 9000),
       str(t.top_pairs_by_bytes()))
@@ -99,7 +100,7 @@ check("only five pairs are reported",
       len(tally_of([flow("10.0.0.%d" % i, "8.8.8.8") for i in range(20)])
           .top_pairs_by_bytes()) == 5)
 check("a flow missing an address makes no pair",
-      tally_of([{"src_addr": "10.0.0.1", "proto": 6}]).pair_bytes == Counter())
+      tally_of([{"src_addr": "10.0.0.1", "proto": 6}]).traffic.pairs == {})
 
 # --- longest flows ----------------------------------------------------------
 t = tally_of([flow("10.0.0.%d" % i, "8.8.8.8", duration=float(i), start=0)
@@ -351,10 +352,13 @@ t = main.Tally()
 for i in range(main.MAX_TRACKED_KEYS + 500):
     t.add(flow("10.%d.%d.%d" % (i // 65536, (i // 256) % 256, i % 256),
                "8.8.8.8", octets=1), HDR)
-check("the pair table is bounded", len(t.pair_bytes) <= main.MAX_TRACKED_KEYS,
-      str(len(t.pair_bytes)))
-check("its companion is pruned in step", set(t.pair_bytes) == set(t.pair_packets),
-      "%d vs %d" % (len(t.pair_bytes), len(t.pair_packets)))
+check("the pair table is bounded",
+      len(t.traffic.pairs) <= main.MAX_TRACKED_KEYS, str(len(t.traffic.pairs)))
+# One table rather than two now, so there is no companion to fall out of step
+# with it: bytes and packets hang off the same pair object.
+check("and a pair still carries both figures",
+      all(p.total.bytes and p.total.packets is not None
+          for p in t.traffic.pairs.values()))
 check("what was dropped is counted", t.pruned > 0, str(t.pruned))
 check("the talkers table is bounded too",
       len(t.talkers) <= main.MAX_TRACKED_KEYS, str(len(t.talkers)))
@@ -404,7 +408,8 @@ check("accepted flows are counted apart from dropped ones",
 t = tally_of([flow("192.168.1.1", "8.8.8.8", duration=1)])
 t.clear()
 check("clear() empties everything",
-      t.flows == 0 and not t.proto_bytes and not t.pair_bytes and not t.talkers
+      t.flows == 0 and not t.proto_bytes and not t.traffic.pairs
+      and not t.traffic.endpoints and not t.talkers
       and not t.talkers_in and not t.talkers_out and not t.internal
       and not t.internal_in and not t.internal_out
       and t.longest == [] and t.external_bytes == 0 and t._events == []

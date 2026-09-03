@@ -6,7 +6,7 @@ suite that takes it up on that.
 """
 from harness import check, finish
 
-from nettail.feed import CLIENT_BACKLOG, PROSE_KINDS, Feed
+from nettail.feed import CLIENT_BACKLOG, EVENTS, PROSE_KINDS, Feed
 
 # -- an unwatched bus costs nothing -------------------------------------
 
@@ -55,6 +55,22 @@ events, _dropped = bus.drain(client)
 check("every documented prose kind publishes",
       len(events) == len(PROSE_KINDS),
       "%d of %d" % (len(events), len(PROSE_KINDS)))
+
+# -- the answer to one browser's question --------------------------------
+#
+# Every watcher receives every answer, and the ask's own id rides on it so a
+# page can tell its own from somebody else's. Publishing to the one client
+# that asked is the alternative, and it would mean the feed learning which
+# client an ask came from, which is a thread boundary it does not cross.
+
+bus.detail({"ask": 3, "held": True, "sections": []})
+events, _dropped = bus.drain(client)
+check("a detail answer publishes under its own name",
+      len(events) == 1 and events[0][0] == "detail", str(events))
+check("carrying the id of the ask it answers", events[0][1]["ask"] == 3)
+check("and it is one of the documented events",
+      "detail" in [name for name, _doc in EVENTS],
+      str([name for name, _doc in EVENTS]))
 
 # -- overflow drops the oldest and counts it -----------------------------
 

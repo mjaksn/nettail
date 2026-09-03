@@ -658,6 +658,15 @@ try:
         check("but refuses the control route",
               fetch(quiet_url + "key", host_header=quiet_host, method="POST",
                     body=body) == 403)
+        # And still answers questions about a flow, which is the whole reason
+        # the readonly refusal moved under the key branch: asking what a flow
+        # was changes nothing, and a view served for watching is still a view
+        # somebody may want to read properly.
+        asking = json.dumps({"ask": 1, "n": 1,
+                             "ends": [None, None]}).encode("utf-8")
+        check("while still answering questions about a flow",
+              fetch(quiet_url + "detail", host_header=quiet_host,
+                    method="POST", body=asking) == 200)
     finally:
         quiet.stop(timeout=1.0)
 

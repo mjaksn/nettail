@@ -9,7 +9,9 @@ Also pins the two `--json` interactions, which are the ones nobody would notice
 going wrong: the clear key must not put escape codes into a machine-readable
 stream, and pause must hold the browser view without holding stdout.
 """
+import argparse
 import io
+import json
 import os
 import socket
 import struct
@@ -67,7 +69,7 @@ check("the terminal listing still shows every key, browser or not",
 
 
 def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
-        keyboard=None, presses=(), window=None, port_notices=()):
+        keyboard=None, presses=(), window=None, port_notices=(), asks=()):
     """Drive main() with keys arriving as if from a browser.
 
     `web_presses` is a list of (after_n_polls, key, value). The queue is filled
@@ -86,6 +88,12 @@ def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
     `presses` are keys arriving from the terminal rather than from a browser,
     which is the only way to reach a key that a browser is not allowed to
     press. They are handed over one per pass round the loop, in order.
+
+    `asks` are questions about a flow, as (after_n_polls, ask, serial, ends),
+    put on the queue a browser's POST to the detail route would put them on.
+    Timed against the poll counter like the presses, because an ask is only
+    worth answering once some flows have gone by: the serial the page would
+    have clicked is the one the collector stamped on a flow it published.
 
     `port_notices` are ports a request thread would have noted, timed against
     the poll counter the same way `web_presses` are. They stand in for a
@@ -116,6 +124,7 @@ def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
     """
     waited = []
     queued = list(web_presses)
+    asked = list(asks)
     noticed = list(port_notices)
     waiting = list(packets)
     seen = {}
@@ -144,6 +153,10 @@ def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
                 if press[0] <= FakeSocket.calls:
                     queued.remove(press)
                     seen["site"].keys.put_nowait((press[1], press[2]))
+            for question in list(asked):
+                if question[0] <= FakeSocket.calls:
+                    asked.remove(question)
+                    seen["site"].asks.put_nowait(question[1:])
             for note in list(noticed):
                 if note[0] <= FakeSocket.calls:
                     noticed.remove(note)
@@ -179,6 +192,10 @@ def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
         def __init__(self, bus, keys, allowed, **kw):
             self.bus = bus
             self.keys = keys
+            # The second queue a request thread may put something on. Held
+            # here for the same reason the key queue is: a check drives the
+            # receive loop by filling it, and nothing binds a port.
+            self.asks = kw.get("asks")
             self.allowed = allowed
             self.readonly = kw.get("readonly", False)
             self.port = 2056
@@ -268,6 +285,8 @@ def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
     seen["events"] = events
     seen["prose"] = [(payload["kind"], payload["text"])
                      for kind, payload in events if kind == "prose"]
+    seen["flows"] = [payload for kind, payload in events if kind == "flow"]
+    seen["details"] = [payload for kind, payload in events if kind == "detail"]
     return seen
 
 
@@ -536,6 +555,114 @@ decoded = [s["snap"]["flows"] for s in statuses(result)]
 check("a flow the filter hides is decoded", max(decoded) == 1)
 check("but is not counted as one a browser would have seen",
       max(counts) == 0, "%r shown against %r decoded" % (counts, decoded))
+
+# -- a flow carries its own identity -------------------------------------
+#
+# What makes a row clickable. The serial is the collector's own counter and
+# means nothing outside the run; the two ends travel beside it so that a row
+# whose flow has fallen out of the ring can still be asked about.
+
+result = run([], [v5_packet(0)])
+check("every flow published carries a serial",
+      result["flows"] and all(isinstance(f.get("n"), int)
+                              for f in result["flows"]),
+      str([f.get("n") for f in result["flows"]]))
+check("and the serials are the order they were published in",
+      [f["n"] for f in result["flows"]]
+      == list(range(1, len(result["flows"]) + 1)),
+      str([f["n"] for f in result["flows"]]))
+check("and its two ends, as the decoder spelled them",
+      all(f.get("ends") == ["192.168.1.10", "8.8.8.8"]
+          or f.get("ends") == ["192.168.1.11", "8.8.8.8"]
+          for f in result["flows"]),
+      str([f.get("ends") for f in result["flows"]]))
+check("beside the cells and the record, which are unchanged",
+      all("cells" in f and "record" in f for f in result["flows"]))
+
+# -- and a browser can ask about one --------------------------------------
+
+result = run([], [v5_packet(0)], asks=[(3, 7, 1, ("192.168.1.10", "8.8.8.8"))])
+answers = result["details"]
+check("an ask is answered", len(answers) == 1, "%d answers" % len(answers))
+if answers:
+    answer = answers[0]
+    check("with the ask's own id on it", answer["ask"] == 7, str(answer["ask"]))
+    check("the flow it asked about is still held", answer["held"] is True)
+    check("so the flow and the datagram are both described",
+          [s["title"] for s in answer["sections"]] == ["Flow", "Datagram"],
+          str([s["title"] for s in answer["sections"]]))
+    check("both endpoint panels are filled",
+          len(answer["ends"]) == 2
+          and all(panel["tables"] for panel in answer["ends"]),
+          str([panel["title"] for panel in answer["ends"]]))
+    check("and the pair under them", bool(answer["pair"]["tables"]),
+          str(answer["pair"]["title"]))
+    check("the datagram section carries what the receive loop stamped on",
+          all(label in dict(answer["sections"][1]["facts"])
+              for label in ("Sequence", "Received here", "Datagram size",
+                            "Flows in the datagram", "Sampling in force")),
+          str([label for label, _v in answer["sections"][1]["facts"]]))
+
+# A serial the ring never held is the case a reader reaches by clicking a row
+# that has scrolled a long way up.
+result = run([], [v5_packet(0)],
+             asks=[(3, 8, 99999, ("192.168.1.10", "8.8.8.8"))])
+answers = result["details"]
+check("a serial the collector no longer holds is answered anyway",
+      len(answers) == 1 and answers[0]["held"] is False, str(answers))
+if answers:
+    check("with the endpoint statistics the ask's ends still name",
+          all(len(panel["facts"]) > 3 for panel in answers[0]["ends"]),
+          str([len(panel["facts"]) for panel in answers[0]["ends"]]))
+
+# -- the new keys in the json line ---------------------------------------
+#
+# Nothing downstream of the receive loop used to see any of this: the header
+# was used to timestamp a flow and then dropped.
+
+result = run([], [v5_packet(11)], argv=["--json"])
+lines = [line for line in result["out"].splitlines() if line.strip()]
+records = [json.loads(line) for line in lines]
+check("a json line carries the export sequence number",
+      records and records[0]["_sequence"] == 11, str(records[:1]))
+check("and the observation domain", "_domain" in records[0])
+check("and when the datagram reached this collector",
+      records[0]["_received"] > 1600000000, str(records[0].get("_received")))
+check("and the sampling rate in force",
+      records[0]["_sampling_rate"] == 1, str(records[0].get("_sampling_rate")))
+check("and the exporter's own export time", "_export_time" in records[0])
+check("v5, which has one, also carries the exporter uptime",
+      records[0]["_uptime"] == 100000, str(records[0].get("_uptime")))
+check("while the three that were always there have not moved",
+      all(key in records[0] for key in ("_exporter", "_version", "_timestamp")))
+
+# -- how often the dialog asks again --------------------------------------
+
+greeting = run([], [v5_packet(0)])["greeting_when_serving"]
+check("the greeting says how often the dialog refreshes",
+      greeting["detail_refresh"] == main.DEFAULT_DETAIL_REFRESH,
+      str(greeting.get("detail_refresh")))
+greeting = run([], [v5_packet(0)],
+               argv=["--web-detail-refresh", "1.5"])["greeting_when_serving"]
+check("and takes the flag's value when one was given",
+      greeting["detail_refresh"] == 1.5, str(greeting.get("detail_refresh")))
+greeting = run([], [v5_packet(0)],
+               argv=["--web-detail-refresh", "0"])["greeting_when_serving"]
+check("and zero, which is the page not asking again at all",
+      greeting["detail_refresh"] == 0.0, str(greeting.get("detail_refresh")))
+
+# The flag validates rather than merely parsing. `type=float` alone accepts a
+# negative interval, a NaN and an infinity, and all three reach the page as a
+# setInterval argument: the first two mean "every frame" and the third means
+# the timer never fires while still claiming it will.
+for bad in ("-1", "nan", "inf", "-inf", "soon", ""):
+    try:
+        main.detail_refresh_arg(bad)
+        check("a refresh interval of %r is refused" % bad, False, "accepted")
+    except argparse.ArgumentTypeError as exc:
+        check("a refresh interval of %r is refused" % bad, True, str(exc))
+for good, want in (("0", 0.0), ("5", 5.0), ("0.25", 0.25)):
+    check("and %r is taken" % good, main.detail_refresh_arg(good) == want)
 
 # -- read only ----------------------------------------------------------
 

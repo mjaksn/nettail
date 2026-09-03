@@ -74,6 +74,7 @@ SAMPLES = {
     "web_token": "a-token-worth-keeping",
     "web_colour": "off",
     "web_readonly": "true",
+    "web_detail_refresh": "2.5",
     "size_scale_max": "2M",
     "size_scale_dynamic": "true",
     "size_scale_window": "500",
