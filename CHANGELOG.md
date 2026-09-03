@@ -11,6 +11,47 @@ but it is a program rather than a library, and the names inside it may move
 without that being a breaking change. `--json` output is the part meant to be
 parsed, and it is treated as public.
 
+## [0.12.0] - 2026-09-03
+
+### Added
+
+- **`--update-country-db` fetches a country database because you asked for
+  one**, rather than because a prompt caught you at a terminal with none. It is
+  the other half of the offer added in 0.11.0, and it reaches the two cases
+  that offer cannot: a database that is already there and has gone old, and a
+  machine with nobody sitting at it. Nothing is collected. It fetches, says
+  what it did, and exits with a status a script can read.
+
+  No question is put and no terminal is looked for. Every guard on the offer is
+  about not mistaking an empty pipe for a yes, and typing the flag is the yes;
+  a run from cron that types it meant it. There is no probe either, since that
+  exists so nobody is put a question whose yes could not be carried out, and
+  there is no question. For the same reason it is the one country option a
+  settings file cannot hold: an errand written into a file would reach out to
+  db-ip.com and exit on every run for ever after.
+
+  Where it writes is the part that matters. With `--country-db` it refreshes
+  that file. Without it the file goes where the next run will actually read it,
+  and a database sitting higher in the search order stops the fetch and is
+  named, rather than being quietly shadowed by a copy nothing would ever open.
+  That is the machine whose `geoipupdate` keeps `/usr/share/GeoIP` current,
+  where fetching underneath would have left a new file, an old answer and
+  nothing on screen to say which was being shown. A database being replaced is
+  named first, publisher and build date alike, so that swapping a GeoLite2 file
+  you put there by hand for a DB-IP one is something you are told about. What
+  lands is opened and read as a database before any of it reports success.
+
+### Changed
+
+- **A database more than a year old now says what to do about it.** The startup
+  line already said the file was old enough that some of what it says has since
+  moved; it now names `--update-country-db` as well, which turns a complaint
+  into a way out.
+- **`python -m nettail` passes the exit status on.** The installed command
+  always did, since that is what setuptools wraps it in, so the two ways of
+  running now report the same thing. A collector run is unaffected: it answers
+  with nothing, which is still a zero.
+
 ## [0.11.0] - 2026-09-03
 
 ### Added
@@ -636,6 +677,7 @@ console: the part that decides what a flow should look like on a terminal.
   reminder line under the startup banner can be a pointer rather than a
   two-hundred-character list that wrapped and then scrolled away.
 
+[0.12.0]: https://github.com/mjaksn/nettail/releases/tag/v0.12.0
 [0.11.0]: https://github.com/mjaksn/nettail/releases/tag/v0.11.0
 [0.8.0]: https://github.com/mjaksn/nettail/releases/tag/v0.8.0
 [0.7.0]: https://github.com/mjaksn/nettail/releases/tag/v0.7.0
