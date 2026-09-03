@@ -52,7 +52,7 @@ caller wanting the second asks ``qr.render`` for it. Nothing else in that
 module collides.
 """
 
-__version__ = "0.12.0"
+__version__ = "0.13.0"
 
 from .cli import (
     WatchedTemplates,
