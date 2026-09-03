@@ -55,6 +55,7 @@ from nettail import country
 from nettail.colour import C, PlainStream, colour_on
 from nettail.display import ENDPOINT_WIDTH, endpoint
 from nettail.statusbar import wire_line
+from nettail.values import human_bytes
 from nettail.web import WEB_ENDPOINT_WIDTH, unpad
 from nettail.web import load_font as web_font
 
@@ -834,11 +835,25 @@ class Fetched:
         self.closed = True
 
 
+class Headed:
+    """What urlopen hands back for a HEAD: the headers and no body at all."""
+
+    def __init__(self, size=None):
+        self.headers = {} if size is None else {"Content-Length": str(size)}
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
 class Opener:
     """A urlopen that answers from a table of URLs, and logs what it was asked.
 
     A URL with no entry is a 404, which is what DB-IP answers for a month
     whose build has not gone up, and is the case the second URL exists for.
+    The real server was checked by hand and answers a HEAD for a month that is
+    there with a 200 and a Content-Length, and one that is not with a plain
+    404, which is what this stands in for.
     """
 
     def __init__(self, answers):
@@ -854,6 +869,8 @@ class Opener:
                 request.full_url, 404, "Not Found", {}, None)
         if isinstance(payload, Exception):
             raise payload
+        if request.get_method() == "HEAD":
+            return Headed(len(payload))
         return Fetched(payload)
 
 
@@ -954,6 +971,67 @@ check("and is not put where a later run would find it",
 check("and the part file went with it", not os.path.exists(DEST + ".part"))
 
 # ---------------------------------------------------------------------------
+# The question asked before the question
+# ---------------------------------------------------------------------------
+#
+# Nobody is asked to agree to a download that cannot happen, so a HEAD goes
+# first and settles whether there is anything to offer. The real server was
+# checked by hand while this was written: a month that is there answers 200
+# with a Content-Length, and a month that is not answers a plain 404, which is
+# what the fake above stands in for.
+
+opener = Opener({urls[0]: REAL})
+url, size, trouble = country.probe(opener=opener, when=SEPTEMBER)
+check("the probe asks about the current month first", url == urls[0], str(url))
+check("with a HEAD rather than by fetching the file",
+      [request.get_method() for request in opener.asked] == ["HEAD"],
+      str([request.get_method() for request in opener.asked]))
+check("and reports the size the server named", size == len(REAL), str(size))
+check("and has nothing to report going wrong", trouble is None, repr(trouble))
+check("and waits a good deal less than a download would",
+      opener.timeout == country.PROBE_TIMEOUT
+      and country.PROBE_TIMEOUT < country.DOWNLOAD_TIMEOUT,
+      repr(opener.timeout))
+check("and names this program to the server it asks",
+      opener.asked[0].get_header("User-agent")
+      == "nettail/" + main.__version__)
+
+opener = Opener({urls[1]: REAL})
+url, size, trouble = country.probe(opener=opener, when=SEPTEMBER)
+check("a month whose build is not up yet falls to the one before",
+      url == urls[1], str(url))
+check("and both were asked with HEAD",
+      [request.get_method() for request in opener.asked] == ["HEAD", "HEAD"])
+
+opener = Opener({})
+url, size, trouble = country.probe(opener=opener, when=SEPTEMBER)
+check("neither month there is nothing to offer", url is None, str(url))
+check("and no size to go with it", size is None)
+check("and it says what it was told", "404" in (trouble or ""), repr(trouble))
+
+opener = Opener({urls[0]: urllib.error.HTTPError(
+    urls[0], 503, "Service Unavailable", {}, None)})
+url, _size, trouble = country.probe(opener=opener, when=SEPTEMBER)
+check("an answer that is not a 404 stops the probe there",
+      url is None and len(opener.asked) == 1, str(len(opener.asked)))
+check("and is reported as it came", "503" in (trouble or ""), repr(trouble))
+
+opener = Opener({urls[0]: urllib.error.URLError("no route to host")})
+url, _size, trouble = country.probe(opener=opener, when=SEPTEMBER)
+check("a machine with no way out is answered at once", url is None)
+check("and told why", "no route to host" in (trouble or ""), repr(trouble))
+
+
+def unmeasured(request, timeout=None):
+    """A server that answers but names no length, which is allowed."""
+    return Headed()
+
+
+url, size, trouble = country.probe(opener=unmeasured, when=SEPTEMBER)
+check("a server that names no size is still a yes", url == urls[0])
+check("and the size is simply not known", size is None, str(size))
+
+# ---------------------------------------------------------------------------
 # Where a fetched file is allowed to land
 # ---------------------------------------------------------------------------
 
@@ -1002,12 +1080,28 @@ class Typed(io.StringIO):
         return True
 
 
-def offered(typed, fetch=None, stdin=None):
+class Probe:
+    """A probe that logs rather than asking, and can be told to fail."""
+
+    def __init__(self, trouble=None, size=None):
+        self.trouble = trouble
+        self.size = len(REAL) if size is None else size
+        self.asked = 0
+
+    def __call__(self):
+        self.asked += 1
+        if self.trouble:
+            return None, None, self.trouble
+        return urls[0], self.size, None
+
+
+def offered(typed, fetch=None, stdin=None, probe=None):
     """Put the offer, and hand back what was printed and what came back."""
     out = FakeTTY()
     stdin = Typed(typed) if stdin is None else stdin
     note = main.offer_country_db("the old note", stream=out, stdin=stdin,
-                                 fetch=fetch)
+                                 fetch=fetch,
+                                 probe=Probe() if probe is None else probe)
     return plain(out.getvalue()), note
 
 
@@ -1017,9 +1111,11 @@ class Counted:
     def __init__(self, trouble=None):
         self.trouble = trouble
         self.asked = []
+        self.urls = None
 
-    def __call__(self, where):
+    def __call__(self, where, urls=None):
         self.asked.append(where)
+        self.urls = urls
         if self.trouble:
             return self.trouble
         # What a real fetch leaves behind: a database at the place asked for.
@@ -1032,11 +1128,18 @@ country.close()
 country.search_paths = lambda *_: (DEST,)
 try:
     fetch = Counted()
-    printed, note = offered("", fetch=fetch, stdin=io.StringIO("y\n"))
+    probe = Probe()
+    printed, note = offered("", fetch=fetch, stdin=io.StringIO("y\n"),
+                            probe=probe)
     check("a stdin that is not a terminal is never asked", printed == "",
           repr(printed))
     check("and nothing is fetched on its behalf", fetch.asked == [])
     check("and the note it already had is what it keeps", note == "the old note")
+    # The important half of that: a run with nobody at it does not reach out
+    # either. The terminal check is what stops the network as well as the
+    # question, which is why the probe sits after it rather than before it.
+    check("and nothing whatever is asked of the network", probe.asked == 0,
+          str(probe.asked))
 
     fetch = Counted()
     printed, note = offered("y\n", fetch=fetch)
@@ -1050,6 +1153,10 @@ try:
           "No address goes anywhere" in printed, printed)
     check("the question defaults to no, out loud", "[y/N]" in printed, printed)
     check("yes fetches it", fetch.asked == [DEST], str(fetch.asked))
+    check("and fetches the URL the probe just confirmed",
+          fetch.urls == (urls[0],), str(fetch.urls))
+    check("and the size the server named is what the reader was told",
+          human_bytes(len(REAL)) in printed, printed)
     check("and what came back is a database", note is None, repr(note))
     check("which is the one that was fetched", country.loaded())
 
@@ -1066,6 +1173,43 @@ try:
     fetch = Counted()
     printed, note = offered("yes\n", fetch=fetch)
     check("a spelled out yes is a yes too", fetch.asked == [DEST])
+
+    country.close()
+        # A machine that cannot reach db-ip.com is not asked a question whose yes
+    # was never going to work. It is told why, and told where to go and find a
+    # database for itself, and the collector runs on unmarked.
+    country.close()
+    fetch = Counted()
+    probe = Probe(trouble="no route to host")
+    printed, note = offered("y\n", fetch=fetch, probe=probe)
+    check("a probe that fails is still a probe that was made",
+          probe.asked == 1, str(probe.asked))
+    check("but nothing is asked of the reader after it",
+          "[y/N]" not in printed, printed)
+    check("and nothing is fetched, whatever was on stdin", fetch.asked == [])
+    check("the reader is told why", "no route to host" in (note or ""),
+          repr(note))
+    check("and that no address will be marked",
+          "no address will be marked" in (note or ""), repr(note))
+    check("and where to find one themselves", country.DBIP_PAGE in (note or ""),
+          repr(note))
+    check("both of them, in fact", country.MAXMIND_PAGE in (note or ""),
+          repr(note))
+    check("and what kind of file to come back with",
+          ".mmdb" in (note or ""), repr(note))
+    check("and where to put it", DEST in (note or ""), repr(note))
+    check("and the other way of pointing this program at it",
+          "--country-db" in (note or ""), repr(note))
+    check("and the run goes on without one", not country.loaded())
+
+    # A server that answers but names no size. The offer is still made; it
+    # simply says nothing about how big the file is, rather than guessing.
+    country.close()
+    fetch = Counted()
+    printed, note = offered("n\n", probe=Probe(size=0), fetch=fetch)
+    check("no size named is no size claimed", "to fetch." not in printed,
+          printed)
+    check("and the offer is put all the same", "[y/N]" in printed, printed)
 
     country.close()
     fetch = Counted(trouble="db-ip.com: timed out")
@@ -1131,6 +1275,9 @@ PAGE = io.open(os.path.join(ROOT, "nettail", "web.html"),
                encoding="utf-8").read()
 check("the page reads the credit off the status frame",
       "payload.credit" in PAGE)
+check("the README sends a reader to the same DB-IP page the fallback does",
+      country.DBIP_PAGE in README)
+check("and the same MaxMind one", country.MAXMIND_PAGE in README)
 check("and writes down neither the words it shows",
       country.DBIP_CREDIT not in PAGE)
 check("nor the address it points them at", country.DBIP_HOME not in PAGE)

@@ -4,9 +4,13 @@ Off unless `--country` asks for it, and silent unless there is a database to
 read. No country data ships with this program and none is fetched unless a
 person at the keyboard says so: what a flag says is whatever the file the
 reader pointed at says, which is the only honest arrangement for a fact this
-program cannot work out for itself. An address on this network is never
-marked, because the question is about the far end of a flow and a private
-address has no far end to be in.
+program cannot work out for itself. One request goes out before that yes, and
+only one: `probe` asks db-ip.com whether there is a file to fetch at all, so
+that nobody is put a question whose yes could not have been carried out. It is
+announced on the line above itself for the same reason the config module
+prints which file it read. An address on this network is never marked, because
+the question is about the far end of a flow and a private address has no far
+end to be in.
 
 A database is a MaxMind format file, `.mmdb`. That is what both free country
 databases are distributed as, DB-IP's lite build and MaxMind's GeoLite2, and
@@ -14,9 +18,11 @@ it is what a distribution's `geoipupdate` writes into `/usr/share/GeoIP`, so
 a machine that already syncs one needs nothing fetched. A City database
 answers the country question too and is read the same way.
 
-A run that searches and finds nothing offers to fetch one, and `download` is
-that offer carried out. Only DB-IP's file can be offered, for the reason set
-out beside `DBIP_URL`, and only after somebody has said yes at a terminal.
+A run that searches and finds nothing offers to fetch one. `probe` is what
+settles whether there is an offer to make, `download` is that offer carried
+out, and `find_online` is what a reader is told instead when the first of
+those says no. Only DB-IP's file can be offered, for the reason set out beside
+`DBIP_URL`, and only after somebody has said yes at a terminal.
 
 Reading one is about two hundred lines against a format that has not changed
 since 2015, and the case for writing them rather than depending on
@@ -192,6 +198,13 @@ DBIP_LICENCE = "Creative Commons Attribution 4.0"
 DBIP_CREDIT = "IP Geolocation by DB-IP"
 DBIP_HOME = "https://db-ip.com"
 
+# The two pages a reader is sent to when the offer cannot be made, which is
+# every run that cannot reach db-ip.com and every run with nobody to ask.
+# Named here rather than written into the message, because the README lists
+# the same two and `test_country` holds the two lists to each other.
+DBIP_PAGE = "https://db-ip.com/db/download/ip-to-country-lite"
+MAXMIND_PAGE = "https://dev.maxmind.com/geoip/geolite2-free-geolocation-data"
+
 # What a DB-IP file's metadata calls it. Their country build says
 # DBIP-Country-Lite and their city one DBIP-City-Lite, so what is matched is
 # the prefix rather than either name.
@@ -206,6 +219,14 @@ DBIP_TYPE = "dbip"
 # bounds each read rather than the transfer.
 DOWNLOAD_TIMEOUT = 30
 DOWNLOAD_MAX = 64 * 1024 * 1024
+
+# And how long to wait on the question that comes before it. Shorter than the
+# download's own on purpose: a HEAD is a few hundred bytes either way, and the
+# machine this matters on is the one that drops the packets rather than
+# refusing them, where the whole wait is spent finding out there is nobody
+# there. Thirty seconds of that in front of a collector that was going to run
+# perfectly well anyway is a program that looks hung at startup.
+PROBE_TIMEOUT = 10
 
 
 # The first regional indicator, which stands for A. A flag is the two letters
@@ -608,7 +629,62 @@ def download_urls(when=None):
     return (DBIP_URL % (when.tm_year, when.tm_mon), DBIP_URL % before)
 
 
-def download(dest, opener=None, when=None):
+def probe(opener=None, when=None):
+    """Ask db-ip.com whether there is a database to fetch, without fetching.
+
+    Hands back three things: the URL that answered, how large it says the file
+    is, and what went wrong. The first is None exactly when the third is set,
+    and the size is None on its own where the server named none.
+
+    A HEAD rather than a GET, because the only two questions are whether the
+    file is there and how big it is and both are answered in the headers.
+
+    It exists so that nobody is asked to agree to a download that cannot
+    happen. A reader with no route out, behind a proxy that refuses, or on a
+    network that drops the request would otherwise say yes, wait, and be told
+    it failed, when the useful answer was always going to be where to fetch a
+    file by hand. Knowing first turns that into one line of advice.
+
+    Both months are tried, for the reason `download` tries both: from the
+    first of a month until DB-IP puts the new build up, the current name is a
+    404 and the month before is the newest there is, and probing only the
+    first would send everybody in that window to the fallback.
+    """
+    # Lazily, for the reason `download` imports lazily: this is the only part
+    # of the program that speaks HTTP as a client.
+    import urllib.error
+    import urllib.request
+
+    from . import __version__
+
+    opener = urllib.request.urlopen if opener is None else opener
+    trouble = "nothing to fetch"
+    for url in download_urls(when):
+        request = urllib.request.Request(
+            url, method="HEAD",
+            headers={"User-Agent": "nettail/" + __version__})
+        try:
+            response = opener(request, timeout=PROBE_TIMEOUT)
+        except urllib.error.HTTPError as exc:
+            trouble = "%s: HTTP %s" % (url, exc.code)
+            if exc.code == 404:
+                continue
+            return None, None, trouble
+        except OSError as exc:
+            # No route, no name, a refused connection, a certificate that
+            # would not verify, or the timeout above. All of them mean the
+            # same thing to a reader: not from here, not now.
+            return None, None, "%s: %s" % (
+                url, getattr(exc, "reason", None) or exc)
+        try:
+            size = response.headers.get("Content-Length")
+        finally:
+            response.close()
+        return url, (int(size) if size and size.isdigit() else None), None
+    return None, None, trouble
+
+
+def download(dest, opener=None, when=None, urls=None):
     """Fetch DB-IP's free country database to `dest`, unpacked.
 
     Hands back None when there is a readable database at `dest` afterwards,
@@ -624,7 +700,10 @@ def download(dest, opener=None, when=None):
     the one this started in.
 
     `opener` is urlopen unless a caller says otherwise, which is how the suite
-    exercises all of this without touching the network.
+    exercises all of this without touching the network. `urls` is both months
+    unless a caller says otherwise, and the offer says otherwise: `probe` has
+    just been told which of the two is there, and asking for the other one
+    again would be spending a round trip on a 404 already seen.
     """
     # Imported here rather than at the top of the module because this is the
     # only thing in the program that speaks HTTP as a client, and
@@ -645,7 +724,7 @@ def download(dest, opener=None, when=None):
 
     part = dest + ".part"
     last = "nothing to fetch"
-    for url in download_urls(when):
+    for url in (download_urls(when) if urls is None else urls):
         request = urllib.request.Request(
             url, headers={"User-Agent": "nettail/" + __version__})
         try:
@@ -727,17 +806,41 @@ def looked_in(places=None):
                                 "place for one")
 
 
+def somewhere_to_put_one():
+    """The place to tell a reader to put a database they fetched themselves.
+
+    `destination` and not the head of the search list: the head belongs to
+    root on every Unix machine, and advice that fails when the reader follows
+    it is worse than none.
+    """
+    return destination() or (search_paths() or UNIX_PATHS)[0]
+
+
 def by_hand():
     """How to get a database without this program's help.
 
     The whole of what a run that cannot ask says, and the tail of what a
-    declined offer says. The place it names is `destination` and not the head
-    of the search list: the head belongs to root on every Unix machine, and
-    advice that fails when the reader follows it is worse than none.
+    declined offer says. Short, because in both of those cases the line it
+    ends has already explained itself.
     """
     return ("DB-IP and MaxMind both publish a free one: put it at %s, or "
-            "point --country-db at it wherever it is."
-            % (destination() or (search_paths() or UNIX_PATHS)[0]))
+            "point --country-db at it wherever it is." % somewhere_to_put_one())
+
+
+def find_online():
+    """How to go and find a database, for a reader who has to do it alone.
+
+    Longer than `by_hand` on purpose. That one is a tail on a line which has
+    already named a way out; this is the whole of what somebody is told when
+    the offer could not even be made, so it says what kind of file to come
+    back with, where both of the free ones live, which of them wants an
+    account, and both ways of pointing this program at what they end up with.
+    """
+    return ("A country database is a MaxMind format .mmdb file, and either of "
+            "the free ones does: DB-IP's IP to Country Lite at %s, which needs "
+            "no account, or MaxMind's GeoLite2 Country at %s, which needs a "
+            "free one. Put it at %s, or point --country-db at it wherever it "
+            "is." % (DBIP_PAGE, MAXMIND_PAGE, somewhere_to_put_one()))
 
 
 def load(path=None):

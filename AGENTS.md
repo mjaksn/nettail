@@ -189,8 +189,26 @@ Five things about it are easy to break and quiet when broken.
 
 ### Fetching one
 
-A run that searches and finds nothing offers to fetch a database. Six things
+A run that searches and finds nothing offers to fetch a database. Seven things
 about that are worth knowing before touching it.
+
+- **A HEAD settles whether there is an offer to make, and it goes after both
+  guards rather than before them.** `probe` asks db-ip.com for the headers of
+  both months and hands back the URL that answered, the size it named and what
+  went wrong. It exists so that nobody is put a question whose yes could not
+  have been carried out: a reader with no route out would otherwise say yes,
+  wait, and be told it failed, when the useful answer was always the two
+  download pages, which is what `find_online` gives them. Two things about its
+  position are load-bearing. It is the only request this program makes before
+  anybody has agreed to anything, so it is announced on the line above itself,
+  the way `config` prints which file it read: the line is the mitigation, not
+  decoration. And it sits below the terminal check, so a run under systemd or
+  cron or docker makes no request at all rather than merely asking no question;
+  `test_country` pins that with a probe that counts its calls. `PROBE_TIMEOUT`
+  is shorter than `DOWNLOAD_TIMEOUT` on purpose, because the machine this
+  matters on is the one that drops packets rather than refusing them, and
+  thirty seconds of that in front of a collector that runs perfectly well
+  anyway looks like a program that has hung.
 
 - **The licence decides which publisher can be offered, and there is only
   one.** DB-IP's lite build is a plain URL under Creative Commons Attribution
@@ -240,11 +258,22 @@ about that are worth knowing before touching it.
   that opens a file to decide whether to throw it away cannot then throw it
   away.
 
-`download` takes its opener, so the suite exercises the fetch, both months,
-every failure and the offer around them without touching the network. There is
-no check that the real URL is still there and there should not be one: a suite
-that fails when db-ip.com is down is a suite that fails for reasons that are
-none of this program's business.
+`download` and `probe` both take their opener, so the suite exercises the
+fetch, the probe, both months, every failure and the offer around them without
+touching the network. There is no check that the real URL is still there and
+there should not be one: a suite that fails when db-ip.com is down is a suite
+that fails for reasons that are none of this program's business. What the fake
+opener stands in for was checked by hand against the real server, and is worth
+rechecking if any of it is changed: a month that is there answers a HEAD with
+200 and a `Content-Length`, and a month that is not answers a plain 404 rather
+than a 403 or a redirect, which is what makes the fall back to the previous
+month work.
+
+The size in the offer comes from that `Content-Length` rather than from a
+figure in the source. That is deliberate and worth keeping: the file grows
+every month, and a number written into the prose would be wrong within a year
+and wrong in the two places the prose lives. Where the server names no length
+the clause is left out rather than guessed at.
 
 Nothing in the suite draws on a terminal or opens a browser, so the manual
 check is the real acceptance step, as it is for the QR code. Run with

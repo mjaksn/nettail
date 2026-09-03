@@ -1549,11 +1549,12 @@ Finding none, at a terminal, you are asked whether to fetch one:
 ```
 no country database found. Looked in /etc/nettail, /usr/share/GeoIP,
 /var/lib/GeoIP, /usr/local/share/GeoIP, /home/you/.local/share/nettail.
+asking db-ip.com whether there is one to fetch
 DB-IP publish a free one, IP to Country Lite, under the Creative Commons
-Attribution 4.0 licence. Fetching it takes about four megabytes from
-db-ip.com and unpacks to about eight at
-/home/you/.local/share/nettail/country.mmdb. No address goes anywhere either
-way: a country is read out of the file on this machine, then and afterwards.
+Attribution 4.0 licence. It is 3.9M to fetch. It unpacks to about twice that
+at /home/you/.local/share/nettail/country.mmdb. No address goes anywhere
+either way: a country is read out of the file on this machine, then and
+afterwards.
 fetch it now? [y/N]
 ```
 
@@ -1562,6 +1563,31 @@ is not `y` or `yes`. Ctrl-C ends the run rather than answering it. Say yes and
 the file is fetched, unpacked, opened to check that it really is a database,
 and only then moved into place, so an interrupted fetch leaves nothing behind
 for a later run to trip over.
+
+The middle line is the one request that goes out before you have agreed to
+anything. It is a HEAD, so it fetches no file: it asks whether there is one
+there and how big it is, and the size you are quoted is the server's own
+answer rather than a figure written down here. It is printed rather than done
+quietly because it is the only time this program contacts anybody without
+being told to, and a run that reached out silently would be worse than one
+that did not reach out at all.
+
+That question is also what decides whether you are asked at all. A machine
+with no route out, behind a proxy that refuses, or on a network that drops the
+request gets no prompt, because a yes there was never going to work. It is
+told what went wrong and where to go instead:
+
+```
+no address will be marked: db-ip.com could not be reached (...). A country
+database is a MaxMind format .mmdb file, and either of the free ones does:
+DB-IP's IP to Country Lite at https://db-ip.com/db/download/ip-to-country-lite,
+which needs no account, or MaxMind's GeoLite2 Country at
+https://dev.maxmind.com/geoip/geolite2-free-geolocation-data, which needs a
+free one. Put it at /home/you/.local/share/nettail/country.mmdb, or point
+--country-db at it wherever it is.
+```
+
+The collector then runs on exactly as it would have, with no address marked.
 
 DB-IP is the only publisher this can offer, because it is the only one that
 can be fetched at all. Their lite build sits behind a plain URL under a licence
@@ -1579,7 +1605,9 @@ what the file says it is rather than from how it arrived, so a DB-IP file you
 fetched by hand is credited exactly as one fetched here is.
 
 Nothing is asked where nobody could answer. Both stdin and stderr have to be a
-terminal, which they are not under systemd, cron, a pipe or a container.
+terminal, which they are not under systemd, cron, a pipe or a container. Those
+runs make no request either: the terminal check comes before the HEAD, not
+after it, so a collector running as a service never contacts db-ip.com at all.
 Nothing is asked either when there is nowhere writable to put a file, since a
 yes there could only have been followed by a refusal.
 

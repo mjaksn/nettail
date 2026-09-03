@@ -39,12 +39,21 @@ parsed, and it is treated as public.
   defaulting to no. Only DB-IP's file can be offered, because it is the only
   one that can be fetched at all: their lite build is a plain URL under the
   Creative Commons Attribution 4.0 licence, while GeoLite2 wants an account and
-  a licence key before a byte moves. The offer names the licence, the address
-  and the destination before asking, nothing is fetched without a yes, and
-  nothing is asked at all where nobody could answer, which is every run under
-  systemd, cron, a pipe or a container. What is fetched is unpacked, opened as
-  a database and only then moved into place, so a fetch that fails leaves
-  nothing a later run would find and refuse.
+  a licence key before a byte moves. The offer names the licence, the address,
+  the size and the destination before asking, nothing is fetched without a yes,
+  and nothing is asked at all where nobody could answer, which is every run
+  under systemd, cron, a pipe or a container. What is fetched is unpacked,
+  opened as a database and only then moved into place, so a fetch that fails
+  leaves nothing a later run would find and refuse.
+
+  A HEAD goes out first, and is announced on the line above itself, because it
+  is the one request this makes before anybody has agreed to anything. It
+  settles whether there is a file to offer and how big it is, so the size
+  quoted is the server's own answer rather than a number written down here.
+  A machine that cannot reach db-ip.com is not asked a question whose yes could
+  not have worked: it is told why and given both publishers' download pages,
+  and the collector runs on unmarked. The probe comes after the terminal check
+  rather than before it, so a run as a service makes no request either.
 
   That licence asks for a credit and this program pays it: a run reading a
   DB-IP database names them on its startup line, and the browser view, which is

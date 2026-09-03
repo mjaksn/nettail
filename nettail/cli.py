@@ -873,7 +873,7 @@ def ask_yes_no(question, stream, stdin):
     return answer.strip().lower() in ("y", "yes")
 
 
-def offer_country_db(note, stream=None, stdin=None, fetch=None):
+def offer_country_db(note, stream=None, stdin=None, fetch=None, probe=None):
     """Offer to fetch a country database, and fetch one if told to.
 
     Hands back the line the caller is to print. That is `note` itself, the one
@@ -890,13 +890,23 @@ def offer_country_db(note, stream=None, stdin=None, fetch=None):
 
     Nor is anything asked before the answer could be acted on. A machine with
     nowhere writable is told what it was told before, since a yes there could
-    only have been followed by a refusal.
+    only have been followed by a refusal. Nor before db-ip.com has said there
+    is a file there: `country.probe` asks, and a reader who could not be
+    served is given the two pages to fetch one from instead of a question
+    whose yes was never going to work.
+
+    That probe is the one thing here that touches the network before anybody
+    has agreed to anything, so it is announced on the line above it and it
+    happens after both guards rather than before them. A run under systemd or
+    cron or docker is not asked, and must not reach out either: the terminal
+    check is what stops the second as well as the first, and it is why the
+    order of this function is not an accident.
 
     What the offer says is as long as it is on purpose. It names the file, the
-    licence, the address it comes from and the place it is going, because a
-    program that reaches out to the network is a program that has to say so
-    before it does, and because a reader is agreeing to somebody else's terms
-    rather than only to a download.
+    licence, the size the server just gave, the address it comes from and the
+    place it is going, because a program that reaches out to the network is a
+    program that has to say so before it does, and because a reader is
+    agreeing to somebody else's terms rather than only to a download.
     """
     stream = sys.stderr if stream is None else stream
     stdin = sys.stdin if stdin is None else stdin
@@ -908,17 +918,31 @@ def offer_country_db(note, stream=None, stdin=None, fetch=None):
 
     print(f"{C.YELLOW}no country database found. Looked in "
           f"{country.looked_in()}.{C.RESET}", file=stream)
+    print(f"{C.GREY}asking db-ip.com whether there is one to fetch{C.RESET}",
+          file=stream)
+    url, size, trouble = (country.probe if probe is None else probe)()
+    if url is None:
+        # Nothing to offer, so nothing is asked. A reader who has just been
+        # told the network is not going to help wants the two pages rather
+        # than a question, and the collector runs on unmarked either way.
+        return ("no address will be marked: db-ip.com could not be reached "
+                "(%s). %s" % (trouble, country.find_online()))
+
+    # What the server just said it weighs, rather than a figure written down
+    # here that would be right until the file grew. Left out entirely when it
+    # named none, since a guess is what this is avoiding.
+    weight = f" It is {human_bytes(size)} to fetch." if size else ""
     print(f"{C.GREY}DB-IP publish a free one, IP to Country Lite, under the "
-          f"{country.DBIP_LICENCE} licence. Fetching it takes about four "
-          f"megabytes from db-ip.com and unpacks to about eight at {where}. "
-          f"No address goes anywhere either way: a country is read out of the "
-          f"file on this machine, then and afterwards.{C.RESET}", file=stream)
+          f"{country.DBIP_LICENCE} licence.{weight} It unpacks to about twice "
+          f"that at {where}. No address goes anywhere either way: a country "
+          f"is read out of the file on this machine, then and afterwards."
+          f"{C.RESET}", file=stream)
     if not ask_yes_no("fetch it now?", stream, stdin):
         return "no address will be marked. " + country.by_hand()
 
-    print(f"{C.GREY}fetching {country.download_urls()[0]}{C.RESET}",
-          file=stream)
-    trouble = (country.download if fetch is None else fetch)(where)
+    print(f"{C.GREY}fetching {url}{C.RESET}", file=stream)
+    trouble = (country.download if fetch is None
+               else fetch)(where, urls=(url,))
     if trouble:
         return ("could not fetch a country database: %s. %s"
                 % (trouble, country.by_hand()))
