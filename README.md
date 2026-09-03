@@ -1037,6 +1037,12 @@ terminal, showing the keys a browser can press.
 The `m` key asks for a value, which at a terminal means typing a line. In a
 browser it prompts and sends the answer along with the key.
 
+One key goes the other way. The down arrow works the **Follow** box, and it is
+the browser's own: the page answers it without telling the collector, and the
+terminal has nothing like it. It is in neither the drawer nor the `?` listing,
+both of which are the collector's key table and nothing else. See
+[Following the tail](#following-the-tail).
+
 ### While the tab is in the background
 
 A tab you switch away from gives up its connection after about fifteen seconds,
@@ -1081,12 +1087,38 @@ view down with them. It is on to start with. Scroll up and it clears itself, so
 you can read something without wrestling the page for it; scroll back to the
 bottom and it fills again.
 
+The down arrow key toggles it, from anywhere on the page, which saves reaching
+for the box every time something worth reading goes past. It is the one key the
+page answers by itself. Following the tail is this tab's business rather than
+the collector's, so nothing about the press leaves the browser, and two windows
+watching one run scroll independently.
+
+The page takes the key rather than leaving it to the browser, so wherever a
+browser would have answered it by scrolling the flows down a line, it no longer
+does. It has to be that way round. At the bottom of the table that scroll lands
+where it started, and the box is set from the scroll position, so the tick the
+keypress had just taken off would go straight back on. Every other way of
+moving the view is untouched, and moving it off the bottom clears the box as it
+always did.
+
+It does nothing while a flow dialog is open. The dialog is what you are looking
+at, the arrow scrolls what is in it, and Follow is not worth working from
+behind one.
+
+The terminal has no equivalent, which is why the key is in neither the drawer
+nor the `?` listing. A console cannot hold its view still without holding the
+flows back, and holding the flows back is what `space` already does. The key
+reader also swallows the arrow keys on purpose, so that a cursor key is never
+mistaken for the escape that closes the program.
+
 If it was on when you switched away from the tab, returning puts you back at
 the bottom straight away rather than leaving you where you were until the next
 flow arrives to carry you there.
 
 `--web-readonly` serves the display and accepts nothing back, which is the
-setting for a session left up on a machine other people use.
+setting for a session left up on a machine other people use. The down arrow
+goes on working there, since it never reaches the collector and so there is
+nothing for a readonly one to refuse.
 
 ### What it is safe to do with
 
@@ -2578,7 +2610,7 @@ python tests/run.py tally keys    # only suites whose name contains either
 python tests/run.py -v            # print every check, not only failures
 ```
 
-2210 checks across 39 suites, in about a minute. No test dependencies and
+2216 checks across 39 suites, in about a minute. No test dependencies and
 no test runner to learn: the suites need only netflume and lanname, the same as
 the collector.
 

@@ -81,6 +81,21 @@ parsed, and it is treated as public.
   handed without naming a field, a flag or a protocol of its own. That is the
   same rule the table head and the buttons already follow.
 
+- **The down arrow toggles Follow in the browser view**, from anywhere on the
+  page, which saves reaching for the box every time something worth reading
+  goes past. It is the one key the page answers by itself: following the tail
+  is a fact about one tab rather than about the run, so nothing about the
+  press reaches the collector and two windows watching one run scroll
+  independently. It goes on working under `--web-readonly`, since there is
+  nothing there for a display-only collector to refuse, and it does nothing
+  while a flow dialog is open, which is the reader's focus and owns their
+  keystrokes. Where a browser would have answered the arrow by scrolling the
+  flows a line, it no longer does; every other way of moving the view is
+  untouched. The terminal has no equivalent, so the key is in neither the
+  drawer nor the `?` listing, both of which are the collector's key table:
+  a console cannot hold its view still without holding the flows back, and
+  holding the flows back is what `space` already does.
+
 ### Changed
 
 - **`--json` gains six metadata keys**, all of them about the export message

@@ -293,6 +293,40 @@ try:
     check("the cadence comes from the collector rather than the page",
           "detail_refresh" in body)
 
+    # The down arrow works the Follow box, and is the one key the page answers
+    # by itself: following the tail is the tab's business and the collector has
+    # no name for it, so it is in neither KEYS nor the greeting and nothing on
+    # the control route would notice it going. Greps again, and three of them,
+    # because each half of this is quiet when it breaks. Answered below the
+    # readonly guard it would stop working on the display-only collector whose
+    # reader most wants it; without preventDefault the browser scrolls, the
+    # scroll handler reads the position back into the box, and at the tail that
+    # puts the tick straight back on.
+    opens = body.find('document.addEventListener("keydown"')
+    ends = body.find("// ---- the stream", opens)
+    handler = body[opens:ends]
+    arrow = handler.find('event.key === "ArrowDown"')
+    check("the down arrow is answered by the page", opens != -1 and arrow != -1)
+    # Scoped to the branch and not to the rest of the handler, which has a
+    # preventDefault of its own for the keys that do go to the collector: read
+    # to the end and the check the arrow's own guard is here for would pass
+    # with that guard deleted, which is the whole failure it is written for.
+    branch = handler[arrow:handler.find("if (readonly)")]
+    check("and by working the Follow box rather than by sending a key",
+          "followBox.click()" in branch)
+    check("and it takes the browser's own scrolling out of the way",
+          "event.preventDefault()" in branch)
+    check("it is answered before the guard that keeps keys off a "
+          "display-only collector",
+          -1 < arrow < handler.find("if (readonly)"))
+    check("and before the one that hands a keystroke to a focused box",
+          arrow < handler.find('tagName === "INPUT"'))
+    # The dialog guard is the one thing above it. A dialog owns the reader's
+    # keystrokes and the arrow scrolls what is in it, so Follow is not worked
+    # from behind one.
+    check("but below the guard that leaves everything to an open dialog",
+          -1 < handler.find("if (detail.open)") < arrow)
+
     # -- the greeting -----------------------------------------------------
 
     bus.set_hello({
