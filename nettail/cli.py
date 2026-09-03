@@ -986,6 +986,23 @@ def main():
         ap.set_defaults(**settings)
     args = ap.parse_args()
 
+    # A file the reader named and this could not read is an error, where one
+    # found by searching is a complaint. The difference is that somebody typed
+    # this one: a unit file with a typo in the path would otherwise run on
+    # stock defaults for ever while saying nothing was wrong.
+    if args.config is not None and config_path is None:
+        ap.error(config_notes[0] if config_notes
+                 else "could not read %s" % args.config)
+
+    # And a file that sets two options the command line would refuse together.
+    # argparse enforces a mutually exclusive group against what it was typed,
+    # so two of them arriving as defaults walk straight through it. Said here
+    # the way argparse would have said it, because a file that contradicts
+    # itself has said what it wanted no more clearly than a command line that
+    # does.
+    for said in config.conflicts(ap, settings):
+        ap.error("%s: %s" % (config_path or "the settings file", said))
+
     # The token, when the flag did not carry it. This is how the installed
     # service gets one: systemd reads `EnvironmentFile` and compose reads
     # `env_file`, so by the time this runs the value is already here, and
@@ -1092,7 +1109,17 @@ def main():
     # wanted a file writes one and goes, and never has to be interrupted to
     # stop.
     if args.save_config is not None:
-        written = config.write(ap, args, args.save_config, baseline)
+        # A bare --save-config writes ~/.nettail/nettail.conf, which is also
+        # the second place the search looks, so the file being written is
+        # very often the file that was just read. A token in it would
+        # otherwise be dropped on the way through, since one is never written
+        # out, and the next restart would mint a fresh one and quietly break
+        # every bookmark. Putting it back where it already was is not the same
+        # act as writing it somewhere new, and only the first is allowed.
+        keep = (("web_token",)
+                if "web_token" in settings
+                and config.same_file(args.save_config, config_path) else ())
+        written = config.write(ap, args, args.save_config, baseline, keep)
         print(f"{C.GREY}settings written to {written}{C.RESET}",
               file=sys.stderr)
         return

@@ -150,6 +150,25 @@ Four things about it are easy to break.
   everywhere else in this program. It is the one place "the command line
   wins" reads differently and it is written down in three places for that
   reason.
+- **A token goes back only where it already was.** `NEVER_WRITTEN` keeps
+  `--web-token` out of a saved file, and `keep` is the exception `main` allows
+  when the file about to be written is the file the settings came from. That
+  is not a softening of the rule: a bare `--save-config` writes
+  `~/.nettail/nettail.conf`, which is the second place the search looks, so
+  the file being written is usually the file just read, and dropping the token
+  there mints a fresh one at the next restart and breaks every bookmarked URL.
+  The rule the code enforces is that a file which never had a secret never
+  gets one.
+
+Three smaller things, each of which was a real defect before it was a rule.
+`read` opens with `utf-8-sig` and catches `UnicodeDecodeError`, because a
+mark left by Notepad became part of the first key and a file saved as UTF-16
+by PowerShell was a traceback out of `main` before the socket was bound.
+`parse` registers every long flag an action has, not the first, or `color` and
+`web-color` would be names the command line takes and a file does not.
+`conflicts` exists because argparse enforces a mutually exclusive group
+against what was typed, so two of its options arriving as defaults walk
+straight through it.
 
 `settable` reaches for `parser._actions`, which is argparse's own and has no
 public spelling. There is no API for "what options does this parser have", and

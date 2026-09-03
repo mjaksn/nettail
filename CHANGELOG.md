@@ -37,7 +37,16 @@ parsed, and it is treated as public.
   line the format itself cannot read is different, since an INI file is read
   whole or not at all: a line with no equals in it, or a key written twice,
   loses the file rather than the line, and the collector says so and starts on
-  its defaults.
+  its defaults. Two things do stop it, both being a file that has not said what
+  it meant: one named with `--config` that cannot be read, and one setting two
+  options that are alternatives, which the command line refuses together and so
+  does a file.
+
+  An option answers to every name it has, so `colour` and `color` are one
+  setting as they are one flag, and writing both is reported rather than
+  quietly resolved. The file is UTF-8, a byte order mark in front of it is
+  ignored, and a file saved as UTF-16, which is what PowerShell writes unless
+  told otherwise, is reported as such rather than read as nonsense.
 - **The first `nettail.conf` of these that exists is read**, and only that one:
   the working directory, `~/.nettail`, the home directory, then the usual place
   for a user's configuration on that platform, then the machine's. On Windows
@@ -56,8 +65,13 @@ parsed, and it is treated as public.
   lists them and under its own help text: what the run set is live, and the
   rest is commented out with its default beside it, so the file is a complete
   list of what can be set and a short list of what is set. `--web-token` is
-  never written out whatever the run was given, since it is a secret and a
-  settings file is not; reading one from a file still works.
+  never written into a file that did not already have one, since it is a
+  secret and a settings file is not; reading one from a file works. Saving over
+  the file a token came from writes it back where it was, because a bare
+  `--save-config` writes the file the search would read next time and dropping
+  the token there would mint a fresh one at the next restart and break every
+  bookmarked URL. The file is written rather than edited, so comments in the
+  file being replaced do not survive it.
 
 ## [0.8.0] - 2026-09-02
 
@@ -512,6 +526,7 @@ console: the part that decides what a flow should look like on a terminal.
   reminder line under the startup banner can be a pointer rather than a
   two-hundred-character list that wrapped and then scrolled away.
 
+[0.10.0]: https://github.com/mjaksn/nettail/releases/tag/v0.10.0
 [0.8.0]: https://github.com/mjaksn/nettail/releases/tag/v0.8.0
 [0.7.0]: https://github.com/mjaksn/nettail/releases/tag/v0.7.0
 [0.6.0]: https://github.com/mjaksn/nettail/releases/tag/v0.6.0

@@ -336,7 +336,10 @@ hosts =
 A `[nettail]` header is allowed and is not needed: there is one section and
 nowhere else for a setting to be, so a file that opens with `port = 2055` is
 read as though it had one. A key may be written with dashes as the flag is or
-with underscores as Python spells it. A switch takes `true` or `false`, and
+with underscores as Python spells it, and an option with two spellings answers
+to both: `colour` and `color` are one setting, as they are one flag. Writing
+one option twice under two of its names is reported rather than silently
+resolved, and the first is the one used. A switch takes `true` or `false`, and
 `yes`, `no`, `on`, `off`, `1` and `0` besides. An option that may be repeated
 takes one value a line, indented under the key. A comment is a line beginning
 with `#` or `;`, and a `%` is a `%` rather than anything clever.
@@ -405,6 +408,11 @@ settings from /home/you/.nettail/nettail.conf
 `--config FILE` reads that file instead of looking for one, and nothing is
 searched for.
 
+The file is UTF-8. A byte order mark in front of it is allowed and ignored,
+which is what Notepad leaves; a file saved as UTF-16, which is what PowerShell's
+`Out-File` writes unless told otherwise, is reported as such rather than read as
+nonsense.
+
 A key it does not know and a value it cannot use are each reported and stepped
 over: that line costs its own line, and the collector starts with everything
 else the file said. A line the format itself cannot read is a different thing,
@@ -424,6 +432,17 @@ hosts =
     /etc/hosts.iot
 ```
 
+Two things stop the collector rather than being stepped over, both of them
+about a file that has not said what it meant:
+
+- **A file named with `--config` that cannot be read.** One found by searching
+  is a complaint, because nobody asked for it by name; one typed is an
+  instruction, and a service that ran on stock defaults for ever while
+  printing a line about a file it never opened would be worse than a refusal.
+- **A file setting two options that are alternatives**, such as
+  `size-scale-max` beside `size-scale-dynamic`. The command line refuses those
+  together and so does a file, in the same words.
+
 ### Saving one
 
 `--save-config` writes what this run would have used and exits without
@@ -434,6 +453,11 @@ else being said.
 ```bash
 nettail --port 9995 --external-only --web --save-config
 ```
+
+The file is written rather than edited: what comes out is generated whole from
+what this run would have used, so a comment you wrote in the file being
+replaced does not survive it. Keep a file you have annotated somewhere else, or
+save to a new name and merge.
 
 What it writes is every option, in the order the help lists them, each under
 its own help text. What this run set is written live; everything else is
@@ -449,12 +473,20 @@ external-only = true
 #verbose = false
 ```
 
-`--web-token` is the one thing never written out, whatever the run was given.
-It is a secret and a settings file is not: it is the file you edit, copy
-between machines and paste into an issue. `NETTAIL_WEB_TOKEN` in the
+`--web-token` is the one thing never written into a file that did not already
+have one. It is a secret and a settings file is not: it is the file you edit,
+copy between machines and paste into an issue. `NETTAIL_WEB_TOKEN` in the
 environment is where a token belongs, which is how the installed service
-receives one. Reading a token from a file still works, for somebody who put it
-there on purpose.
+receives one. Reading a token from a file works, for somebody who put it there
+on purpose.
+
+There is one exception and it is the ordinary case rather than a corner. A bare
+`--save-config` writes `~/.nettail/nettail.conf`, which is also the second place
+the search looks, so the file being written is very often the file just read. A
+token in it is written back where it already was, with a line saying why.
+Dropping it would mint a fresh one at the next restart and quietly break every
+bookmarked URL. Saving anywhere else leaves the token behind, so this can put a
+secret back where it was and can never put one somewhere new.
 
 `--config` and `--save-config` cannot be given together: they are opposite
 directions through the same door, and a command line asking for both has not

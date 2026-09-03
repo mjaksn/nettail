@@ -43,6 +43,10 @@ from harness import SCRIPT, check, finish
 from nettail import config
 from nettail.cli import build_parser
 
+# Spelled rather than escaped, because this file is written and rewritten by
+# tooling that has been known to eat a backslash.
+NEWLINE = chr(10)
+
 # One value per option, written as a person would write it in a file. The only
 # table in this suite, and it is checked against the parser below: an option
 # added to the program with no sample here fails rather than going untested.
@@ -129,6 +133,46 @@ written, _ = from_file("[nettail]\nexternal_only = true\n")
 check("an underscored key reaches the same option", written.external_only)
 written, _ = from_file("[nettail]\nEXTERNAL-ONLY = true\n")
 check("and case is not a way to miss it", written.external_only)
+
+# --- an option answers to every name it has ---------------------------------
+
+# `--colour` has `--color` beside it and `--web-colour` has `--web-color`. A
+# file that could not say one of those would make the claim this whole feature
+# rests on false, and the README says it in as many words.
+written, complaints = from_file("[nettail]" + NEWLINE + "color = never" + NEWLINE)
+check("an option's alias is a name a file can use",
+      written.colour == "never" and complaints == [], str(complaints))
+written, complaints = from_file("[nettail]" + NEWLINE + "web-color = off"
+                                + NEWLINE)
+check("and so is the other one", written.web_colour == "off", str(complaints))
+
+# Two spellings of one option are two keys to configparser and one option
+# here, so they walk past its own refusal of a repeated key. Said out loud
+# rather than letting the second quietly replace the first.
+written, complaints = from_file("[nettail]" + NEWLINE + "web-port = 1"
+                                + NEWLINE + "web_port = 2" + NEWLINE)
+check("a key written two ways is reported", len(complaints) == 1,
+      str(complaints))
+check("and names both spellings",
+      "web-port" in complaints[0] and "web_port" in complaints[0],
+      complaints[0])
+check("and the first is the one used", written.web_port == 1,
+      str(written.web_port))
+
+# --- two options the command line would refuse together ---------------------
+
+ap = build_parser()
+values, _ = config.parse(ap, "[nettail]" + NEWLINE + "size-scale-max = 1M"
+                         + NEWLINE + "size-scale-dynamic = true" + NEWLINE)
+said = config.conflicts(ap, values)
+check("a file setting both sides of an alternative is caught",
+      len(said) == 1, str(said))
+check("and the message names both",
+      "size-scale-max" in said[0] and "size-scale-dynamic" in said[0], said[0])
+check("one of them alone is not a conflict",
+      config.conflicts(ap, {"size_scale_max": 1}) == [])
+check("and neither is a pair from different groups",
+      config.conflicts(ap, {"size_scale_max": 1, "web": True}) == [])
 
 # --- who wins ---------------------------------------------------------------
 
@@ -288,17 +332,49 @@ check("and none of them is not an error",
       config.find([os.path.join(held, "nothing.conf")]) is None)
 
 ap = build_parser()
-values, complaints = config.read(ap, first)
+values, complaints, opened = config.read(ap, first)
 check("a real file reads", values.get("port") == 1111, str(values))
 check("with nothing to complain about", complaints == [], str(complaints))
+check("and says it was read", opened is True)
 
-values, complaints = config.read(ap, os.path.join(held, "not-there.conf"))
+values, complaints, opened = config.read(ap, os.path.join(held,
+                                                          "not-there.conf"))
 check("a file that is not there is a complaint and not an exception",
       len(complaints) == 1 and "not-there.conf" in complaints[0],
       str(complaints))
-values, complaints = config.read(ap, held)
-check("and so is a directory where a file should be", len(complaints) == 1,
+check("and says it was not read, so nothing claims it was", opened is False)
+values, complaints, opened = config.read(ap, held)
+check("and so is a directory where a file should be",
+      len(complaints) == 1 and opened is False, str(complaints))
+
+# What a Windows text editor writes. PowerShell's Out-File is UTF-16 by
+# default and Notepad puts a byte order mark on its UTF-8, and the two used to
+# fail in opposite ways: a traceback out of main before the socket was bound,
+# and a file whose every setting was silently ignored because the mark had
+# become part of the first key.
+utf16 = os.path.join(held, "utf16.conf")
+with io.open(utf16, "w", encoding="utf-16") as handle:
+    handle.write("[nettail]" + NEWLINE + "port = 3333" + NEWLINE)
+values, complaints, opened = config.read(ap, utf16)
+check("a file saved as UTF-16 is a complaint rather than a traceback",
+      values == {} and len(complaints) == 1 and opened is False,
       str(complaints))
+check("and the complaint says what it looks like",
+      "UTF-16" in complaints[0], complaints[0])
+
+marked = os.path.join(held, "bom.conf")
+with io.open(marked, "w", encoding="utf-8-sig") as handle:
+    handle.write("[nettail]" + NEWLINE + "port = 3333" + NEWLINE)
+values, complaints, opened = config.read(ap, marked)
+check("a byte order mark does not become part of the first key",
+      values.get("port") == 3333 and complaints == [], str(complaints))
+
+headless = os.path.join(held, "bom-headless.conf")
+with io.open(headless, "w", encoding="utf-8-sig") as handle:
+    handle.write("port = 3333" + NEWLINE)
+values, complaints, opened = config.read(ap, headless)
+check("even with no section header in front of it",
+      values.get("port") == 3333 and complaints == [], str(complaints))
 
 # --- what is saved can be read back -----------------------------------------
 
@@ -361,6 +437,31 @@ check("saving after loading keeps what was loaded",
       "\nport = 9995\n" in config.render(ap, args, baseline))
 check("and without the baseline it would not, which is why there is one",
       "\nport = 9995\n" not in config.render(ap, args))
+
+# A token is written back only into the file it came from. A bare
+# --save-config writes ~/.nettail/nettail.conf, which is also the second place
+# the search looks, so the file being written is very often the file just
+# read; dropping the token there would mint a fresh one at the next restart
+# and quietly break every bookmark.
+
+check("two ways of spelling one path are one file",
+      config.same_file("a.conf", os.path.join(os.getcwd(), "a.conf")))
+check("and two different files are not",
+      not config.same_file("a.conf", "b.conf"))
+check("and nothing is not a file", not config.same_file(None, "a.conf"))
+
+ap = build_parser()
+baseline = config.defaults(ap)
+values, _ = config.parse(ap, "[nettail]" + NEWLINE
+                         + "web-token = a-token-worth-keeping" + NEWLINE)
+ap.set_defaults(**values)
+args = ap.parse_args([])
+kept = config.render(ap, args, baseline, keep=("web_token",))
+check("a token is written back where it already was",
+      NEWLINE + "web-token = a-token-worth-keeping" + NEWLINE in kept)
+check("and the file says why it is there", "already in this file" in kept)
+check("but not into a file that did not have one",
+      "a-token-worth-keeping" not in config.render(ap, args, baseline))
 
 # --- the two options, read before the parse ---------------------------------
 
@@ -487,6 +588,72 @@ check("a bad value is reported rather than fatal", "ninety" in err, err)
 check("and so is an unknown key", "nonsense" in err, err)
 check("and the rest of the file is used, which is what starting on its port "
       "says", "127.0.0.1:19995" in err, err)
+
+# A file this run named and could not read is an error, where one found by
+# searching is a complaint. Somebody typed this one, and a unit file with a
+# typo in the path would otherwise run on stock defaults for ever while
+# printing a line that says its settings came from somewhere.
+def refused(argv, cwd):
+    """Run a command line that should stop the program, and say how it went.
+
+    A timeout is the interesting failure: it means the program did not stop
+    over what it was given and went on to listen instead, which is exactly
+    what these two checks exist to catch. --version cannot be used to hurry it
+    along, because argparse answers that inside the parse and exits before
+    there is anything to refuse.
+    """
+    try:
+        done = subprocess.run([sys.executable, *SCRIPT, *argv], cwd=cwd,
+                              capture_output=True, text=True, timeout=20)
+    except subprocess.TimeoutExpired as expired:
+        return None, expired.stderr or ""
+    return done.returncode, done.stderr
+
+
+missing = os.path.join(work, "not-here.conf")
+code, err = refused(["--config", missing], work)
+check("a named file that is not there stops the run", code == 2, str(code))
+check("and says which file", "not-here.conf" in err, err)
+check("and nothing claims to have read it", "settings from" not in err, err)
+
+# And a file that sets two options the command line refuses together. argparse
+# enforces a mutually exclusive group against what was typed, so two of them
+# arriving as defaults would walk straight through it.
+both = os.path.join(work, "both.conf")
+with io.open(both, "w", encoding="utf-8") as handle:
+    handle.write("[nettail]" + NEWLINE + "size-scale-max = 1M" + NEWLINE
+                 + "size-scale-dynamic = true" + NEWLINE)
+code, err = refused(["--config", both], work)
+check("a file setting both sides of an alternative stops the run",
+      code == 2 and "cannot be set together" in err, "%s: %s" % (code, err))
+check("and the message names them",
+      "size-scale-max" in err and "size-scale-dynamic" in err, err)
+
+# Saving over the file the settings came from keeps the token that was in it.
+# A bare --save-config writes the second place the search looks, so this is
+# the ordinary case rather than a corner of one.
+tokened = tempfile.mkdtemp()
+with io.open(os.path.join(tokened, config.CONFIG_NAME), "w",
+             encoding="utf-8") as handle:
+    handle.write("web-token = a-token-worth-keeping" + NEWLINE
+                 + "port = 9995" + NEWLINE)
+
+_out, err = run(["--save-config", config.CONFIG_NAME], tokened)
+with io.open(os.path.join(tokened, config.CONFIG_NAME),
+             encoding="utf-8") as handle:
+    saved = handle.read()
+check("saving over the file a token came from keeps it",
+      "web-token = a-token-worth-keeping" in saved, saved[-600:])
+check("and the rest of the file with it", "port = 9995" in saved)
+
+_out, err = run(["--save-config", "elsewhere.conf"], tokened)
+with io.open(os.path.join(tokened, "elsewhere.conf"),
+             encoding="utf-8") as handle:
+    elsewhere = handle.read()
+check("saving somewhere else does not carry the token there",
+      "a-token-worth-keeping" not in elsewhere)
+check("though everything that is not a secret goes",
+      "\nport = 9995\n" in elsewhere, elsewhere[-400:])
 
 # Nothing found is nothing said, on a machine that happens to have no config
 # file anywhere the search reaches.

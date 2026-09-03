@@ -287,12 +287,19 @@ def parse(parser, text, source="the config file"):
     except configparser.Error as exc:
         return {}, ["%s could not be read: %s" % (source, exc)]
 
+    # Every name an option answers to: each of its long flags, and the dest
+    # besides. `--colour` has `--color` beside it and `--web-colour` has
+    # `--web-color`, and a file that could not say one of those would make the
+    # claim this module rests on false, which is that what the command line
+    # takes, a file takes.
     known = {}
     for action in settable(parser):
-        known[_key(option_name(action))] = action
+        for flag in action.option_strings:
+            if flag.startswith("--"):
+                known[_key(flag[2:])] = action
         known[_key(action.dest)] = action
 
-    settings = {}
+    settings, said_by = {}, {}
     for section in reader.sections():
         if _key(section) != SECTION:
             complaints.append("%s: [%s] is not a section this program reads; "
@@ -304,6 +311,18 @@ def parse(parser, text, source="the config file"):
             if action is None:
                 complaints.append("%s: no option called %r" % (source, name))
                 continue
+            # configparser refuses a key written twice and loses the file over
+            # it, which is the loud answer to an ambiguity. Two spellings of
+            # one option are two keys to configparser and one option here, so
+            # they walk straight past that and the second would quietly
+            # replace the first. Said out loud instead, and the first stands.
+            if action.dest in said_by:
+                complaints.append(
+                    "%s: %r and %r are the same option, and %r is the one "
+                    "used" % (source, said_by[action.dest], name,
+                              said_by[action.dest]))
+                continue
+            said_by[action.dest] = name
             try:
                 settings[action.dest] = convert(action, raw)
             except (ValueError, TypeError, argparse.ArgumentTypeError) as exc:
@@ -323,18 +342,60 @@ def _has_section(text):
 
 
 def read(parser, path):
-    """Read one config file: the settings, and the complaints.
+    """Read one config file: the settings, the complaints, and whether it read.
 
-    A file that cannot be opened is a complaint like any other and not an
-    exception, because the caller has already decided this file exists or has
-    been told to read it, and neither case is worth stopping a collector over.
+    The third answer is what stops the caller announcing a file it did not
+    manage to read. A file that cannot be opened is a complaint like any other
+    rather than an exception, but a run that says "settings from" a file it
+    never read is worse than one that says nothing at all.
+
+    `utf-8-sig` rather than `utf-8`, which is about the byte order mark
+    Notepad and PowerShell put at the front of a UTF-8 file. Left on, it
+    becomes part of the first key, so the first setting in the file is
+    reported as an option that does not exist and the reader is left looking
+    at a line that is plainly correct.
+
+    A decode error is caught for the reason `services.load` explains: on
+    Windows the obvious ways to write a text file produce UTF-16, none of
+    which reads as UTF-8, and a traceback before the socket is bound is a poor
+    answer to a file somebody saved from the wrong menu.
     """
     try:
-        with open(path, "r", encoding="utf-8") as handle:
+        with open(path, "r", encoding="utf-8-sig") as handle:
             text = handle.read()
     except OSError as exc:
-        return {}, ["could not read %s: %s" % (path, exc.strerror or exc)]
-    return parse(parser, text, source=path)
+        return {}, ["could not read %s: %s"
+                    % (path, exc.strerror or exc)], False
+    except UnicodeDecodeError:
+        return {}, ["could not read %s: it is not UTF-8, which is what a file "
+                    "saved as UTF-16 looks like from here. Saved again as "
+                    "UTF-8 it will be read." % path], False
+    values, complaints = parse(parser, text, source=path)
+    return values, complaints, True
+
+
+def conflicts(parser, settings):
+    """Settings that argparse would have refused, had they been typed.
+
+    A mutually exclusive group is enforced against arguments actually seen on
+    a command line, so two options from one group arriving as defaults walk
+    straight through it. `--size-scale-max` beside `--size-scale-dynamic` is
+    refused outright when it is typed and was accepted from a file, which is
+    one interface saying two different things.
+
+    Hands back a message for each group that has more than one of its options
+    set. The caller decides how loudly to say it, and `main` says it the way
+    argparse says the same thing, because a file that contradicts itself has
+    said what it wanted no more clearly than a command line that does.
+    """
+    said = []
+    for group in parser._mutually_exclusive_groups:
+        named = [action for action in group._group_actions
+                 if action.dest in settings]
+        if len(named) > 1:
+            said.append("%s cannot be set together; they are alternatives"
+                        % " and ".join(option_name(action) for action in named))
+    return said
 
 
 def defaults(parser):
@@ -393,7 +454,7 @@ def _wrapped(text, width=74):
     return lines
 
 
-def render(parser, args, baseline=None):
+def render(parser, args, baseline=None, keep=()):
     """The whole config file for a run, as text.
 
     Every option appears, in the order the help lists them, under its own help
@@ -410,8 +471,15 @@ def render(parser, args, baseline=None):
     file had set back out as a comment, since by then those values are the
     parser's defaults, and the saved file would be empty of the settings it
     was made from.
+
+    `keep` names the settings in `NEVER_WRITTEN` that may be written after
+    all, which is how a token survives a file being saved over itself. The
+    caller allows it only when the file about to be written is the file the
+    token came from, so this can put a secret back where it already was and
+    can never put one somewhere new.
     """
     baseline = defaults(parser) if baseline is None else baseline
+    keep = tuple(keep)
     out = io.StringIO()
     out.write("# nettail settings.\n#\n")
     for line in _wrapped(
@@ -441,7 +509,7 @@ def render(parser, args, baseline=None):
         if action.choices is not None:
             out.write("# one of: %s\n"
                       % ", ".join(str(choice) for choice in action.choices))
-        if action.dest in NEVER_WRITTEN:
+        if action.dest in NEVER_WRITTEN and action.dest not in keep:
             for line in _wrapped(
                     "Never written out, whatever this run was given. It is a "
                     "secret and this file is not, and the environment is where "
@@ -450,6 +518,14 @@ def render(parser, args, baseline=None):
                 out.write("# %s\n" % line)
             out.write("#%s =\n" % name)
             continue
+        if action.dest in keep:
+            for line in _wrapped(
+                    "Kept because it was already in this file. Saving over a "
+                    "file is the only way a secret is written here, and a "
+                    "file that never had one never gets one."):
+                out.write("# %s\n" % line)
+            out.write(assign(name, value))
+            continue
         if value == baseline.get(action.dest) or value is None:
             out.write(assign(name, baseline.get(action.dest), commented=True))
             continue
@@ -457,20 +533,33 @@ def render(parser, args, baseline=None):
     return out.getvalue()
 
 
-def write(parser, args, path, baseline=None):
+def same_file(one, other):
+    """Whether two paths name the same file, before either has to exist."""
+    if not one or not other:
+        return False
+    return (os.path.normcase(os.path.abspath(os.path.expanduser(one)))
+            == os.path.normcase(os.path.abspath(os.path.expanduser(other))))
+
+
+def write(parser, args, path, baseline=None, keep=()):
     """Write a config file for this run, making its directory if it is missing.
 
     Hands back the path it wrote, which is what the caller prints. The
     directory is created because the default path is `~/.nettail`, which is
     this program's own and will not exist on a machine that has never saved
     one.
+
+    The file is written rather than edited: what comes out is generated whole
+    from what this run would have used, so a comment somebody wrote in the
+    file being replaced does not survive. That is worth knowing before saving
+    over a file you have edited, and it is why `keep` exists at all.
     """
     path = os.path.abspath(os.path.expanduser(path))
     directory = os.path.dirname(path)
     if directory:
         os.makedirs(directory, exist_ok=True)
     with open(path, "w", encoding="utf-8") as handle:
-        handle.write(render(parser, args, baseline))
+        handle.write(render(parser, args, baseline, keep))
     return path
 
 
@@ -518,5 +607,8 @@ def settings(parser, argv=None):
     path = named if named else find()
     if path is None:
         return {}, None, []
-    values, complaints = read(parser, path)
-    return values, path, complaints
+    values, complaints, opened = read(parser, path)
+    # The path comes back only when there was something to read there. `main`
+    # prints it as the file the settings came from, and a file that could not
+    # be opened is not that, however deliberately it was named.
+    return values, (path if opened else None), complaints
