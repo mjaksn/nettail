@@ -42,16 +42,19 @@ body {
   margin: 0;
   background: var(--ground);
   color: var(--ink);
-  /* The emoji families are on the end for one character, the country flag,
-     which no monospace font has. A browser walks this list per character, so
-     everything else still comes from the first monospace font that is here
-     and only the flag falls through. Segoe UI Emoji is last on purpose: it is
-     what Windows always has and the one of the four that draws a flag as two
-     boxed letters rather than as a flag, so anything installed beside it
-     wins. */
-  font: 13px/1.5 ui-monospace, "SFMono-Regular", "Cascadia Mono", Menlo,
-        Consolas, "DejaVu Sans Mono", "Twemoji Mozilla", "Noto Color Emoji",
-        "Apple Color Emoji", "Segoe UI Emoji", monospace;
+  /* "Country Flags" is the font this collector serves, and it is first
+     because the script below registers it for the regional indicator letters
+     and nothing else: every other character walks straight past it into the
+     monospace fonts. No monospace font has a flag glyph, so without it the
+     browser falls back to whatever emoji font the machine has, and on Windows
+     that is Segoe UI Emoji, which draws the country's two letters in a pair
+     of boxes. Those three are still named after the monospace ones as the
+     fallback for a build with no font in it: they are what a Mac and a Linux
+     desktop have anyway, and Segoe UI Emoji is last of them because it is the
+     one that cannot draw a flag at all. */
+  font: 13px/1.5 "Country Flags", ui-monospace, "SFMono-Regular",
+        "Cascadia Mono", Menlo, Consolas, "DejaVu Sans Mono", "Twemoji Mozilla",
+        "Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji", monospace;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -319,6 +322,48 @@ footer span i { color: var(--ink-3); font-style: normal; }
   // Everything is addressed relative to the token already in the path, so the
   // token is never written down here and never leaves the URL bar.
   var BASE = location.pathname.replace(/\/+$/, "");
+
+  // The flags font, asked for only by a page that has flags to draw, and then
+  // only once. `wantFlags` is called from the status handler when the
+  // collector says it is marking countries, which is a fact about how it was
+  // started and about the g key rather than anything the page can work out for
+  // itself: a run without --country never shows a flag, and 78 KB it will
+  // never draw a character with is 78 KB not worth sending.
+  //
+  // Fetched rather than declared in an @font-face, because that rule would
+  // resolve its url against the page's own address, and that address is
+  // whichever of the two forms the reader arrived by: the printed URL ends in
+  // a slash and the same page answers without one. "flags.woff2" beside it
+  // would therefore mean either the font or /t/flags.woff2, which is nothing,
+  // depending on a trailing character nobody should have to keep. The stream
+  // and the key route have the same problem and solve it the same way, with
+  // BASE, and CSS has no way to say BASE. A <base> tag would, and the content
+  // security policy refuses one on purpose. Declaring it would also hand the
+  // decision above to the browser, which fetches an unicode-range face when a
+  // character in the range is laid out: that is close to the right answer and
+  // is not this one, since it would fetch on the first flag rather than not
+  // at all.
+  //
+  // unicodeRange keeps the face to the one job even once it is here: it is
+  // consulted for the regional indicator letters and nothing else, so a
+  // machine that already draws flags goes on using its own font for every
+  // other character on the page.
+  //
+  // Everything about it is allowed to fail. A build with no font in it answers
+  // 404, and the emoji families in the stylesheet are what the page had before
+  // the font was shipped.
+  var askedForFlags = false;
+  function wantFlags() {
+    if (askedForFlags || !window.FontFace || !document.fonts) { return; }
+    askedForFlags = true;
+    try {
+      var face = new FontFace(
+        "Country Flags", 'url("' + BASE + '/flags.woff2") format("woff2")',
+        { unicodeRange: "U+1F1E6-1F1FF" });
+      face.load().then(function (loaded) { document.fonts.add(loaded); },
+                       function () { /* no font, and the fallbacks stand */ });
+    } catch (e) { /* the same */ }
+  }
 
   // How many rows to keep. A busy link produces thousands a minute and a tab
   // left open for an hour would otherwise become unusable, so the oldest go and
@@ -637,6 +682,11 @@ footer span i { color: var(--ink-3); font-style: normal; }
     if (typeof payload.flows_shown === "number") {
       lastFlowsShown = payload.flows_shown;
     }
+    // Asked for here rather than in the greeting, so that the g key turning
+    // the marking on mid-run is answered too: a status frame follows within a
+    // repaint interval either way, and the greeting a late browser gets has
+    // the last one spliced into it.
+    if (payload.countries) { wantFlags(); }
     var s = payload.snap || {};
     var t = payload.shown || {};
     statusBar.textContent = "";

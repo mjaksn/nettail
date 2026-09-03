@@ -53,6 +53,21 @@ ettail` on Windows, which has no
   the two boxed letters is its own fonts' business, Windows having no flag
   glyph on it at all, so the page names the fonts that can before the one that
   cannot.
+- **The browser view ships the flags it draws.** A flag is two regional
+  indicator letters, no monospace font has a glyph for the pair, and Windows
+  has no emoji font that draws one at all, so Chrome and Edge there showed the
+  country's two letters in boxes. `flags.woff2`, 78 KB of colour vector flags
+  and nothing else, is served from the token's own URL and used for those
+  letters alone, so a browser that already had flags goes on using its own font
+  for everything else. It is fetched only by a page that has flags to draw:
+  every status frame says whether the collector is marking countries, and the
+  page asks on the strength of that and nothing else, so a run without
+  `--country` never sends it and pressing `g` mid-run fetches it within a
+  repaint interval. It is the one thing the page fetches besides itself and
+  the one exception to its being a single file, and a build without it falls
+  back to the machine's own emoji fonts exactly as before. The font is Twemoji
+  artwork under CC BY 4.0, taken unchanged from TalkJS's
+  country-flag-emoji-polyfill, and `flags-licence` ships beside it saying so.
 - **The `g` key** turns the marking off and on while the collector runs, and
   says so rather than appearing to work when there is no database to mark
   with.

@@ -32,6 +32,7 @@ flow row, in the summary, on the status bar, in `--json`, and never on an
 address on this network.
 """
 import argparse
+import hashlib
 import io
 import ipaddress
 import os
@@ -52,6 +53,7 @@ from nettail.colour import C, PlainStream, colour_on
 from nettail.display import ENDPOINT_WIDTH, endpoint
 from nettail.statusbar import wire_line
 from nettail.web import WEB_ENDPOINT_WIDTH, unpad
+from nettail.web import load_font as web_font
 
 # ---------------------------------------------------------------------------
 # Writing a MaxMind format file
@@ -719,6 +721,30 @@ check("and names the one that cannot draw a flag last of the four",
       STACK.index("Segoe UI Emoji") > STACK.index("Noto Color Emoji"), STACK)
 check("with the whole lot behind the monospace fonts",
       STACK.index("Twemoji Mozilla") > STACK.index("DejaVu Sans Mono"), STACK)
+
+# The font this collector ships, and the file that says whose it is. The
+# artwork is CC BY 4.0, which asks for the credit to travel with the material,
+# so the licence file has to be in the package beside the font and has to be
+# describing the font that is actually there. A hash written down once and
+# never checked again is the same as no hash at all.
+FONT = os.path.join(ROOT, "nettail", "flags.woff2")
+with io.open(FONT, "rb") as handle:
+    FONT_BYTES = handle.read()
+with io.open(os.path.join(ROOT, "nettail", "flags-licence"),
+             encoding="utf-8") as handle:
+    LICENCE = handle.read()
+
+check("the font ships with the package", len(FONT_BYTES) > 20000,
+      str(len(FONT_BYTES)))
+check("and is a woff2", FONT_BYTES[:4] == b"wOF2", repr(FONT_BYTES[:4]))
+check("the licence beside it records this font and not another",
+      hashlib.sha256(FONT_BYTES).hexdigest() in LICENCE,
+      hashlib.sha256(FONT_BYTES).hexdigest())
+for credit in ("Twemoji", "CC BY 4.0", "creativecommons.org/licenses/by/4.0",
+               "country-flag-emoji-polyfill"):
+    check("and credits %s" % credit, credit in LICENCE)
+check("the page asks for the file that is shipped",
+      "flags.woff2" in PAGE and web_font() == FONT_BYTES)
 
 # The status bar's top talker is a public address by definition, and is the one
 # field on the bar that can carry a country.

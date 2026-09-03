@@ -109,7 +109,9 @@ a port keeps its own answer.
 
 The data file has to stay listed in `[tool.setuptools.package-data]`. Left
 out, the wheel ships without it and every supplemental name silently becomes a
-bare port number.
+bare port number. Three other files are listed there for the same kind of
+reason: `web.html`, `flags.woff2` and `flags-licence`. CI installs the wheel
+and asserts all four are in it.
 
 ## Countries
 
@@ -137,15 +139,26 @@ Five things about it are easy to break and quiet when broken.
   not available to it for the reasons written on `tee`. A style threaded
   through `row_cells`, the summary and the bar would also be a fourth thing
   for the two views to disagree about.
-- **The browser is sent a flag; whether it draws one is its own affair.**
-  Nothing on the feed's route passes a terminal, so nothing spells it out
-  there, and that is the whole of what this program controls. Windows has no
-  flag glyph anywhere on it, so Chrome and Edge draw the two letters in boxes
-  while Firefox, which ships Twemoji Mozilla, draws a flag. `web.html` puts
-  the emoji families that can draw one ahead of Segoe UI Emoji, which cannot,
-  and `test_country` greps the page for them: dropping them is invisible
-  everywhere except the platform it matters on. Prose that says the browser is
-  *shown* a flag is wrong and has been corrected once already.
+- **The browser is sent a flag, and is now also sent something to draw it
+  with.** Nothing on the feed's route passes a terminal, so nothing spells a
+  flag out there. What a browser then draws was for a while not this program's
+  to decide: no monospace font has a glyph for a regional indicator pair, and
+  Windows has no emoji font that draws a flag at all, so Chrome and Edge there
+  drew the two letters in boxes. `flags.woff2` is the answer and is the one
+  exception to the page being a single file; the reasoning sits on `FONT_FILE`
+  in `web.py`. Three things about it are easy to undo: the page asks for it
+  through `BASE`, because a relative url in CSS resolves against whichever of
+  the page's two addresses the reader arrived by; it asks only when a status
+  frame says `countries`, because `FontFace.load()` fetches when it is called
+  and a face built at startup sent 78 KB to every browser watching a run that
+  would never draw a flag; and
+  the emoji families still named after the monospace ones are the fallback for
+  a build with the font left out. The `unicodeRange` on the face is what keeps
+  it off every other character once it is there. `flags-licence` has to stay
+  in the wheel
+  beside it, since the artwork is CC BY 4.0 and the credit travels with the
+  material. `test_country` holds the licence's checksum to the font that is
+  actually there, and `test_web_server` fetches the route.
 - **Both forms are two characters wide**, on screen and to `len`, and every
   column in the program measures its contents with `len`. That is what lets
   `endpoint`, `with_names` and the status bar go on padding as they always

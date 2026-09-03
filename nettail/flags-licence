@@ -1,0 +1,29 @@
+flags.woff2, and where it came from
+
+The font beside this file draws the country flags the browser view shows. It
+is shipped rather than fetched, and it is the only thing in this package that
+is somebody else's work rather than this project's, so this is here to say
+whose and under what terms. It travels in the wheel with the font, because the
+licence on the artwork asks for the credit to go wherever the material does.
+
+  file      flags.woff2
+  from      country-flag-emoji-polyfill 0.1.10, the file dist/TwemojiCountryFlags.woff2
+  by        TalkJS, https://github.com/talkjs/country-flag-emoji-polyfill
+  fetched   https://registry.npmjs.org/country-flag-emoji-polyfill/-/country-flag-emoji-polyfill-0.1.10.tgz
+  sha256    9f04f14429bb6a9f415c7a4dd902a918d7e81a4f7526c415496fdb063954e3b8
+  changes   none. The file is byte for byte the one in that package.
+
+The font is COLR and CPAL, which is to say layered vector colour, and it holds
+the flag sequences and nothing else: 78 KB rather than the several megabytes a
+whole emoji font costs.
+
+The build is MIT, copyright 2022 TalkJS. The emoji art in it comes from
+Twemoji and is used under CC BY 4.0:
+
+  Twemoji            https://github.com/twitter/twemoji
+  CC BY 4.0          https://creativecommons.org/licenses/by/4.0/
+
+Nothing else from that package is here. The JavaScript half of it decides at
+runtime whether a browser needs the font; this program serves the font to
+every browser and lets the one that already had flags go on using its own,
+which is what the unicode-range on the face is for.

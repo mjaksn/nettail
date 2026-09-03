@@ -896,6 +896,9 @@ of stdout. `--web-colour off` is how a run says otherwise.
 - The page keeps the last few thousand rows and trims the rest, saying so when
   it does. A tab left open on a busy link would otherwise become unusable.
 - IPv4 only, matching the collector socket.
+- The page fetches one thing besides itself, `flags.woff2`, and only when
+  there are country flags on it to draw. Everything else it needs is inside
+  it, and it reaches for nothing off this machine at all.
 
 ---
 
@@ -1581,16 +1584,34 @@ characters everywhere else, so this is arranged the way colour is: the flag is
 painted once where the row is built, and spelled back out as two letters on the
 way to a terminal that cannot draw it.
 
-Sent is not the same as drawn, and on Windows it is worth knowing the
-difference. The page receives the flag characters, and then the browser draws
-them with whatever font it can find: Firefox ships Twemoji Mozilla and shows
-real flags, and so does anything on a machine with Noto Color Emoji installed,
-while Chrome and Edge fall back to Segoe UI Emoji, which draws the country's
-two letters in a pair of boxes. That is Windows having no flag glyph anywhere
-on it rather than anything this program can settle, which is the same fact
-behind `auto` choosing the letters for a Windows terminal. The page names the
-fonts that can do it ahead of the one that cannot, so installing one is the
-whole of the fix.
+Sent is not the same as drawn, and for a while that was the end of it. A flag
+is two regional indicator letters, no monospace font has a glyph for the pair,
+and the browser falls back to whatever emoji font the machine has. Windows has
+none that draws a flag, by a decision that has held for a decade, so Chrome and
+Edge there drew the country's two letters in a pair of boxes and nothing about
+the page could change it.
+
+So the collector ships the font and serves it. `flags.woff2` is 78 KB of
+colour vector flags and nothing else, fetched from the token's own URL and used
+for the regional indicator letters alone, so a machine that already draws flags
+goes on using its own font for every other character on the page. It is the one
+thing the page asks for besides itself, and the one exception to its being a
+single file. A build without it falls back to the machine's emoji fonts exactly
+as before, which is what the fonts named after it in the stylesheet are for.
+
+It is fetched only by a page that has flags to draw. The collector says in
+every status frame whether it is marking countries, and the page asks for the
+font on the strength of that and nothing else, once: a run without `--country`
+never sends it, and pressing `g` mid-run has the browser fetch it within a
+repaint interval. It is served with a year's caching and marked immutable,
+since it changes only with a new version of this program, under a URL whose
+token has changed as well.
+
+The font is Twemoji artwork, used under CC BY 4.0 and taken from TalkJS's
+[country-flag-emoji-polyfill](https://github.com/talkjs/country-flag-emoji-polyfill)
+unchanged. `nettail/flags-licence` ships beside it and says so, with the source
+and the checksum; the test suite holds the two to each other so the file cannot
+come to describe a font that is not there.
 
 ### What it is worth
 
@@ -2018,6 +2039,8 @@ subprocesses. Everything else is the package:
 | `feed.py` | the events a browser watches, and the bounded queues they wait in |
 | `web.py` | serving those events over HTTP, and taking keys back from a browser |
 | `web.html` | the page itself, shipped as package data |
+| `flags.woff2` | the country flags the browser view draws, shipped as package data, and the one thing the page fetches besides itself |
+| `flags-licence` | where that font came from and under what terms, which has to travel with it |
 | `cli.py` | argument parsing, the receive loop, and the exit summary |
 | `tally.py` | the running totals behind the traffic summary |
 | `keys.py` | reading keypresses, and what each one does |
@@ -2284,3 +2307,10 @@ appear on a blocklist. Worth building, in rough order of yield:
 ## License
 
 MIT. Do what you want with it, and keep the notice. See [LICENSE](LICENSE).
+
+One file in the package is somebody else's work. `nettail/flags.woff2`, the
+country flags the browser view draws, is Twemoji artwork used under
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), taken unchanged from
+TalkJS's [country-flag-emoji-polyfill](https://github.com/talkjs/country-flag-emoji-polyfill),
+whose build is MIT. `nettail/flags-licence` travels with it and says all of
+that where the font is, which is what that licence asks for.

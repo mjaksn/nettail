@@ -490,6 +490,16 @@ def statuses(result):
 result = run([], [v5_packet(0), v5_packet(2)], settle=0.6)
 counts = [s["flows_shown"] for s in statuses(result) if "flows_shown" in s]
 check("the status carries a count of flows shown", counts != [])
+
+# Whether the browser has any reason to fetch the flags font. False here,
+# because this run asked for no countries, and the page fetches the font on
+# the strength of this and nothing else. An eager fetch is what that replaced,
+# and it would send 78 KB to every browser watching a run like this one.
+marking = [s["countries"] for s in statuses(result) if "countries" in s]
+check("the status says whether countries are being marked",
+      marking != [], str(len(statuses(result))))
+check("and says no for a run with no database to mark from",
+      marking and not any(marking), str(marking))
 check("and it reaches the total that arrived", counts and max(counts) == 4,
       repr(counts))
 check("the greeting carries it too, for a tab that reconnects",

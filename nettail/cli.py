@@ -1501,6 +1501,12 @@ def main():
             # the point of the count is to say what was missed rather than
             # what happened.
             "flows_shown": shown_flows[0],
+            # Whether anything on the page will have a flag on it. The browser
+            # asks for the flags font when this is true and never otherwise,
+            # so a run without --country costs it nothing. It is here rather
+            # than in the greeting because the g key moves it, and a status
+            # frame follows any key within a repaint interval.
+            "countries": country.showing(),
             "snap": snap,
             "shown": {
                 "elapsed": human_clock(snap["elapsed"]),
