@@ -24,7 +24,7 @@ from netflume import (
     flow_timestamp,
 )
 
-from . import __version__, services
+from . import __version__, config, services
 from .colour import C, PlainStream, colour_on, strip_colour
 from .display import (
     COLUMNS,
@@ -843,11 +843,40 @@ def build_parser():
     ap.add_argument("--version", action="version",
                     version=f"nettail {__version__}",
                     help="print the version and exit")
+    # A file's settings and a way to write one. Mutually exclusive because
+    # they are opposite directions through the same door: one says which file
+    # to read, the other where to write what this run would have used, and a
+    # command line asking for both is a command line that has not decided.
+    conf = ap.add_mutually_exclusive_group()
+    conf.add_argument("--config", metavar="FILE", default=None,
+                      help="read settings from this file instead of looking "
+                           "for one. Anything below can be set in it, under "
+                           "the same name without its dashes, and anything "
+                           "typed here still wins")
+    conf.add_argument("--save-config", nargs="?", metavar="FILE",
+                      const=config.default_save_path(), default=None,
+                      help="write what this run would have used to FILE, or "
+                           "to %s, and exit without collecting anything"
+                           % config.default_save_path())
     ap.add_argument("--bind", default="0.0.0.0",
                     help="address to bind (default 0.0.0.0)")
     ap.add_argument("--port", type=int, default=2055, help="UDP port (default 2055)")
     ap.add_argument("--external-only", action="store_true",
                     help="only show flows involving a public IP")
+    # The n and p keys, asked for at the start rather than pressed. Every
+    # other key that turns part of the display on has a flag beside it, and
+    # these two did not, which left two settings that a config file could not
+    # say either, since a file can say what the command line can and nothing
+    # more. The dest is the name the key already used, so the keys, the
+    # display and a file are all talking about the same attribute.
+    ap.add_argument("--names", dest="named_hosts", action="store_true",
+                    help="show a host by its name in place of its address, "
+                         "where a name is known. The n key turns it off and "
+                         "on while running")
+    ap.add_argument("--macs", dest="show_macs", action="store_true",
+                    help="show hardware addresses on a line under each flow, "
+                         "on the exporters that send them. The p key turns it "
+                         "off and on while running")
     ap.add_argument("--verbose", action="store_true",
                     help="print every decoded field under each flow")
     ap.add_argument("--json", action="store_true",
@@ -944,16 +973,53 @@ def build_parser():
                      help="background lookup threads (default 4)")
     grp.add_argument("--resolve-timeout", type=float, default=1.0,
                      help="per-probe timeout in seconds for mDNS and NetBIOS")
-    # Toggled by the n and p keys rather than asked for on the command line,
-    # but they live on args like every other display setting, so that one
-    # place says what the display is currently doing.
-    ap.set_defaults(named_hosts=False, show_macs=False)
     return ap
 
 
 def main():
     ap = build_parser()
+
+    # A config file, read before the command line is parsed rather than merged
+    # after it, because that ordering is what makes the command line win: what
+    # a file says becomes the parser's default, and anything typed overrides a
+    # default. Merged afterwards it could only have been the other way round,
+    # since by then argparse cannot tell a value that was typed from a default
+    # that happens to equal it.
+    #
+    # The baseline is what the options held before any of that, and is kept
+    # for --save-config: once a file's settings are the parser's defaults, a
+    # value that came from the file is indistinguishable from one nobody ever
+    # chose, and saving would write the file back out without them.
+    baseline = config.defaults(ap)
+    settings, config_path, config_notes = config.settings(ap)
+    if settings:
+        ap.set_defaults(**settings)
     args = ap.parse_args()
+
+    # A file the reader named and this could not read is an error, where one
+    # found by searching is a complaint. The difference is that somebody typed
+    # this one: a unit file with a typo in the path would otherwise run on
+    # stock defaults for ever while saying nothing was wrong.
+    if args.config is not None and config_path is None:
+        ap.error(config_notes[0] if config_notes
+                 else "could not read %s" % args.config)
+
+    # And a file that sets two options the command line would refuse together.
+    # argparse enforces a mutually exclusive group against what it was typed,
+    # so two of them arriving as defaults walk straight through it. Said here
+    # the way argparse would have said it, because a file that contradicts
+    # itself has said what it wanted no more clearly than a command line that
+    # does.
+    for said in config.conflicts(ap, settings):
+        ap.error("%s: %s" % (config_path or "the settings file", said))
+
+    # And the other way that pair can arrive: the file set one of them and the
+    # command line typed the other. argparse saw one option and refused
+    # nothing, so both are set by now, and the file has beaten the command
+    # line at the one thing the ordering above exists to prevent. The file's
+    # side goes back to what it held before the file was read.
+    for dest, value in config.overruled(ap, args, settings, baseline).items():
+        setattr(args, dest, value)
 
     # The token, when the flag did not carry it. This is how the installed
     # service gets one: systemd reads `EnvironmentFile` and compose reads
@@ -977,9 +1043,16 @@ def main():
                 ap.error("%s in the environment cannot be used: %s"
                          % (WEB_TOKEN_ENV, exc))
 
-    # Checked here rather than after the socket is up: argparse catches
-    # --size-scale-max against --size-scale-dynamic for us, but this pair is
-    # ours to check, and a bind failure would otherwise report first.
+    # Checked here rather than after the socket is up, so that a bind failure
+    # does not report first. This pair is ours to check because it cannot be a
+    # mutually exclusive group: --size-scale-window rules out
+    # --size-scale-max and not --size-scale-dynamic, which it implies, and a
+    # group excludes in every direction at once.
+    #
+    # What reaches this is only ever a pair that came from one place, since
+    # `overruled` has already settled the case where one side was typed and
+    # the other came from the file. Two typed, or two out of one file, is a
+    # reader who has asked for both and is told so.
     if args.size_scale_window and args.size_scale_max is not None:
         ap.error("--size-scale-window scopes the dynamic scale and cannot be "
                  "combined with --size-scale-max")
@@ -1044,6 +1117,37 @@ def main():
             # had a colour code in it, so there is nothing to take out and no
             # reason to put a substitution in front of every flow.
             sys.stdout = PlainStream(sys.stdout)
+
+    # Which file the settings came from, said out loud every time. A config
+    # file in the working directory is a file somebody else may have put
+    # there, and a run that quietly took its options from one would be worse
+    # than not having the feature at all. Printed here rather than where it
+    # was read, because the colour above has only just been settled and this
+    # is the first line anything prints.
+    if config_path is not None:
+        print(f"{C.GREY}settings from {config_path}{C.RESET}", file=sys.stderr)
+    for note in config_notes:
+        print(f"{C.YELLOW}{note}{C.RESET}", file=sys.stderr)
+
+    # Saving is a thing to do instead of collecting rather than before it.
+    # Nothing has been bound or started at this point, so a run that only
+    # wanted a file writes one and goes, and never has to be interrupted to
+    # stop.
+    if args.save_config is not None:
+        # A bare --save-config writes ~/.nettail/nettail.conf, which is also
+        # the second place the search looks, so the file being written is
+        # very often the file that was just read. A token in it would
+        # otherwise be dropped on the way through, since one is never written
+        # out, and the next restart would mint a fresh one and quietly break
+        # every bookmark. Putting it back where it already was is not the same
+        # act as writing it somewhere new, and only the first is allowed.
+        keep = (("web_token",)
+                if "web_token" in settings
+                and config.same_file(args.save_config, config_path) else ())
+        written = config.write(ap, args, args.save_config, baseline, keep)
+        print(f"{C.GREY}settings written to {written}{C.RESET}",
+              file=sys.stderr)
+        return
 
     # Treat SIGTERM like Ctrl-C so the summary still prints under systemd.
     def _term(_signum, _frame):

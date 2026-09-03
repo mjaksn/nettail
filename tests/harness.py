@@ -13,10 +13,13 @@ duration, and sharing an interpreter would let one suite's fakes leak into the
 next.
 """
 
+import atexit
 import io
 import os
 import re
+import shutil
 import sys
+import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # How a subprocess starts the collector. The package is the entry point now:
@@ -35,6 +38,29 @@ if ROOT not in sys.path:
 # child process inherits the environment.
 os.environ["PYTHONPATH"] = os.pathsep.join(
     [ROOT] + [p for p in os.environ.get("PYTHONPATH", "").split(os.pathsep) if p])
+
+# A home directory of this suite's own, and nobody else's.
+#
+# The collector looks for a settings file, and after the working directory it
+# looks under the home directory. So a developer who follows the README once
+# and runs `nettail --save-config` has a file in ~/.nettail that every suite
+# starting a collector would then read, in process and in a subprocess alike:
+# `external-only = true` alone changes what several of them assert, and the
+# failure would look like a bug in the code rather than like a file somebody
+# saved last week. The repository's .gitignore keeps one out of the checkout
+# and can do nothing about the home directory, so the home directory is
+# replaced here instead.
+#
+# Every variable an expanduser or a config search consults is pointed at one
+# empty directory, and a child process inherits it. The machine-wide places,
+# /etc/nettail and %PROGRAMDATA%, are left alone deliberately: a suite that
+# ignored those would not be testing the search this program really does, and
+# a machine with a file in /etc has said something about every program on it.
+_HOME = tempfile.mkdtemp(prefix="nettail-tests-home-")
+atexit.register(shutil.rmtree, _HOME, True)
+for _variable in ("HOME", "USERPROFILE", "XDG_CONFIG_HOME", "APPDATA",
+                  "LOCALAPPDATA"):
+    os.environ[_variable] = _HOME
 
 _ESCAPES = re.compile(r"\033\[[0-9;]*m")
 _failures = []

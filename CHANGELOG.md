@@ -11,6 +11,85 @@ but it is a program rather than a library, and the names inside it may move
 without that being a breaking change. `--json` output is the part meant to be
 parsed, and it is treated as public.
 
+## [0.10.0] - 2026-09-02
+
+### Added
+
+- **Anything the command line takes, a settings file takes too.** `nettail.conf`
+  holds the same options under the same names without their dashes, and there
+  is no second list of what can be set: the file is read against the same
+  parser the command line is, so an option that exists is settable and one that
+  does not is reported as an unknown key. A `[nettail]` section header is
+  allowed and not needed, a key may be spelled with dashes or underscores, a
+  switch takes true or false, and an option that may be repeated takes one
+  value a line.
+
+  **The command line wins.** What the file says becomes the default and
+  anything typed overrides it, which is also why the file is read before the
+  arguments are parsed rather than merged after them: by then argparse cannot
+  tell a value that was typed from a default that happens to equal it, and the
+  merge could only have gone the other way. The one exception is a repeatable
+  option, where typing `--hosts` adds to what the file listed rather than
+  replacing it, because that is what repeatable means everywhere else here.
+
+  Two options that are alternatives are the one place that ordering does not
+  settle by itself, since argparse refuses a mutually exclusive group's second
+  option only when it was typed and the file's arrives as a default. A file's
+  `size-scale-max` beside a typed `--size-scale-dynamic` would otherwise
+  survive into a run that asked for its opposite, so the file's side is set
+  aside for that run and the command line wins there as everywhere else.
+
+  A key it does not know and a value it cannot use are reported and stepped
+  over, so that line costs its own line and the rest of the file is used. A
+  line the format itself cannot read is different, since an INI file is read
+  whole or not at all: a line with no equals in it, or a key written twice,
+  loses the file rather than the line, and the collector says so and starts on
+  its defaults. Two things do stop it, both being a file that has not said what
+  it meant: one named with `--config` that cannot be read, and one setting two
+  options that are alternatives, which the command line refuses together and so
+  does a file. `--config` with an empty name counts as the first of those and
+  not as no `--config` at all, so a script written as `--config "$CONF"` with
+  the variable unset stops rather than quietly taking its settings from
+  whatever the working directory holds.
+
+  An option answers to every name it has, so `colour` and `color` are one
+  setting as they are one flag, and writing both is reported rather than
+  quietly resolved. The file is UTF-8, a byte order mark in front of it is
+  ignored, and a file saved as UTF-16, which is what PowerShell writes unless
+  told otherwise, is reported as such rather than read as nonsense.
+- **The first `nettail.conf` of these that exists is read**, and only that one:
+  the working directory, `~/.nettail`, the home directory, then the usual place
+  for a user's configuration on that platform, then the machine's. On Windows
+  that is `%APPDATA%`, `%LOCALAPPDATA%` and `%PROGRAMDATA%`; on macOS
+  `~/Library/Application Support` and `/usr/local/etc`; elsewhere
+  `$XDG_CONFIG_HOME` or `~/.config`, and `/etc/nettail`. Nothing is merged.
+
+  The working directory comes first so that a directory can carry its own
+  settings, which is the useful case and also the one to be careful with, since
+  a file there is one somebody else may have put there. **Which file was read
+  is printed at startup, every time.**
+- **`--names` and `--macs`**, which start a run with what the `n` and `p` keys
+  turn on. Every other key that turns part of the display on had a flag beside
+  it and these two did not, so they were the two settings a command line could
+  not ask for and, since a file says what the command line says and nothing
+  more, the two a settings file could not hold either. They take the names the
+  keys already use, so `names`, `named-hosts` and `named_hosts` are one key in
+  a file, as `macs` and `show-macs` are.
+- **`--config FILE`** reads that file and searches for none.
+- **`--save-config [FILE]`** writes what this run would have used and exits
+  without collecting anything, to the file named or to
+  `~/.nettail/nettail.conf`. Every option is written, in the order the help
+  lists them and under its own help text: what the run set is live, and the
+  rest is commented out with its default beside it, so the file is a complete
+  list of what can be set and a short list of what is set. `--web-token` is
+  never written into a file that did not already have one, since it is a
+  secret and a settings file is not; reading one from a file works. Saving over
+  the file a token came from writes it back where it was, because a bare
+  `--save-config` writes the file the search would read next time and dropping
+  the token there would mint a fresh one at the next restart and break every
+  bookmarked URL. The file is written rather than edited, so comments in the
+  file being replaced do not survive it.
+
 ## [0.8.0] - 2026-09-02
 
 ### Added
@@ -464,6 +543,7 @@ console: the part that decides what a flow should look like on a terminal.
   reminder line under the startup banner can be a pointer rather than a
   two-hundred-character list that wrapped and then scrolled away.
 
+[0.10.0]: https://github.com/mjaksn/nettail/releases/tag/v0.10.0
 [0.8.0]: https://github.com/mjaksn/nettail/releases/tag/v0.8.0
 [0.7.0]: https://github.com/mjaksn/nettail/releases/tag/v0.7.0
 [0.6.0]: https://github.com/mjaksn/nettail/releases/tag/v0.6.0

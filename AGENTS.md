@@ -70,6 +70,17 @@ test:
   dispatch and the startup reminder line. `QR_KEY` is `q` in the same way,
   and has one thing more to agree with: it is kept back from the browser, so
   it is named in `WEB_EXCLUDED` as well.
+
+  A key that turns part of the display on also wants a flag beside it, and
+  `test_key_help` holds that too: every key is either an act, which is
+  something to do rather than something to set, or a setting whose dest a
+  command line option moves as well. A key is for changing your mind and a
+  flag is for saying so at the start, and the flag is what lets a settings
+  file hold it at all, since a file says what the command line says and
+  nothing more. `--names` and `--macs` exist because the n and p keys were
+  the two that had no flag; the check is what stops the next one arriving the
+  same way. A new key is either added to that suite's list of acts or given
+  its flag, and until somebody says which, it fails.
 - **`EPHEMERAL_FLOOR` in `services.py`** repeats a number netflume writes
   inline and exports no constant for. `test_services` finds where netflume
   actually stops naming ports and pins ours to it.
@@ -110,6 +121,99 @@ a port keeps its own answer.
 The data file has to stay listed in `[tool.setuptools.package-data]`. Left
 out, the wheel ships without it and every supplemental name silently becomes a
 bare port number.
+
+## Settings from a file
+
+`config.py` reads `nettail.conf` and writes one. The feature's whole claim is
+that anything settable on the command line is settable in a file, and it holds
+because **there is no list of what can be set**: `settable(parser)` reads the
+parser, so `build_parser` goes on being the one place an option exists.
+`test_config` types every option and writes every option and asserts the two
+runs come out with the same arguments, and a new option with no sample value
+in that suite fails rather than turning out to be quietly unsettable.
+
+Six things about it are easy to break.
+
+- **The file is read before the arguments are parsed, and that is what makes
+  the command line win.** Its settings are installed with `set_defaults`, and
+  an argument overrides a default. Merged after the parse it could only have
+  gone the other way round: by then argparse cannot tell a value that was
+  typed from a default that happens to equal it, so a file would silently
+  beat the command line. This is also why the two config options are read by
+  a small parser of their own first; which file to read may itself be an
+  argument.
+- **`--save-config` compares against a baseline taken before any of that.**
+  Once a file's settings are the parser's defaults, a value that came from the
+  file is indistinguishable from one nobody ever chose, and a run that loaded
+  a config and saved it again would write every one of them back out as a
+  comment. `main` takes `config.defaults(ap)` before `set_defaults` and hands
+  it to `write`. There is a check for it in both directions, because the
+  failure is a file that looks fine and has lost half of itself.
+- **Which file was read is printed at startup, every time.** The search starts
+  in the working directory, which is what makes a per-directory config
+  possible and is also a file somebody else may have put there. The line is
+  the whole mitigation and is not decoration; a run that quietly took its
+  options from a stranger's file would be worse than not having the feature.
+  It is printed after the colour is settled rather than where the file is
+  read, because nothing may print before that.
+- **A repeatable option adds rather than replaces.** `--hosts` typed beside a
+  file that lists two gives three, because that is what repeatable means
+  everywhere else in this program. It is the one place "the command line
+  wins" reads differently and it is written down in three places for that
+  reason.
+- **Two options that are alternatives are the one place the ordering does not
+  settle it.** Everywhere else the file and the command line are arguing about
+  one option, so installing the file as a default and letting an argument
+  override it is the whole mechanism. A mutually exclusive group is two
+  options that mean opposite things, and argparse refuses the second only when
+  it was typed, so a file's `size-scale-max` and a typed
+  `--size-scale-dynamic` both survive the parse and nothing downstream can
+  tell a choice was ever meant. That is the file beating the command line at
+  the one thing the ordering exists to prevent, and worse than the ordinary
+  case, because the file's value does not lose an argument, it survives into a
+  run that asked for its opposite. `config.overruled` puts the file's side
+  back, quietly, which is what every other option does when the command line
+  overrides it. It decides nothing about a pair that came from one place: two
+  typed argparse has refused already, and two out of one file is what
+  `conflicts` reports. `EXCLUSIVE_PAIRS` is there because
+  `--size-scale-window` rules out `--size-scale-max` and not
+  `--size-scale-dynamic`, which it implies, and an argparse group excludes in
+  every direction at once, so that pair cannot be expressed as one.
+- **A token goes back only where it already was.** `NEVER_WRITTEN` keeps
+  `--web-token` out of a saved file, and `keep` is the exception `main` allows
+  when the file about to be written is the file the settings came from. That
+  is not a softening of the rule: a bare `--save-config` writes
+  `~/.nettail/nettail.conf`, which is the second place the search looks, so
+  the file being written is usually the file just read, and dropping the token
+  there mints a fresh one at the next restart and breaks every bookmarked URL.
+  The rule the code enforces is that a file which never had a secret never
+  gets one.
+
+Three smaller things, each of which was a real defect before it was a rule.
+`read` opens with `utf-8-sig` and catches `UnicodeDecodeError`, because a
+mark left by Notepad became part of the first key and a file saved as UTF-16
+by PowerShell was a traceback out of `main` before the socket was bound.
+`parse` registers every long flag an action has, not the first, or `color` and
+`web-color` would be names the command line takes and a file does not.
+`conflicts` exists because argparse enforces a mutually exclusive group
+against what was typed, so two of its options arriving as defaults walk
+straight through it. `settings` asks whether a file was named and not whether
+the name has anything in it, because `main` asks it that way too when it
+decides a named file that will not read is an error: asked as truthiness,
+`--config ""` went back to searching, and a script written as `--config
+"$CONF"` with the variable unset would have taken its settings from whatever
+the working directory held, which is the one file the printed line exists to
+warn about.
+
+`settable` reaches for `parser._actions`, which is argparse's own and has no
+public spelling. There is no API for "what options does this parser have", and
+the alternative to the attribute is writing the options out again, which is
+the thing the module exists not to do.
+
+`--web-token` is read from a file and never written to one. A settings file is
+the file people edit, copy between machines and paste into an issue, and the
+token is the one thing here this program already goes to trouble to keep out
+of `ps`. `NEVER_WRITTEN` is where that lives.
 
 ## The web interface
 
