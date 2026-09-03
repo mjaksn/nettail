@@ -8,6 +8,7 @@ after that, the shape again when the fields change under an ID already in
 use, and none of it without --verbose.
 """
 import io
+import os
 import socket
 import struct
 import sys
@@ -141,19 +142,32 @@ var = rendered([("10.0.0.1", 0, 401,
                  False, True)])
 check("a variable length field is not given a width",
       "ie96:auto/var" in var, repr(var))
+# 4 for the fixed field, plus the one byte of length prefix the variable
+# one costs even when it carries nothing. netflume refuses a record
+# shorter than that, so a floor of 4 would be a floor no record can sit on.
 check("a template holding one gives its record size as a floor",
-      "at least 4 bytes a record" in var, repr(var))
+      "at least 5 bytes a record" in var, repr(var))
 
 unknown = rendered([("10.0.0.1", 0, 402, [("ie999", "auto", 8)],
                      False, True)])
 check("an element with no name still says which it was",
       "ie999:auto/8" in unknown, repr(unknown))
 
-wide = rendered([("10.0.0.1", 0, 403, [("octets", "uint", 4)] * 40,
-                  False, True)])
+# The width has to be pinned rather than assumed. `report_templates` wraps to
+# the window stderr is going to, and stderr here is whatever the suite was
+# started from: under `tests/run.py` that is a pipe, which measures zero and
+# falls back to SUMMARY_WIDTH, but run directly at a terminal wider than 120
+# it is the terminal. `qr.window` reads COLUMNS and LINES before it measures
+# anything, which is the lever for exactly this.
+os.environ["COLUMNS"], os.environ["LINES"] = "100", "40"
+try:
+    wide = rendered([("10.0.0.1", 0, 403, [("octets", "uint", 4)] * 40,
+                      False, True)])
+finally:
+    del os.environ["COLUMNS"], os.environ["LINES"]
 check("a long field list is wrapped rather than run off the window",
       len(wide.splitlines()) > 2
-      and max(len(ln) for ln in wide.splitlines()) <= main.cli.SUMMARY_WIDTH,
+      and max(len(ln) for ln in wide.splitlines()) <= 100,
       repr([len(ln) for ln in wide.splitlines()]))
 
 # --- and what a refresh is shown as ---------------------------------------

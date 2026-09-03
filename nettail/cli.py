@@ -428,10 +428,17 @@ def report_templates(seen, out=None):
             print(f"{C.GREY}{exporter} (domain {domain}) resent {kind} {tid}, "
                   f"unchanged{C.RESET}", file=out)
             continue
-        # A variable length field has no width until a record declares one, so
-        # what the template fixes is a floor rather than a size.
+        # A variable length field has no width until a record declares one,
+        # so what the template fixes is a floor rather than a size. The floor
+        # is not the fixed fields alone: every such field costs at least the
+        # one byte of length prefix the record has to carry in front of it,
+        # which is netflume's own rule in `record_min_length`. That is
+        # repeated here rather than imported, because the name left netflume's
+        # public surface in 0.2.0 and is documented as free to move, but the
+        # arithmetic has to agree with it or this says a record can be shorter
+        # than the decoder will ever accept.
         variable = any(length == 0xFFFF for _name, _kind, length in fields)
-        size = sum(0 if length == 0xFFFF else length
+        size = sum(1 if length == 0xFFFF else length
                    for _name, _kind, length in fields)
         print(f"{C.BLUE}{exporter} (domain {domain}) sent {kind} {tid}: "
               f"{len(fields)} field{'' if len(fields) == 1 else 's'}, "
