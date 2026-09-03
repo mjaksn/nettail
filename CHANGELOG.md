@@ -101,7 +101,11 @@ parsed, and it is treated as public.
   for that end. Absent otherwise, which is every run that did not ask for one,
   the way `src_host` is absent when no name is known.
 
-## [0.10.0] - 2026-09-02
+## 0.10.0 - 2026-09-02
+
+Never released on its own. 0.11.0 landed before a tag was cut and
+carries everything below, so there is no `v0.10.0` for this heading to
+link at, and it is written plainly for that reason.
 
 ### Added
 
@@ -634,7 +638,6 @@ console: the part that decides what a flow should look like on a terminal.
   two-hundred-character list that wrapped and then scrolled away.
 
 [0.11.0]: https://github.com/mjaksn/nettail/releases/tag/v0.11.0
-[0.10.0]: https://github.com/mjaksn/nettail/releases/tag/v0.10.0
 [0.8.0]: https://github.com/mjaksn/nettail/releases/tag/v0.8.0
 [0.7.0]: https://github.com/mjaksn/nettail/releases/tag/v0.7.0
 [0.6.0]: https://github.com/mjaksn/nettail/releases/tag/v0.6.0
