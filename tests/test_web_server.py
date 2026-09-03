@@ -307,10 +307,15 @@ try:
     handler = body[opens:ends]
     arrow = handler.find('event.key === "ArrowDown"')
     check("the down arrow is answered by the page", opens != -1 and arrow != -1)
+    # Scoped to the branch and not to the rest of the handler, which has a
+    # preventDefault of its own for the keys that do go to the collector: read
+    # to the end and the check the arrow's own guard is here for would pass
+    # with that guard deleted, which is the whole failure it is written for.
+    branch = handler[arrow:handler.find("if (readonly)")]
     check("and by working the Follow box rather than by sending a key",
-          "followBox.click()" in handler)
+          "followBox.click()" in branch)
     check("and it takes the browser's own scrolling out of the way",
-          "event.preventDefault()" in handler[arrow:])
+          "event.preventDefault()" in branch)
     check("it is answered before the guard that keeps keys off a "
           "display-only collector",
           -1 < arrow < handler.find("if (readonly)"))
