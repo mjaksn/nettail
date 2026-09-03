@@ -8,6 +8,14 @@ that can only press the keys it already knows about will never notice.
 
 The reminder line under the banner is a pointer at the listing rather than a
 list of its own, so what is checked of it is that it points somewhere real.
+
+There is a third thing now, which is that the keyboard and the command line
+offer the same settings. A key that turns part of the display on wants a flag
+beside it: a key is for changing your mind and a flag is for saying so at the
+start, and since a settings file can say what the command line can and nothing
+more, a setting with no flag is one a file cannot hold either. `--names` and
+`--macs` were added because they were the two that had no flag, and the check
+at the foot of this file is what stops the next one going the same way.
 """
 import argparse
 import io
@@ -143,5 +151,61 @@ panel = controls(quiet)
 check("a key nobody claimed does nothing", panel.handle("z") is None)
 check("and prints nothing", quiet.getvalue() == "")
 check("an empty key is not a key", panel.handle("") is None)
+
+
+# --- every key that is a setting has a flag beside it -----------------------
+
+# The keys that do something rather than turn something on. These have nothing
+# to be set at startup: pausing, clearing and printing are acts, and asking for
+# them before there is anything on screen means nothing. Everything else in
+# KEYS changes what the display is doing and belongs on the command line too.
+#
+# Written down here and nowhere else, and it is the one table in this file. A
+# key added to KEYS is either an act, and belongs in this list, or a setting,
+# and wants a flag; either way somebody has to say which, and until they do
+# this fails rather than letting a setting arrive with no way to ask for it.
+ACTIONS = {
+    "space",    # pause and resume
+    "x",        # clear the screen
+    "s",        # print the summary now
+    "l",        # print the host list
+    "c",        # clear the statistics
+    "m",        # ask for a new fixed top, which --size-scale-max is
+    "q",        # print the QR code
+    "?",        # print this listing
+    "esc",      # close the program
+}
+
+# What each remaining key sets, against the flag that sets the same thing at
+# startup. The dest is the attribute both of them move, which is what makes
+# them the same setting rather than two that happen to agree.
+SETTINGS = {
+    "b": "hide_status",
+    "d": "size_scale_dynamic",
+    # The one whose state is not kept on `args`. `country` holds it on the
+    # module, because `display`, `cli` and `statusbar` all ask and share no
+    # arguments between them, which is the arrangement `services` uses and is
+    # reasoned about where the state is declared. It is still one setting with
+    # one flag, which is what this table is for.
+    "g": "country",
+    "h": "resolve",
+    "n": "named_hosts",
+    "p": "show_macs",
+    "f": "fqdn",
+    "e": "external_only",
+}
+
+keys = [key for key, _doc in main.KEYS]
+check("every key is either an act or a setting",
+      sorted(ACTIONS | set(SETTINGS)) == sorted(keys),
+      "unaccounted for: %s" % sorted(set(keys) - ACTIONS - set(SETTINGS)))
+
+flags = {action.dest: action.option_strings[0]
+         for action in main.build_parser()._actions if action.option_strings}
+for key, dest in sorted(SETTINGS.items()):
+    check("the %s key has a flag beside it, and it is %s"
+          % (key, flags.get(dest, "missing")), dest in flags,
+          "no command line option sets %r, so a settings file cannot either"
+          % dest)
 
 finish("key help")

@@ -37,6 +37,7 @@ TIME         EXPORTER        PROTO  SOURCE                                     D
 - [Quick start](#quick-start)
 - [Configuring the UDM Pro](#configuring-the-udm-pro)
 - [Command line options](#command-line-options)
+- [Settings file](#settings-file)
 - [The status bar](#the-status-bar)
 - [Keyboard controls](#keyboard-controls)
 - [The web interface](#the-web-interface)
@@ -219,8 +220,9 @@ different reason.
 ## Command line options
 
 ```
-usage: nettail [-h] [--version] [--bind BIND] [--port PORT] [--external-only]
-               [--verbose] [--json] [--colour WHEN] [--no-color]
+usage: nettail [-h] [--version] [--config FILE | --save-config [FILE]]
+               [--bind BIND] [--port PORT] [--external-only] [--names]
+               [--macs] [--verbose] [--json] [--colour WHEN] [--no-color]
                [--header-every HEADER_EVERY] [--sticky-header] [--hide-status]
                [--no-supplemental-services] [--web] [--web-port PORT]
                [--web-bind ADDR] [--web-host NAME] [--web-token TOKEN]
@@ -237,9 +239,13 @@ usage: nettail [-h] [--version] [--bind BIND] [--port PORT] [--external-only]
 | Option | Default | Description |
 | --- | --- | --- |
 | `--version` | | Print the version and exit |
+| `--config FILE` | searched | Read settings from this file instead of looking for one. See [Settings file](#settings-file) |
+| `--save-config [FILE]` | `~/.nettail/nettail.conf` | Write what this run would have used to a file and exit without collecting anything |
 | `--bind BIND` | `0.0.0.0` | Address to bind the UDP socket to |
 | `--port PORT` | `2055` | UDP port to listen on |
 | `--external-only` | off | Only display flows where the source or destination is a public IP. Everything is still counted in the summary |
+| `--names` | off | Show a host by its name in place of its address, where a name is known. The `n` key turns it off and on while running |
+| `--macs` | off | Show hardware addresses on a line under each flow, on the exporters that send them. The `p` key turns it off and on while running |
 | `--verbose` | off | Print every decoded field on an indented line under each flow. Also surfaces parse errors |
 | `--json` | off | Emit one JSON object per flow on stdout instead of the table |
 | `--colour WHEN` | `auto` | When to use ANSI colour **on this terminal**: `auto`, `always` or `never`. Under `auto` a terminal gets colour and a redirected stream does not, and `NO_COLOR` in the environment turns it off. The browser view has its own switch, `--web-colour`, and is not decided by this one. `--color` is accepted too |
@@ -320,6 +326,200 @@ what is marked.
 | `--fqdn` | off | Show `nas.lan` instead of `nas` |
 | `--resolve-workers N` | `4` | Background lookup threads |
 | `--resolve-timeout SEC` | `1.0` | Per-probe timeout for mDNS and NetBIOS queries |
+
+---
+
+## Settings file
+
+Everything the collector takes on the command line it takes in a file instead,
+under the same name without its dashes. There is no second list of what can be
+set: the file is read against the same parser the command line is, so an option
+that exists is settable, and one that does not is reported as an unknown key.
+
+```ini
+# nettail.conf
+port = 2055
+external-only = true
+web = true
+web-bind = 127.0.0.1
+resolve = dns
+hosts =
+    /etc/hosts.lan
+    /etc/hosts.iot
+```
+
+A `[nettail]` header is allowed and is not needed: there is one section and
+nowhere else for a setting to be, so a file that opens with `port = 2055` is
+read as though it had one. A key may be written with dashes as the flag is or
+with underscores as Python spells it, and an option with two spellings answers
+to both: `colour` and `color` are one setting, as they are one flag. Writing
+one option twice under two of its names is reported rather than silently
+resolved, and the first is the one used. A switch takes `true` or `false`, and
+`yes`, `no`, `on`, `off`, `1` and `0` besides. An option that may be repeated
+takes one value a line, indented under the key. A comment is a line beginning
+with `#` or `;`, and a `%` is a `%` rather than anything clever.
+
+**The command line wins.** What the file says becomes the default and anything
+typed overrides it, so a config file is where the settings you always want live
+and the command line is for today. What neither says falls back to what the
+program shipped with, which is how a default this program changes later still
+reaches you.
+
+The one exception is an option that may be repeated, `--hosts` and
+`--web-host`. Typing one of those adds to what the file listed rather than
+replacing it, because that is what repeatable means everywhere else here. A run
+that wants none of them wants `--config` pointed at a file that lists none.
+
+Options that are alternatives win the same way, and it is worth saying because
+they are the one place where winning means the file's setting is dropped
+rather than replaced. With `size-scale-max` in your file, `--size-scale-dynamic`
+on the command line gives you a dynamic scale and the file's fixed top is set
+aside for that run, exactly as though it had not been there. The same goes for
+`--size-scale-window`, which rules out a fixed top too. Neither is an error:
+you asked for one of a pair of alternatives and got it.
+
+There is a second thing worth knowing before you rely on it: a switch turned on
+in a file cannot be turned off from the command line, because switches here
+have no `--no-` form. Colour is not quite an exception and is worth spelling
+out, since it is the setting most likely to be in a file: `colour` is a choice
+rather than a switch, so `colour = never` in a file still yields to `--colour
+always` like any other value. `no-color = true` is a switch, so it yields to
+nothing, and it beats `--colour always` besides, because `--no-color` means
+`--colour never` however it arrived. Set `colour`, not `no-color`, in a file
+you want to argue with later. Anything else, and the answer is a different
+file.
+
+### Where it is looked for
+
+The first of these that exists is read, and only that one. They are not merged:
+a setting that comes from two files at once is a setting nobody can find by
+looking at either.
+
+On Linux, and anything else that is not Windows or macOS:
+
+```
+./nettail.conf
+~/.nettail/nettail.conf
+~/.nettail.conf
+~/nettail.conf
+$XDG_CONFIG_HOME/nettail/nettail.conf   (or ~/.config/nettail/nettail.conf)
+/etc/nettail/nettail.conf
+/etc/nettail.conf
+```
+
+macOS has `~/Library/Application Support/nettail/nettail.conf` after the home
+directory and `/usr/local/etc/nettail/nettail.conf` before `/etc`. Windows has
+none of the Unix ones, and looks in the working directory, the home directory,
+and then:
+
+```
+%APPDATA%\nettail\nettail.conf
+%LOCALAPPDATA%\nettail\nettail.conf
+%PROGRAMDATA%\nettail\nettail.conf
+```
+
+The working directory comes first so that a directory can carry its own
+settings, which is useful and is also the one thing about this feature worth
+being careful with: a `nettail.conf` in the directory you happen to be in is a
+file somebody else may have put there. **Which file was read is printed at
+startup, every time**, and that is the whole mitigation:
+
+```
+settings from /home/you/.nettail/nettail.conf
+```
+
+`--config FILE` reads that file instead of looking for one, and nothing is
+searched for.
+
+The file is UTF-8. A byte order mark in front of it is allowed and ignored,
+which is what Notepad leaves; a file saved as UTF-16, which is what PowerShell's
+`Out-File` writes unless told otherwise, is reported as such rather than read as
+nonsense.
+
+A key it does not know and a value it cannot use are each reported and stepped
+over: that line costs its own line, and the collector starts with everything
+else the file said. A line the format itself cannot read is a different thing,
+because an INI file is read whole or not at all. A line with no `=` in it, or a
+key written twice, loses the file rather than the line, and the collector says
+so and starts on its defaults. Writing a repeated option twice is the way to
+meet that:
+
+```ini
+# wrong, and it costs the whole file
+hosts = /etc/hosts.lan
+hosts = /etc/hosts.iot
+
+# right
+hosts =
+    /etc/hosts.lan
+    /etc/hosts.iot
+```
+
+Two things stop the collector rather than being stepped over, both of them
+about a file that has not said what it meant:
+
+- **A file named with `--config` that cannot be read.** One found by searching
+  is a complaint, because nobody asked for it by name; one typed is an
+  instruction, and a service that ran on stock defaults for ever while
+  printing a line about a file it never opened would be worse than a refusal.
+- **A file setting two options that are alternatives**, such as
+  `size-scale-max` beside `size-scale-dynamic`. The command line refuses those
+  together and so does a file, in the same words. One of each, a file saying
+  one and the command line the other, is not refused: that is the command line
+  winning, and it is described under precedence above.
+- **`--config` with nothing after it**, which is what `--config "$CONF"` in a
+  script comes to when the variable is unset. An empty name is a file that was
+  named and cannot be read rather than a reason to go looking, so the run stops
+  instead of quietly taking its settings from the working directory.
+
+### Saving one
+
+`--save-config` writes what this run would have used and exits without
+collecting anything. With no path it writes `~/.nettail/nettail.conf`, which is
+the second place the search looks, so the next run finds it without anything
+else being said.
+
+```bash
+nettail --port 9995 --external-only --web --save-config
+```
+
+The file is written rather than edited: what comes out is generated whole from
+what this run would have used, so a comment you wrote in the file being
+replaced does not survive it. Keep a file you have annotated somewhere else, or
+save to a new name and merge.
+
+What it writes is every option, in the order the help lists them, each under
+its own help text. What this run set is written live; everything else is
+commented out with its default beside it. So the file is a complete list of
+what can be set and a short list of what is set, and a default this program
+changes later still reaches somebody who never touched that option.
+
+```ini
+# only show flows involving a public IP
+external-only = true
+
+# print every decoded field under each flow
+#verbose = false
+```
+
+`--web-token` is the one thing never written into a file that did not already
+have one. It is a secret and a settings file is not: it is the file you edit,
+copy between machines and paste into an issue. `NETTAIL_WEB_TOKEN` in the
+environment is where a token belongs, which is how the installed service
+receives one. Reading a token from a file works, for somebody who put it there
+on purpose.
+
+There is one exception and it is the ordinary case rather than a corner. A bare
+`--save-config` writes `~/.nettail/nettail.conf`, which is also the second place
+the search looks, so the file being written is very often the file just read. A
+token in it is written back where it already was, with a line saying why.
+Dropping it would mint a fresh one at the next restart and quietly break every
+bookmarked URL. Saving anywhere else leaves the token behind, so this can put a
+secret back where it was and can never put one somewhere new.
+
+`--config` and `--save-config` cannot be given together: they are opposite
+directions through the same door, and a command line asking for both has not
+decided which.
 
 ---
 
@@ -511,6 +711,11 @@ press. Turning it off releases the scroll region; turning it back on scrolls up
 only the two rows it is about to cover, so nothing already on screen is painted
 over. In a window with no room for both the bar and a pinned `--sticky-header`,
 the header keeps it and `b` says so rather than displacing what you asked for.
+
+`--names` starts a run with `n` already on, and `--macs` does the same for `p`.
+Every key that turns part of the display on has a flag beside it now, which
+also means both can be set in a settings file: a key is for changing your mind
+and a flag is for saying so at the start.
 
 `n` swaps the address for the name, rather than printing the name after it:
 `192.168.1.42:51234 (macbook-pro)` becomes `macbook-pro:51234`. A host that has
@@ -2110,6 +2315,7 @@ subprocesses. Everything else is the package:
 | `values.py` | sizes, rates and durations, written for a column |
 | `sizescale.py` | the colour ramp behind the BYTES column |
 | `services.py` | port names, the system database first and a shipped list after |
+| `config.py` | settings read from a file, and one written back out |
 | `country.py` | reading a MaxMind format database, the flag an address is marked with, and spelling it out for a terminal that cannot draw one |
 | `display.py` | laying one flow out as a line of text |
 | `sticky.py` | pinning the column header to the top of the window |
@@ -2285,6 +2491,7 @@ another suite's result.
 | `test_summary_key` | the traffic summary printed on demand, and the clock it is dated by |
 | `test_sticky_with_gradient` | the pinned header and the size ramp sharing one screen |
 | `test_services` | the supplemental port names, the parser behind them, the system database keeping precedence, and the ephemeral floor pinned to where netflume actually puts it |
+| `test_config` | every option set in a file against the same option typed on the command line, the search order on platforms this machine is not, and a saved file read back |
 | `test_country` | the database reader against files the suite writes itself, at all three record widths, and the flag reaching a flow row, the summary and `--json` while never reaching an address on this network |
 | `test_qr` | the encoder against pinned symbols: the format information and its BCH check, the mask that was chosen, and the padding codewords no reader ever looks at |
 | `test_readme_samples` | the transcripts this README quotes, against what the program prints today |
