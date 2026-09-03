@@ -132,7 +132,7 @@ try:
     check("the page asks for the font through BASE, not relatively",
           re.search(r"BASE\s*\+\s*['\"]/flags\.woff2", body) is not None,
           "a relative url breaks on one of the two addresses the page "
-          "answers at"),
+          "answers at")
     check("and registers it for the flag letters and nothing else",
           "U+1F1E6-1F1FF" in body)
     # And asks for it only when the collector says it is marking countries. An

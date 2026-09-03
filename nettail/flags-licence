@@ -24,6 +24,8 @@ Twemoji and is used under CC BY 4.0:
   CC BY 4.0          https://creativecommons.org/licenses/by/4.0/
 
 Nothing else from that package is here. The JavaScript half of it decides at
-runtime whether a browser needs the font; this program serves the font to
-every browser and lets the one that already had flags go on using its own,
-which is what the unicode-range on the face is for.
+runtime whether a browser needs the font; this program does not ask, and
+decides something else instead. A page that is marking countries fetches it
+and a page that is not never does, and the unicode-range on the face keeps it
+to the flag letters once it is here, so a machine that already draws flags
+goes on using its own font for every other character on the page.
