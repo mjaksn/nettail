@@ -18,7 +18,7 @@ name: CI
 # dispatch is a convenience here, never the gate.
 #
 # The ruleset on main should require the `gate` job below and nothing else.
-# Requiring the matrix jobs directly would mean naming all nine of them, and
+# Requiring the matrix jobs directly would mean naming all eleven of them, and
 # renaming one would quietly stop protecting anything.
 on:
   workflow_dispatch:
@@ -59,7 +59,14 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        python: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+        # The floor and the ceiling are the two that earn their place, and the
+        # ceiling is 3.14 rather than 3.13 because the classifiers claim it,
+        # `cli.py` branches on it for argparse's own colour scheme, and
+        # `test_help_colour` says of itself that every check in it passes
+        # vacuously below 3.14. Topping out at 3.13 meant the suite written for
+        # that behaviour proved nothing anywhere. 3.15 is still at release
+        # candidate and is left until it is not.
+        python: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
         exclude:
           # 3.9 is no longer in the windows runner image's tool cache, so
           # setup-python spends the better part of a minute fetching an
@@ -71,7 +78,7 @@ jobs:
           # different things. 3.9 catches syntax and stdlib incompatibility,
           # which is the same on either OS and is still covered on ubuntu.
           # Windows catches the terminal handling, which is where this program
-          # differs most per platform, and which is still covered on four
+          # differs most per platform, and which is still covered on five
           # versions. Only the intersection goes untested.
           - os: windows-latest
             python: "3.9"
