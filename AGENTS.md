@@ -3,6 +3,46 @@
 Guidance for AI coding agents working in this repository. Claude Code reaches
 it through `CLAUDE.md`, which is a pointer at this file and nothing else.
 
+## Work in a worktree, not in this checkout
+
+**Cut a worktree and work in that, before making the first change.** The
+failure this guards against is two agents editing one checkout at the same
+time, and every part of it is quiet: each reads the other's half-finished
+edits as its own, a suite fails for a reason nothing in the branch explains,
+and a commit carries away work belonging to a change somebody else was in the
+middle of. Nothing announces any of it, and the repository root is where a
+person is most likely to be sitting.
+
+So fetch, and cut a branch from `origin/main` into a worktree under
+`.claude/worktrees/`, which is where this repository already keeps them and
+which `.gitignore` already covers. `EnterWorktree` does it, an `Agent` given
+`isolation: "worktree"` does it, and by hand it is
+`git worktree add .claude/worktrees/<name> -b <name> origin/main`.
+
+The suite runs in a worktree with no further setup, which is worth saying
+because there is no virtual environment in one. `tests/harness.py` puts its
+own root at the front of `sys.path` and of `PYTHONPATH`, and its own root is
+the worktree, so an interpreter from anywhere imports the package under test
+rather than whatever else is installed. It has to be an interpreter that has
+`lanname` and `netflume`, though: one without them fails every suite at import
+and says nothing about the code.
+
+Three kinds of work stay in the main checkout, and all three are work a
+worktree cannot see or cannot reach.
+
+- **Anything about uncommitted work there.** Committing what is already in the
+  tree, saying what has changed, or chasing a failure that only happens with
+  those edits in place. A worktree has none of it.
+- **Anything about the repository rather than the code**: pruning branches,
+  tagging a release, listing or removing worktrees. These act on one shared
+  git directory whichever checkout runs them, and a branch that is checked out
+  in a worktree cannot be deleted at all.
+- **Reading, when nothing is going to be written.** Answering a question or
+  reviewing what is there costs a worktree nothing and gains nothing, and the
+  checkout is likely to be the tree the question is about.
+
+And being told to, which needs no reason.
+
 ## What this is, and what it is not
 
 nettail is the console half of a NetFlow collector: it decides what a flow
