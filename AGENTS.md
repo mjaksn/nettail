@@ -70,6 +70,17 @@ test:
   dispatch and the startup reminder line. `QR_KEY` is `q` in the same way,
   and has one thing more to agree with: it is kept back from the browser, so
   it is named in `WEB_EXCLUDED` as well.
+
+  A key that turns part of the display on also wants a flag beside it, and
+  `test_key_help` holds that too: every key is either an act, which is
+  something to do rather than something to set, or a setting whose dest a
+  command line option moves as well. A key is for changing your mind and a
+  flag is for saying so at the start, and the flag is what lets a settings
+  file hold it at all, since a file says what the command line says and
+  nothing more. `--names` and `--macs` exist because the n and p keys were
+  the two that had no flag; the check is what stops the next one arriving the
+  same way. A new key is either added to that suite's list of acts or given
+  its flag, and until somebody says which, it fails.
 - **`EPHEMERAL_FLOOR` in `services.py`** repeats a number netflume writes
   inline and exports no constant for. `test_services` finds where netflume
   actually stops naming ports and pins ours to it.

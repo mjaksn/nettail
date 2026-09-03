@@ -220,8 +220,8 @@ different reason.
 
 ```
 usage: nettail [-h] [--version] [--config FILE | --save-config [FILE]]
-               [--bind BIND] [--port PORT] [--external-only] [--verbose]
-               [--json] [--colour WHEN] [--no-color]
+               [--bind BIND] [--port PORT] [--external-only] [--names]
+               [--macs] [--verbose] [--json] [--colour WHEN] [--no-color]
                [--header-every HEADER_EVERY] [--sticky-header] [--hide-status]
                [--no-supplemental-services] [--web] [--web-port PORT]
                [--web-bind ADDR] [--web-host NAME] [--web-token TOKEN]
@@ -242,6 +242,8 @@ usage: nettail [-h] [--version] [--config FILE | --save-config [FILE]]
 | `--bind BIND` | `0.0.0.0` | Address to bind the UDP socket to |
 | `--port PORT` | `2055` | UDP port to listen on |
 | `--external-only` | off | Only display flows where the source or destination is a public IP. Everything is still counted in the summary |
+| `--names` | off | Show a host by its name in place of its address, where a name is known. The `n` key turns it off and on while running |
+| `--macs` | off | Show hardware addresses on a line under each flow, on the exporters that send them. The `p` key turns it off and on while running |
 | `--verbose` | off | Print every decoded field on an indented line under each flow. Also surfaces parse errors |
 | `--json` | off | Emit one JSON object per flow on stdout instead of the table |
 | `--colour WHEN` | `auto` | When to use ANSI colour **on this terminal**: `auto`, `always` or `never`. Under `auto` a terminal gets colour and a redirected stream does not, and `NO_COLOR` in the environment turns it off. The browser view has its own switch, `--web-colour`, and is not decided by this one. `--color` is accepted too |
@@ -681,6 +683,11 @@ press. Turning it off releases the scroll region; turning it back on scrolls up
 only the two rows it is about to cover, so nothing already on screen is painted
 over. In a window with no room for both the bar and a pinned `--sticky-header`,
 the header keeps it and `b` says so rather than displacing what you asked for.
+
+`--names` starts a run with `n` already on, and `--macs` does the same for `p`.
+Every key that turns part of the display on has a flag beside it now, which
+also means both can be set in a settings file: a key is for changing your mind
+and a flag is for saying so at the start.
 
 `n` swaps the address for the name, rather than printing the name after it:
 `192.168.1.42:51234 (macbook-pro)` becomes `macbook-pro:51234`. A host that has

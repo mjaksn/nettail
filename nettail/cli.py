@@ -863,6 +863,20 @@ def build_parser():
     ap.add_argument("--port", type=int, default=2055, help="UDP port (default 2055)")
     ap.add_argument("--external-only", action="store_true",
                     help="only show flows involving a public IP")
+    # The n and p keys, asked for at the start rather than pressed. Every
+    # other key that turns part of the display on has a flag beside it, and
+    # these two did not, which left two settings that a config file could not
+    # say either, since a file can say what the command line can and nothing
+    # more. The dest is the name the key already used, so the keys, the
+    # display and a file are all talking about the same attribute.
+    ap.add_argument("--names", dest="named_hosts", action="store_true",
+                    help="show a host by its name in place of its address, "
+                         "where a name is known. The n key turns it off and "
+                         "on while running")
+    ap.add_argument("--macs", dest="show_macs", action="store_true",
+                    help="show hardware addresses on a line under each flow, "
+                         "on the exporters that send them. The p key turns it "
+                         "off and on while running")
     ap.add_argument("--verbose", action="store_true",
                     help="print every decoded field under each flow")
     ap.add_argument("--json", action="store_true",
@@ -959,10 +973,6 @@ def build_parser():
                      help="background lookup threads (default 4)")
     grp.add_argument("--resolve-timeout", type=float, default=1.0,
                      help="per-probe timeout in seconds for mDNS and NetBIOS")
-    # Toggled by the n and p keys rather than asked for on the command line,
-    # but they live on args like every other display setting, so that one
-    # place says what the display is currently doing.
-    ap.set_defaults(named_hosts=False, show_macs=False)
     return ap
 
 

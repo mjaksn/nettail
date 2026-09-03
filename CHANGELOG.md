@@ -58,6 +58,13 @@ parsed, and it is treated as public.
   settings, which is the useful case and also the one to be careful with, since
   a file there is one somebody else may have put there. **Which file was read
   is printed at startup, every time.**
+- **`--names` and `--macs`**, which start a run with what the `n` and `p` keys
+  turn on. Every other key that turns part of the display on had a flag beside
+  it and these two did not, so they were the two settings a command line could
+  not ask for and, since a file says what the command line says and nothing
+  more, the two a settings file could not hold either. They take the names the
+  keys already use, so `names`, `named-hosts` and `named_hosts` are one key in
+  a file, as `macs` and `show-macs` are.
 - **`--config FILE`** reads that file and searches for none.
 - **`--save-config [FILE]`** writes what this run would have used and exits
   without collecting anything, to the file named or to

@@ -57,6 +57,8 @@ SAMPLES = {
     "bind": "10.0.0.5",
     "port": "9995",
     "external_only": "true",
+    "named_hosts": "true",
+    "show_macs": "true",
     "verbose": "true",
     "json": "true",
     "colour": "never",
