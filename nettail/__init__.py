@@ -52,7 +52,7 @@ caller wanting the second asks ``qr.render`` for it. Nothing else in that
 module collides.
 """
 
-__version__ = "0.11.0"
+__version__ = "0.12.0"
 
 from .cli import (
     ask_yes_no,
