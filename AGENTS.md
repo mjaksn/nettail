@@ -272,8 +272,12 @@ month work.
 The size in the offer comes from that `Content-Length` rather than from a
 figure in the source. That is deliberate and worth keeping: the file grows
 every month, and a number written into the prose would be wrong within a year
-and wrong in the two places the prose lives. Where the server names no length
-the clause is left out rather than guessed at.
+and wrong in the two places the prose lives. The size in the README's sample
+run is a snapshot of one run and reads as one, which is what a transcript is
+for; it is not a second claim about the file. Where the server names no length
+the whole clause goes, destination included, because "about twice that" with
+no size before it is a sentence about nothing, and that is what `test_country`
+pins rather than merely the absence of a figure.
 
 Nothing in the suite draws on a terminal or opens a browser, so the manual
 check is the real acceptance step, as it is for the QR code. Run with

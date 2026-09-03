@@ -929,14 +929,15 @@ def offer_country_db(note, stream=None, stdin=None, fetch=None, probe=None):
                 "(%s). %s" % (trouble, country.find_online()))
 
     # What the server just said it weighs, rather than a figure written down
-    # here that would be right until the file grew. Left out entirely when it
-    # named none, since a guess is what this is avoiding.
-    weight = f" It is {human_bytes(size)} to fetch." if size else ""
+    # here that would be right until the file grew. The whole clause goes when
+    # it named none, the destination included: "about twice that" with no size
+    # in front of it is a sentence about nothing.
+    weight = (f" It is {human_bytes(size)} to fetch and about twice that "
+              f"unpacked, at {where}." if size else f" It is put at {where}.")
     print(f"{C.GREY}DB-IP publish a free one, IP to Country Lite, under the "
-          f"{country.DBIP_LICENCE} licence.{weight} It unpacks to about twice "
-          f"that at {where}. No address goes anywhere either way: a country "
-          f"is read out of the file on this machine, then and afterwards."
-          f"{C.RESET}", file=stream)
+          f"{country.DBIP_LICENCE} licence.{weight} No address goes anywhere "
+          f"either way: a country is read out of the file on this machine, "
+          f"then and afterwards.{C.RESET}", file=stream)
     if not ask_yes_no("fetch it now?", stream, stdin):
         return "no address will be marked. " + country.by_hand()
 

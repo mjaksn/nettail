@@ -1083,9 +1083,11 @@ class Typed(io.StringIO):
 class Probe:
     """A probe that logs rather than asking, and can be told to fail."""
 
-    def __init__(self, trouble=None, size=None):
+    def __init__(self, trouble=None, size=...):
         self.trouble = trouble
-        self.size = len(REAL) if size is None else size
+        # Ellipsis for "say nothing", so that None stays available and means
+        # what the real probe means by it: a server that named no length.
+        self.size = len(REAL) if size is ... else size
         self.asked = 0
 
     def __call__(self):
@@ -1206,9 +1208,12 @@ try:
     # simply says nothing about how big the file is, rather than guessing.
     country.close()
     fetch = Counted()
-    printed, note = offered("n\n", probe=Probe(size=0), fetch=fetch)
-    check("no size named is no size claimed", "to fetch." not in printed,
+    printed, note = offered("n\n", probe=Probe(size=None), fetch=fetch)
+    check("no size named is no size claimed", "to fetch and" not in printed,
           printed)
+    check("and nothing is said to be twice a number nobody was given",
+          "twice that" not in printed, printed)
+    check("but where it would go is still said", DEST in printed, printed)
     check("and the offer is put all the same", "[y/N]" in printed, printed)
 
     country.close()

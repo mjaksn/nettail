@@ -1551,7 +1551,7 @@ no country database found. Looked in /etc/nettail, /usr/share/GeoIP,
 /var/lib/GeoIP, /usr/local/share/GeoIP, /home/you/.local/share/nettail.
 asking db-ip.com whether there is one to fetch
 DB-IP publish a free one, IP to Country Lite, under the Creative Commons
-Attribution 4.0 licence. It is 3.9M to fetch. It unpacks to about twice that
+Attribution 4.0 licence. It is 3.9M to fetch and about twice that unpacked,
 at /home/you/.local/share/nettail/country.mmdb. No address goes anywhere
 either way: a country is read out of the file on this machine, then and
 afterwards.
