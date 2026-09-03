@@ -37,6 +37,7 @@ import hashlib
 import io
 import ipaddress
 import os
+import shutil
 import socket
 import struct
 import sys
@@ -1164,5 +1165,8 @@ for path in HELD:
         os.unlink(path)
     except OSError:
         pass
+# The fetch directory has files under it that the loop above cannot take, so
+# it goes whole and last.
+shutil.rmtree(FETCH_DIR, ignore_errors=True)
 
 finish("country")

@@ -910,9 +910,9 @@ def offer_country_db(note, stream=None, stdin=None, fetch=None):
           f"{country.looked_in()}.{C.RESET}", file=stream)
     print(f"{C.GREY}DB-IP publish a free one, IP to Country Lite, under the "
           f"{country.DBIP_LICENCE} licence. Fetching it takes about four "
-          f"megabytes from db-ip.com and puts it at {where}. No address goes "
-          f"anywhere either way: a country is read out of the file on this "
-          f"machine, then and afterwards.{C.RESET}", file=stream)
+          f"megabytes from db-ip.com and unpacks to about eight at {where}. "
+          f"No address goes anywhere either way: a country is read out of the "
+          f"file on this machine, then and afterwards.{C.RESET}", file=stream)
     if not ask_yes_no("fetch it now?", stream, stdin):
         return "no address will be marked. " + country.by_hand()
 
