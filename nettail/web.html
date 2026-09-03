@@ -406,7 +406,8 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
     <span class="caret" aria-hidden="true">&#9656;</span><span>Keys</span>
   </button>
   <span class="spacer"></span>
-  <label class="follow" id="followBox" hidden>
+  <label class="follow" id="followBox" hidden
+         title="Whether new flows pull the view down. The down arrow toggles it.">
     <input type="checkbox" id="follow" checked>
     <span>Follow</span>
   </label>
@@ -1221,8 +1222,36 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
     // in it. Escape is not forwarded from here in any case: it is in the
     // collector's WEB_EXCLUDED, and it is what closes a dialog natively.
     if (detail.open) { return; }
-    if (readonly) { return; }
     if (event.ctrlKey || event.metaKey || event.altKey) { return; }
+    // The down arrow works the Follow box, and is answered here rather than
+    // sent to the collector. Following the tail is this tab's own business:
+    // the collector has no name for it, no state holding it and nothing to
+    // toggle, and two browsers watching one run scroll independently. That is
+    // also why it is above the readonly guard rather than below it. Nothing
+    // about it leaves the page, so a collector serving the display only has
+    // nothing to refuse, and a reader watching a --web-readonly session is
+    // the reader most likely to want to stop the view moving while they read.
+    //
+    // It is above the input guard for a duller reason: clicking the box
+    // leaves the focus on it, so the arrow pressed straight afterwards, which
+    // is the natural way to change your mind, would otherwise do nothing.
+    //
+    // preventDefault is load-bearing here and not tidiness. Where a browser
+    // answers the down arrow by scrolling, that fires the scroll handler at
+    // the foot of this file, which sets the box from the scroll position, and
+    // at the tail it would put back the tick this keypress has just taken off.
+    // Whether it does scroll is not ours to know: the body is overflow hidden
+    // and the flows scroll inside main, so it depends on what the browser has
+    // decided to focus. A guard against the case, rather than a fix for it.
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      // click() rather than assigning checked, which fires no change event.
+      // The handler at the foot of this file stays the one place that decides
+      // what turning Follow back on does.
+      followBox.click();
+      return;
+    }
+    if (readonly) { return; }
     var target = event.target;
     if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) {
       return;

@@ -293,6 +293,30 @@ try:
     check("the cadence comes from the collector rather than the page",
           "detail_refresh" in body)
 
+    # The down arrow works the Follow box, and is the one key the page answers
+    # by itself: following the tail is the tab's business and the collector has
+    # no name for it, so it is in neither KEYS nor the greeting and nothing on
+    # the control route would notice it going. Greps again, and three of them,
+    # because each half of this is quiet when it breaks. Answered below the
+    # readonly guard it would stop working on the display-only collector whose
+    # reader most wants it; without preventDefault the browser scrolls, the
+    # scroll handler reads the position back into the box, and at the tail that
+    # puts the tick straight back on.
+    opens = body.find('document.addEventListener("keydown"')
+    ends = body.find("// ---- the stream", opens)
+    handler = body[opens:ends]
+    arrow = handler.find('event.key === "ArrowDown"')
+    check("the down arrow is answered by the page", opens != -1 and arrow != -1)
+    check("and by working the Follow box rather than by sending a key",
+          "followBox.click()" in handler)
+    check("and it takes the browser's own scrolling out of the way",
+          "event.preventDefault()" in handler[arrow:])
+    check("it is answered before the guard that keeps keys off a "
+          "display-only collector",
+          -1 < arrow < handler.find("if (readonly)"))
+    check("and before the one that hands a keystroke to a focused box",
+          arrow < handler.find('tagName === "INPUT"'))
+
     # -- the greeting -----------------------------------------------------
 
     bus.set_hello({

@@ -544,6 +544,32 @@ Eight things about it are easy to break and quiet when broken.
   page as a QR code, for a terminal, on the terminal, and a browser showing
   that page has the address in its own bar. Allowing it would give a browser
   a key that appears to work and visibly does nothing.
+- **One key goes the other way, and it is the page's own.** The down arrow
+  works the Follow box, and `web.html` answers it without telling anybody.
+  That is not the page hardcoding something the terminal names: following the
+  tail is a fact about one tab, the collector holds no state for it and has no
+  name for it, and two windows on one run scroll independently. So it is in
+  neither `KEYS` nor the greeting, gets no button, and is in neither listing,
+  and nothing about the parity `test_key_help` holds is touched by it. The
+  terminal has no equivalent to offer: a console cannot hold its view still
+  without holding the flows back, which is what `space` already does, and
+  `Keyboard.poll` swallows the arrow sequences on both platforms so that a
+  cursor key is never read as the escape that closes the program. Three things
+  about where it sits in the keydown handler are easy to undo and quiet when
+  undone, and `test_web_server` greps for all three: it is answered above the
+  readonly guard, because nothing about it reaches the collector and the
+  reader of a display-only session is the one most likely to want it; above
+  the guard that leaves a keystroke to a focused input, because clicking the
+  box leaves the focus on it and the arrow pressed straight afterwards is the
+  natural way to change your mind; and with `preventDefault`, because the
+  browser's own answer to the arrow is to scroll, the scroll handler reads the
+  position back into the box, and at the tail that puts the tick straight back
+  on. That is a guard rather than an observed scroll: `body` is
+  `overflow: hidden` and the flows scroll inside `main`, so whether the arrow
+  scrolls anything at all depends on what the browser has decided to focus.
+  It works the box with `click()` rather than by assigning `checked`,
+  which fires no `change` event, so the one handler that decides what turning
+  Follow on does stays the one handler.
 - **The banner is rendered twice, and only for that.** The line pointing at
   the `q` key is the one thing the two readers are not shown alike, for the
   reason the `?` listing is: offering a browser a key the control route then
