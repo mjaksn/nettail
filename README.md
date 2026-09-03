@@ -226,7 +226,7 @@ usage: nettail [-h] [--version] [--bind BIND] [--port PORT] [--external-only]
                [--web-bind ADDR] [--web-host NAME] [--web-token TOKEN]
                [--web-colour WHEN] [--web-readonly] [--size-scale-max BYTES |
                --size-scale-dynamic] [--size-scale-window FLOWS] [--country]
-               [--country-db FILE] [--country-style HOW]
+               [--country-db FILE] [--country-style {auto,flag,code}]
                [--resolve {off,dns,all}] [--hosts FILE] [--resolve-public]
                [--fqdn] [--resolve-workers RESOLVE_WORKERS]
                [--resolve-timeout RESOLVE_TIMEOUT]
@@ -305,7 +305,7 @@ See [Size colour scale](#size-colour-scale) for what the colours mean.
 | --- | --- | --- |
 | `--country` | off | Mark every public address with the country it is in. Implied by `--country-db` |
 | `--country-db FILE` | searched | The database to read. Without it, the first of `/etc/nettail/country.mmdb`, `/usr/share/GeoIP/GeoLite2-Country.mmdb` and `/var/lib/GeoIP/GeoLite2-Country.mmdb` that exists, and a few more besides |
-| `--country-style HOW` | `auto` | How **this terminal** is shown a country: `flag` for the emoji, `code` for the two letters, `auto` for the letters wherever a flag is known not to be drawn. The browser view is always shown the flag and this does not decide for it |
+| `--country-style {auto,flag,code}` | `auto` | How **this terminal** is shown a country: `flag` for the emoji, `code` for the two letters, `auto` for the letters wherever a flag is known not to be drawn. The browser view is always shown the flag and this does not decide for it |
 
 See [Country marking](#country-marking) for where the database comes from and
 what is marked.

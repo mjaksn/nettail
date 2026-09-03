@@ -965,8 +965,14 @@ def build_parser():
                                   "finds none says where it looked"
                                   % (country.search_paths()
                                      or country.UNIX_PATHS)[0])
+    # The choices are shown rather than hidden behind a metavar, which is the
+    # opposite of what --colour does two groups up. WHEN is borrowed from every
+    # GNU tool that has a --color, and a reader who has never seen this program
+    # can still guess what goes after it. HOW is this program's own word and
+    # nothing follows from it: flag and code are not a list anybody would
+    # arrive at unaided. --resolve is spelled out for the same reason.
     country_grp.add_argument("--country-style", choices=("auto", "flag", "code"),
-                             default="auto", metavar="HOW",
+                             default="auto",
                              help="how this terminal is shown a country: flag "
                                   "for the emoji, code for the two letters, "
                                   "auto (default) for the letters where a flag "
