@@ -713,6 +713,9 @@ check("and on again",
       "marking external addresses" in controls.handle("g"))
 resolver.shutdown()
 
+# The mapping has to go before the files can, on Windows at least, where an
+# open mapping is a file that cannot be deleted.
+country.close()
 for path in HELD:
     try:
         os.unlink(path)

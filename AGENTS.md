@@ -147,7 +147,10 @@ Five things about it are easy to break and quiet when broken.
   that backwards and the tree still walks perfectly and answers with somebody
   else's country. `test_country` builds the same database at all three widths
   and asks it the same questions, which is the only thing that catches it,
-  since 24 and 32 have no nibble to get wrong.
+  since 24 and 32 have no nibble to get wrong. It is the one width no real
+  file has confirmed here: the free country databases are 24 bit, so what the
+  packing rests on is the specification and the suite's own three way
+  agreement.
 - **An IPv4 address in an IPv6 database is at ::/96**, which is ninety six
   zero bits before the address itself. `_bits` arranges that by reading the
   same number as 128 bits wide rather than 32, which puts the zeros there
@@ -160,6 +163,12 @@ Five things about it are easy to break and quiet when broken.
   on `args`, where the other display switches live, because `display`, `cli`
   and `statusbar` all ask and share no arguments. It is what `services` does
   and the reasoning is written where the state is.
+
+Nothing in the suite draws on a terminal or opens a browser, so the manual
+check is the real acceptance step, as it is for the QR code. Run with
+`--country` at a real terminal and confirm the columns still line up with a
+flag in them, and open `--web` beside a `--country-style code` terminal to see
+the two views differ in the one way they are meant to.
 
 `terminal_flags` is a guess and may only choose prose, in the sense
 `in_container` may: there is no query for "can you draw a flag", so what it

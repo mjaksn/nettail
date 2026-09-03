@@ -959,11 +959,11 @@ def build_parser():
                              help="mark public addresses with their country. "
                                   "Implied by --country-db")
     country_grp.add_argument("--country-db", default=None, metavar="FILE",
-                             help="the database to read. Without it the usual "
-                                  "places are searched, %s first and the rest "
-                                  "of /usr/share/GeoIP and /var/lib/GeoIP "
-                                  "after, and a run that finds none says where "
-                                  "it looked" % country.SEARCH_PATHS[0])
+                             help="the database to read. Without it the "
+                                  "usual places are searched, %s first and the "
+                                  "GeoIP directories after, and a run that "
+                                  "finds none says where it looked"
+                                  % country.SEARCH_PATHS[0])
     country_grp.add_argument("--country-style", choices=("auto", "flag", "code"),
                              default="auto", metavar="HOW",
                              help="how this terminal is shown a country: flag "

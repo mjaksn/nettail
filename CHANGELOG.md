@@ -41,8 +41,9 @@ parsed, and it is treated as public.
   is the country's two letters written as regional indicators and a terminal
   draws a flag only if its font has one. `auto`, the default, spells the two
   letters out wherever a flag is known not to be drawn: Windows, macOS
-  Terminal, the Linux console, a stream that is not a terminal, and an encoding
-  that cannot carry the characters. `flag` and `code` settle it without
+  Terminal, the Linux console, a terminal with no TERM to speak of, a stream
+  that is not a terminal at all, and an encoding that cannot carry the
+  characters. `flag` and `code` settle it without
   guessing. The browser view is always shown the flag and this does not decide
   for it, which is arranged the way colour is: painted once where the row is
   built, and spelled back out at the terminal that cannot draw it.

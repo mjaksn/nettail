@@ -10,8 +10,8 @@ flow and a private address has no far end to be in.
 A database is a MaxMind format file, `.mmdb`. That is what both free country
 databases are distributed as, DB-IP's lite build and MaxMind's GeoLite2, and
 it is what a distribution's `geoipupdate` writes into `/usr/share/GeoIP`, so
-one machine in three already has a usable file on it. A City database answers
-the country question too and is read the same way.
+a machine that already syncs one needs nothing fetched. A City database
+answers the country question too and is read the same way.
 
 Reading one is about two hundred lines against a format that has not changed
 since 2015, and the case for writing them rather than depending on
@@ -145,11 +145,12 @@ def terminal_flags(choice, stream, env=None, platform=None):
 
     Windows has no flag in any of its shipped fonts, by a deliberate decision
     that has held for a decade, so its consoles are answered no whatever they
-    are. macOS Terminal draws the letters rather than the flag and names
-    itself in the environment, which is as close to an answer as this gets.
-    The Linux console and a dumb terminal have no emoji at all. A stream that
-    is not a terminal is not one this program can reason about, and letters
-    survive a file, a pipe and a paste into anything.
+    are. macOS Terminal does not draw one dependably, and is the one terminal
+    that says who it is in the environment, so it is taken as unable rather
+    than guessed about. The Linux console and a dumb terminal have no emoji at
+    all. A stream that is not a terminal is not one this program can reason
+    about, and letters survive a file, a pipe and a paste into anything. A
+    terminal with no TERM to speak of is in the same position.
 
     An encoding that cannot carry the characters settles it before any of
     that, and is a fact rather than a guess. `main` asks for UTF-8 on both

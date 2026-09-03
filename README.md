@@ -1556,11 +1556,11 @@ known not to be drawn and the flag everywhere else:
 ```
 
 Known not to be drawn means Windows, which ships no flag in any of its fonts;
-macOS Terminal, which draws the letters itself and says who it is in the
-environment; the Linux console and `TERM=dumb`; a stream that is not a terminal
-at all, since letters survive a file, a pipe and a paste into anything; and a
-stream whose encoding cannot carry the characters. Everything else is given the
-flag. `--country-style flag` and `--country-style code` settle it either way
+macOS Terminal, which does not draw one dependably and is the one terminal that
+says who it is in the environment; the Linux console, `TERM=dumb`, and no `TERM`
+at all; a stream that is not a terminal, since letters survive a file, a pipe
+and a paste into anything; and a stream whose encoding cannot carry the
+characters. Everything else is given the flag. `--country-style flag` and `--country-style code` settle it either way
 without guessing.
 
 Both forms are two characters wide, which is why the columns line up the same
