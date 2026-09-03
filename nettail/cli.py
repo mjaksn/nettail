@@ -977,8 +977,8 @@ def build_parser():
                                   "for the emoji, code for the two letters, "
                                   "auto (default) for the letters where a flag "
                                   "is known not to be drawn. The browser view "
-                                  "is always shown the flag and this does not "
-                                  "decide for it")
+                                  "is sent the flag whatever this says, and "
+                                  "draws it or not by its own fonts")
 
     grp = ap.add_argument_group("hostname resolution")
     grp.add_argument("--resolve", choices=Resolver.MODES, default="all",
@@ -1109,8 +1109,8 @@ def main():
     if args.country or args.country_db:
         # Decided from stdout, as the colour question is, because there is one
         # terminal and that is where the display goes. The browser is never
-        # asked: it has the font, and it is shown the flag whatever this
-        # terminal can manage.
+        # asked: what it does with a flag is its own fonts' business, and it
+        # is sent one whatever this terminal can manage.
         if not country.terminal_flags(args.country_style, sys.stdout):
             if not behind(sys.stderr, country.CodeStream):
                 sys.stderr = country.CodeStream(sys.stderr)
@@ -1516,8 +1516,8 @@ def main():
                 "outbound": human_bytes(snap["outbound"]),
                 "resolve": MODE_DESC[snap["resolve"]],
                 # The flag, always, whatever this terminal was judged able
-                # to draw: nothing on this route passes a terminal, and a
-                # browser has the font.
+                # to draw: nothing on this route passes a terminal, so there
+                # is nothing here to spell it out for.
                 "talker": (f"{talker[0]}{country.mark(talker[0])}"
                            + (f" ({talker[1]})" if talker[1] else "")
                            + f"  {human_bytes(talker[2])}") if talker else "",

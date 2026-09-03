@@ -697,6 +697,29 @@ check("the cells a browser is handed carry the flag itself",
 check("and the hostname beside it, which is the same cell",
       any("github" in cell for cell in cells), repr(cells))
 
+# A browser draws a flag with whatever font it can find, and no monospace font
+# has one, so the page names the emoji families that can behind its own stack.
+# Dropping them is invisible on a Mac and on Linux and takes every flag away
+# from a Windows browser that had one, which is the sort of quiet loss a grep
+# is for. Segoe UI Emoji is what Windows always has and is the one of them that
+# draws the two letters instead, so anything installed beside it has to come
+# first.
+with io.open(os.path.join(ROOT, "nettail", "web.html"), encoding="utf-8") as h:
+    PAGE = h.read()
+
+# The declaration itself, not the page, since the comment above it names the
+# same fonts in the order it explains them rather than the order they are in.
+STACK = PAGE[PAGE.index("font: 13px"):]
+STACK = STACK[:STACK.index(";")]
+
+for family in ("Twemoji Mozilla", "Noto Color Emoji", "Apple Color Emoji",
+               "Segoe UI Emoji"):
+    check("the page names %s among its fonts" % family, family in STACK, STACK)
+check("and names the one that cannot draw a flag last of the four",
+      STACK.index("Segoe UI Emoji") > STACK.index("Noto Color Emoji"), STACK)
+check("with the whole lot behind the monospace fonts",
+      STACK.index("Twemoji Mozilla") > STACK.index("DejaVu Sans Mono"), STACK)
+
 # The status bar's top talker is a public address by definition, and is the one
 # field on the bar that can carry a country.
 bar = plain(wire_line({

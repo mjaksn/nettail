@@ -137,6 +137,15 @@ Five things about it are easy to break and quiet when broken.
   not available to it for the reasons written on `tee`. A style threaded
   through `row_cells`, the summary and the bar would also be a fourth thing
   for the two views to disagree about.
+- **The browser is sent a flag; whether it draws one is its own affair.**
+  Nothing on the feed's route passes a terminal, so nothing spells it out
+  there, and that is the whole of what this program controls. Windows has no
+  flag glyph anywhere on it, so Chrome and Edge draw the two letters in boxes
+  while Firefox, which ships Twemoji Mozilla, draws a flag. `web.html` puts
+  the emoji families that can draw one ahead of Segoe UI Emoji, which cannot,
+  and `test_country` greps the page for them: dropping them is invisible
+  everywhere except the platform it matters on. Prose that says the browser is
+  *shown* a flag is wrong and has been corrected once already.
 - **Both forms are two characters wide**, on screen and to `len`, and every
   column in the program measures its contents with `len`. That is what lets
   `endpoint`, `with_names` and the status bar go on padding as they always

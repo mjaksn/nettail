@@ -47,9 +47,12 @@ ettail` on Windows, which has no
   Terminal, the Linux console, a terminal with no TERM to speak of, a stream
   that is not a terminal at all, and an encoding that cannot carry the
   characters. `flag` and `code` settle it without
-  guessing. The browser view is always shown the flag and this does not decide
-  for it, which is arranged the way colour is: painted once where the row is
-  built, and spelled back out at the terminal that cannot draw it.
+  guessing. The browser is sent the flag whatever this says, which is arranged
+  the way colour is: painted once where the row is built, and spelled back out
+  at the terminal that cannot draw it. Whether a browser then draws a flag or
+  the two boxed letters is its own fonts' business, Windows having no flag
+  glyph on it at all, so the page names the fonts that can before the one that
+  cannot.
 - **The `g` key** turns the marking off and on while the collector runs, and
   says so rather than appearing to work when there is no database to mark
   with.

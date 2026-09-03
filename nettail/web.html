@@ -42,8 +42,16 @@ body {
   margin: 0;
   background: var(--ground);
   color: var(--ink);
+  /* The emoji families are on the end for one character, the country flag,
+     which no monospace font has. A browser walks this list per character, so
+     everything else still comes from the first monospace font that is here
+     and only the flag falls through. Segoe UI Emoji is last on purpose: it is
+     what Windows always has and the one of the four that draws a flag as two
+     boxed letters rather than as a flag, so anything installed beside it
+     wins. */
   font: 13px/1.5 ui-monospace, "SFMono-Regular", "Cascadia Mono", Menlo,
-        Consolas, "DejaVu Sans Mono", monospace;
+        Consolas, "DejaVu Sans Mono", "Twemoji Mozilla", "Noto Color Emoji",
+        "Apple Color Emoji", "Segoe UI Emoji", monospace;
   display: flex;
   flex-direction: column;
   overflow: hidden;

@@ -305,7 +305,7 @@ See [Size colour scale](#size-colour-scale) for what the colours mean.
 | --- | --- | --- |
 | `--country` | off | Mark every public address with the country it is in. Implied by `--country-db` |
 | `--country-db FILE` | searched | The database to read. Without it, the first of `/etc/nettail/country.mmdb`, `/usr/share/GeoIP/GeoLite2-Country.mmdb` and `/var/lib/GeoIP/GeoLite2-Country.mmdb` that exists, and a few more besides |
-| `--country-style {auto,flag,code}` | `auto` | How **this terminal** is shown a country: `flag` for the emoji, `code` for the two letters, `auto` for the letters wherever a flag is known not to be drawn. The browser view is always shown the flag and this does not decide for it |
+| `--country-style {auto,flag,code}` | `auto` | How **this terminal** is shown a country: `flag` for the emoji, `code` for the two letters, `auto` for the letters wherever a flag is known not to be drawn. The browser is sent the flag whatever this says, and draws it or not by its own fonts |
 
 See [Country marking](#country-marking) for where the database comes from and
 what is marked.
@@ -1575,11 +1575,22 @@ without guessing.
 Both forms are two characters wide, which is why the columns line up the same
 under either.
 
-The browser view is always shown the flag, whatever this terminal was judged
-able to draw, and `--country-style` does not decide for it. The two are shown
-the same characters everywhere else, so this is arranged the way colour is: the
-flag is painted once where the row is built, and spelled back out as two
-letters on the way to a terminal that cannot draw it.
+The browser is always sent the flag, whatever this terminal was judged able to
+draw, and `--country-style` does not decide for it. The two are shown the same
+characters everywhere else, so this is arranged the way colour is: the flag is
+painted once where the row is built, and spelled back out as two letters on the
+way to a terminal that cannot draw it.
+
+Sent is not the same as drawn, and on Windows it is worth knowing the
+difference. The page receives the flag characters, and then the browser draws
+them with whatever font it can find: Firefox ships Twemoji Mozilla and shows
+real flags, and so does anything on a machine with Noto Color Emoji installed,
+while Chrome and Edge fall back to Segoe UI Emoji, which draws the country's
+two letters in a pair of boxes. That is Windows having no flag glyph anywhere
+on it rather than anything this program can settle, which is the same fact
+behind `auto` choosing the letters for a Windows terminal. The page names the
+fonts that can do it ahead of the one that cannot, so installing one is the
+whole of the fix.
 
 ### What it is worth
 
