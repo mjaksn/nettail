@@ -102,9 +102,9 @@ parsed, and it is treated as public.
 
 ## 0.10.0 - 2026-09-02
 
-Never released on its own. 0.11.0 landed before a tag was cut and carries
-everything below, so there is no `v0.10.0` for this heading to link at, and
-it is written plainly for that reason.
+Never released on its own. 0.11.0 landed before a tag was cut and
+carries everything below, so there is no `v0.10.0` for this heading to
+link at, and it is written plainly for that reason.
 
 ### Added
 
