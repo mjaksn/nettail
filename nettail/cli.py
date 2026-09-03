@@ -999,8 +999,8 @@ def build_parser():
     conf.add_argument("--config", metavar="FILE", default=None,
                       help="read settings from this file instead of looking "
                            "for one. Anything below can be set in it, under "
-                           "the same name without its dashes, and anything "
-                           "typed here still wins")
+                           "the same name without its leading dashes, and "
+                           "anything typed here still wins")
     conf.add_argument("--save-config", nargs="?", metavar="FILE",
                       const=config.default_save_path(), default=None,
                       help="write what this run would have used to FILE, or "
@@ -1038,7 +1038,8 @@ def build_parser():
     ap.add_argument("--no-color", action="store_true",
                     help="the same as --colour never")
     ap.add_argument("--header-every", type=int, default=40,
-                    help="reprint the column header every N lines (0 to disable)")
+                    help="reprint the column header every N lines "
+                         "(default 40, 0 to disable)")
     ap.add_argument("--sticky-header", action="store_true",
                     help="pin the column header to the top of the window "
                          "(needs a terminal; costs scrollback)")
@@ -1154,7 +1155,8 @@ def build_parser():
     grp.add_argument("--resolve-workers", type=int, default=4,
                      help="background lookup threads (default 4)")
     grp.add_argument("--resolve-timeout", type=float, default=1.0,
-                     help="per-probe timeout in seconds for mDNS and NetBIOS")
+                     help="per-probe timeout in seconds for mDNS and NetBIOS "
+                          "(default 1.0)")
     return ap
 
 

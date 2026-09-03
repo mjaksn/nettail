@@ -116,10 +116,12 @@ def search_paths(platform=None, env=None, home=None, cwd=None):
     from two files at once is a setting nobody can find by looking at either.
 
     The user's places differ by platform and are the ones that platform's own
-    programs use: `%APPDATA%` on Windows, `~/Library/Application Support` on
-    macOS, `$XDG_CONFIG_HOME` or `~/.config` elsewhere. The machine's are
-    `%PROGRAMDATA%` and `/etc`, and `/etc/nettail` is where the installer
-    already keeps this program's other machine-wide file.
+    programs use: `%APPDATA%` and `%LOCALAPPDATA%` on Windows,
+    `~/Library/Application Support` on macOS, and `$XDG_CONFIG_HOME` or
+    `~/.config` everywhere that is not Windows, macOS included. The machine's
+    are `%PROGRAMDATA%`, `/usr/local/etc` on macOS, and `/etc`, and
+    `/etc/nettail` is where the installer already keeps this program's other
+    machine-wide file.
 
     The platform, the environment, the home directory and the working
     directory are all arguments with the real ones as their default, which is
@@ -190,11 +192,13 @@ def settable(parser):
 
 
 def option_name(action):
-    """What an option is called in a file: its own flag, without the dashes.
+    """What an option is called in a file: its flag, less the leading dashes.
 
-    The first long option, so `--colour` rather than its `--color` alias and
-    `--web-port` rather than anything invented here. Reading accepts
-    underscores too, since half the world will type the dest instead.
+    Only the leading ones, so `--web-port` becomes `web-port` and keeps the
+    hyphen in the middle. The first long option, so `--colour` rather than its
+    `--color` alias and `--web-port` rather than anything invented here.
+    Reading accepts underscores too, since half the world will type the dest
+    instead.
     """
     for flag in action.option_strings:
         if flag.startswith("--"):
@@ -552,9 +556,10 @@ def render(parser, args, baseline=None, keep=()):
     out.write("# nettail settings.\n#\n")
     for line in _wrapped(
             "Anything this program takes on the command line it takes here, "
-            "under the same name without its dashes. What is typed on the "
-            "command line wins over what is written here. Lines that are "
-            "commented out are showing the default rather than setting it."):
+            "under the same name without its leading dashes. What is typed "
+            "on the command line wins over what is written here. Lines that "
+            "are commented out are showing the default rather than setting "
+            "it."):
         out.write("# %s\n" % line)
     out.write("#\n")
     # The working directory is named as such rather than as whatever it was

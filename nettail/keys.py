@@ -22,13 +22,14 @@ from .values import human_bytes
 
 PAUSE_BUFFER = 2000      # flows held while paused before the oldest are dropped
 
-# The key that lists the others. Named once, because three things have to agree
-# about it: the table below, the dispatch that answers it, and the reminder
-# line that sends the reader to it.
+# The key that lists the others. Named once, because four things have to agree
+# about it: the table below, the dispatch that answers it, the reminder line
+# that sends the reader to it, and `WEB_UNLISTED`, which keeps its button off
+# a browser while leaving the key pressable.
 HELP_KEY = "?"
 
 # The key that draws the web interface URL as a QR code. Named once for the
-# same reason and for one more thing that has to agree: it is kept back from
+# same reason, and its fourth place is a different one: it is kept back from
 # the browser, so it appears in the table below, in the dispatch, in
 # WEB_EXCLUDED, and in the line under the banner that points a reader at it.
 QR_KEY = "q"
@@ -111,9 +112,9 @@ def web_buttons():
 
 
 # The one line printed under the startup banner, which is a pointer and not a
-# list. Naming all sixteen ran to two hundred characters and wrapped on any
-# ordinary terminal, so a banner already three lines long arrived four or five;
-# and it scrolled away with the banner regardless, leaving the reader who
+# list. Naming every one of them ran to two hundred characters and wrapped on
+# any ordinary terminal, so a banner already three lines long arrived four or
+# five; and it scrolled away with the banner regardless, leaving the reader who
 # wanted it an hour later no better off for its having been thorough. The
 # listing answers that reader properly and on demand, so this only has to say
 # where it is.
