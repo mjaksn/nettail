@@ -1101,6 +1101,10 @@ keypress had just taken off would go straight back on. Every other way of
 moving the view is untouched, and moving it off the bottom clears the box as it
 always did.
 
+It does nothing while a flow dialog is open. The dialog is what you are looking
+at, the arrow scrolls what is in it, and Follow is not worth working from
+behind one.
+
 The terminal has no equivalent, which is why the key is in neither the drawer
 nor the `?` listing. A console cannot hold its view still without holding the
 flows back, and holding the flows back is what `space` already does. The key
@@ -2606,7 +2610,7 @@ python tests/run.py tally keys    # only suites whose name contains either
 python tests/run.py -v            # print every check, not only failures
 ```
 
-2210 checks across 39 suites, in about a minute. No test dependencies and
+2216 checks across 39 suites, in about a minute. No test dependencies and
 no test runner to learn: the suites need only netflume and lanname, the same as
 the collector.
 

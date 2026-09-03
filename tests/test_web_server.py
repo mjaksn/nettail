@@ -321,6 +321,11 @@ try:
           -1 < arrow < handler.find("if (readonly)"))
     check("and before the one that hands a keystroke to a focused box",
           arrow < handler.find('tagName === "INPUT"'))
+    # The dialog guard is the one thing above it. A dialog owns the reader's
+    # keystrokes and the arrow scrolls what is in it, so Follow is not worked
+    # from behind one.
+    check("but below the guard that leaves everything to an open dialog",
+          -1 < handler.find("if (detail.open)") < arrow)
 
     # -- the greeting -----------------------------------------------------
 

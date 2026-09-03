@@ -488,7 +488,7 @@ datagrams: a key goes to the same `Controls.handle` the terminal uses, and a
 question about a flow goes to `detail.report`, which is written for being
 called there. See "Asking about a flow" below.
 
-Eight things about it are easy to break and quiet when broken.
+Nine things about it are easy to break and quiet when broken.
 
 - **Nothing on an HTTP thread may print.** `sticky.py` and `statusbar.py` are
   managing a scroll region, and a line written from another thread lands inside
@@ -569,7 +569,11 @@ Eight things about it are easy to break and quiet when broken.
   scrolls anything at all depends on what the browser has decided to focus.
   It works the box with `click()` rather than by assigning `checked`,
   which fires no `change` event, so the one handler that decides what turning
-  Follow on does stays the one handler.
+  Follow on does stays the one handler. It is answered below one guard rather
+  than above it: nothing is forwarded at all while a flow dialog is open,
+  because the dialog is what the reader is looking at and the arrow scrolls
+  what is in it. `test_web_server` greps for that order too, since flipping it
+  would toggle Follow behind a dialog and nothing would complain.
 - **The banner is rendered twice, and only for that.** The line pointing at
   the `q` key is the one thing the two readers are not shown alike, for the
   reason the `?` listing is: offering a browser a key the control route then
