@@ -24,7 +24,7 @@ from netflume import (
     flow_timestamp,
 )
 
-from . import __version__, services
+from . import __version__, config, services
 from .colour import C, PlainStream, colour_on, strip_colour
 from .display import (
     COLUMNS,
@@ -843,6 +843,21 @@ def build_parser():
     ap.add_argument("--version", action="version",
                     version=f"nettail {__version__}",
                     help="print the version and exit")
+    # A file's settings and a way to write one. Mutually exclusive because
+    # they are opposite directions through the same door: one says which file
+    # to read, the other where to write what this run would have used, and a
+    # command line asking for both is a command line that has not decided.
+    conf = ap.add_mutually_exclusive_group()
+    conf.add_argument("--config", metavar="FILE", default=None,
+                      help="read settings from this file instead of looking "
+                           "for one. Anything below can be set in it, under "
+                           "the same name without its dashes, and anything "
+                           "typed here still wins")
+    conf.add_argument("--save-config", nargs="?", metavar="FILE",
+                      const=config.default_save_path(), default=None,
+                      help="write what this run would have used to FILE, or "
+                           "to %s, and exit without collecting anything"
+                           % config.default_save_path())
     ap.add_argument("--bind", default="0.0.0.0",
                     help="address to bind (default 0.0.0.0)")
     ap.add_argument("--port", type=int, default=2055, help="UDP port (default 2055)")
@@ -953,6 +968,22 @@ def build_parser():
 
 def main():
     ap = build_parser()
+
+    # A config file, read before the command line is parsed rather than merged
+    # after it, because that ordering is what makes the command line win: what
+    # a file says becomes the parser's default, and anything typed overrides a
+    # default. Merged afterwards it could only have been the other way round,
+    # since by then argparse cannot tell a value that was typed from a default
+    # that happens to equal it.
+    #
+    # The baseline is what the options held before any of that, and is kept
+    # for --save-config: once a file's settings are the parser's defaults, a
+    # value that came from the file is indistinguishable from one nobody ever
+    # chose, and saving would write the file back out without them.
+    baseline = config.defaults(ap)
+    settings, config_path, config_notes = config.settings(ap)
+    if settings:
+        ap.set_defaults(**settings)
     args = ap.parse_args()
 
     # The token, when the flag did not carry it. This is how the installed
@@ -1044,6 +1075,27 @@ def main():
             # had a colour code in it, so there is nothing to take out and no
             # reason to put a substitution in front of every flow.
             sys.stdout = PlainStream(sys.stdout)
+
+    # Which file the settings came from, said out loud every time. A config
+    # file in the working directory is a file somebody else may have put
+    # there, and a run that quietly took its options from one would be worse
+    # than not having the feature at all. Printed here rather than where it
+    # was read, because the colour above has only just been settled and this
+    # is the first line anything prints.
+    if config_path is not None:
+        print(f"{C.GREY}settings from {config_path}{C.RESET}", file=sys.stderr)
+    for note in config_notes:
+        print(f"{C.YELLOW}{note}{C.RESET}", file=sys.stderr)
+
+    # Saving is a thing to do instead of collecting rather than before it.
+    # Nothing has been bound or started at this point, so a run that only
+    # wanted a file writes one and goes, and never has to be interrupted to
+    # stop.
+    if args.save_config is not None:
+        written = config.write(ap, args, args.save_config, baseline)
+        print(f"{C.GREY}settings written to {written}{C.RESET}",
+              file=sys.stderr)
+        return
 
     # Treat SIGTERM like Ctrl-C so the summary still prints under systemd.
     def _term(_signum, _frame):

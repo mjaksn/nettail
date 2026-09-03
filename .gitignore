@@ -1,3 +1,9 @@
+# A settings file, which is one somebody writes for their own machine and not
+# one this project ships. It is also the first thing the collector looks for,
+# in the working directory, so one committed here would quietly change every
+# run started from a checkout, the test suite's included.
+nettail.conf
+
 __pycache__/
 *.py[cod]
 *.egg-info/

@@ -11,6 +11,51 @@ but it is a program rather than a library, and the names inside it may move
 without that being a breaking change. `--json` output is the part meant to be
 parsed, and it is treated as public.
 
+## [0.10.0] - 2026-09-03
+
+### Added
+
+- **Anything the command line takes, a settings file takes too.** `nettail.conf`
+  holds the same options under the same names without their dashes, and there
+  is no second list of what can be set: the file is read against the same
+  parser the command line is, so an option that exists is settable and one that
+  does not is reported as an unknown key. A `[nettail]` section header is
+  allowed and not needed, a key may be spelled with dashes or underscores, a
+  switch takes true or false, and an option that may be repeated takes one
+  value a line.
+
+  **The command line wins.** What the file says becomes the default and
+  anything typed overrides it, which is also why the file is read before the
+  arguments are parsed rather than merged after them: by then argparse cannot
+  tell a value that was typed from a default that happens to equal it, and the
+  merge could only have gone the other way. The one exception is a repeatable
+  option, where typing `--hosts` adds to what the file listed rather than
+  replacing it, because that is what repeatable means everywhere else here.
+
+  A file it cannot read, a key it does not know and a value it cannot use are
+  each reported and stepped over rather than being fatal. One bad line costs
+  its own line.
+- **The first `nettail.conf` of these that exists is read**, and only that one:
+  the working directory, `~/.nettail`, the home directory, then the usual place
+  for a user's configuration on that platform, then the machine's. On Windows
+  that is `%APPDATA%`, `%LOCALAPPDATA%` and `%PROGRAMDATA%`; on macOS
+  `~/Library/Application Support` and `/usr/local/etc`; elsewhere
+  `$XDG_CONFIG_HOME` or `~/.config`, and `/etc/nettail`. Nothing is merged.
+
+  The working directory comes first so that a directory can carry its own
+  settings, which is the useful case and also the one to be careful with, since
+  a file there is one somebody else may have put there. **Which file was read
+  is printed at startup, every time.**
+- **`--config FILE`** reads that file and searches for none.
+- **`--save-config [FILE]`** writes what this run would have used and exits
+  without collecting anything, to the file named or to
+  `~/.nettail/nettail.conf`. Every option is written, in the order the help
+  lists them and under its own help text: what the run set is live, and the
+  rest is commented out with its default beside it, so the file is a complete
+  list of what can be set and a short list of what is set. `--web-token` is
+  never written out whatever the run was given, since it is a secret and a
+  settings file is not; reading one from a file still works.
+
 ## [0.8.0] - 2026-09-02
 
 ### Added

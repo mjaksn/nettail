@@ -37,6 +37,7 @@ TIME         EXPORTER        PROTO  SOURCE                                     D
 - [Quick start](#quick-start)
 - [Configuring the UDM Pro](#configuring-the-udm-pro)
 - [Command line options](#command-line-options)
+- [Settings file](#settings-file)
 - [The status bar](#the-status-bar)
 - [Keyboard controls](#keyboard-controls)
 - [The web interface](#the-web-interface)
@@ -218,8 +219,9 @@ different reason.
 ## Command line options
 
 ```
-usage: nettail [-h] [--version] [--bind BIND] [--port PORT] [--external-only]
-               [--verbose] [--json] [--colour WHEN] [--no-color]
+usage: nettail [-h] [--version] [--config FILE | --save-config [FILE]]
+               [--bind BIND] [--port PORT] [--external-only] [--verbose]
+               [--json] [--colour WHEN] [--no-color]
                [--header-every HEADER_EVERY] [--sticky-header] [--hide-status]
                [--no-supplemental-services] [--web] [--web-port PORT]
                [--web-bind ADDR] [--web-host NAME] [--web-token TOKEN]
@@ -235,6 +237,8 @@ usage: nettail [-h] [--version] [--bind BIND] [--port PORT] [--external-only]
 | Option | Default | Description |
 | --- | --- | --- |
 | `--version` | | Print the version and exit |
+| `--config FILE` | searched | Read settings from this file instead of looking for one. See [Settings file](#settings-file) |
+| `--save-config [FILE]` | `~/.nettail/nettail.conf` | Write what this run would have used to a file and exit without collecting anything |
 | `--bind BIND` | `0.0.0.0` | Address to bind the UDP socket to |
 | `--port PORT` | `2055` | UDP port to listen on |
 | `--external-only` | off | Only display flows where the source or destination is a public IP. Everything is still counted in the summary |
@@ -307,6 +311,132 @@ See [Size colour scale](#size-colour-scale) for what the colours mean.
 | `--fqdn` | off | Show `nas.lan` instead of `nas` |
 | `--resolve-workers N` | `4` | Background lookup threads |
 | `--resolve-timeout SEC` | `1.0` | Per-probe timeout for mDNS and NetBIOS queries |
+
+---
+
+## Settings file
+
+Everything the collector takes on the command line it takes in a file instead,
+under the same name without its dashes. There is no second list of what can be
+set: the file is read against the same parser the command line is, so an option
+that exists is settable, and one that does not is reported as an unknown key.
+
+```ini
+# nettail.conf
+port = 2055
+external-only = true
+web = true
+web-bind = 127.0.0.1
+resolve = dns
+hosts =
+    /etc/hosts.lan
+    /etc/hosts.iot
+```
+
+A `[nettail]` header is allowed and is not needed: there is one section and
+nowhere else for a setting to be, so a file that opens with `port = 2055` is
+read as though it had one. A key may be written with dashes as the flag is or
+with underscores as Python spells it. A switch takes `true` or `false`, and
+`yes`, `no`, `on`, `off`, `1` and `0` besides. An option that may be repeated
+takes one value a line, indented under the key. A comment is a line beginning
+with `#` or `;`, and a `%` is a `%` rather than anything clever.
+
+**The command line wins.** What the file says becomes the default and anything
+typed overrides it, so a config file is where the settings you always want live
+and the command line is for today. What neither says falls back to what the
+program shipped with, which is how a default this program changes later still
+reaches you.
+
+The one exception is an option that may be repeated, `--hosts` and
+`--web-host`. Typing one of those adds to what the file listed rather than
+replacing it, because that is what repeatable means everywhere else here. A run
+that wants none of them wants `--config` pointed at a file that lists none.
+
+There is a second thing worth knowing before you rely on it: a switch turned on
+in a file cannot be turned off from the command line, because there is no
+`--no-` form of most of them. `--colour never` and `--no-color` are the
+exception. Anything else, and the answer is a different file.
+
+### Where it is looked for
+
+The first of these that exists is read, and only that one. They are not merged:
+a setting that comes from two files at once is a setting nobody can find by
+looking at either.
+
+On Linux, and anything else that is not Windows or macOS:
+
+```
+./nettail.conf
+~/.nettail/nettail.conf
+~/.nettail.conf
+~/nettail.conf
+$XDG_CONFIG_HOME/nettail/nettail.conf   (or ~/.config/nettail/nettail.conf)
+/etc/nettail/nettail.conf
+/etc/nettail.conf
+```
+
+macOS has `~/Library/Application Support/nettail/nettail.conf` after the home
+directory and `/usr/local/etc/nettail/nettail.conf` before `/etc`. Windows has
+none of the Unix ones, and looks in the working directory, the home directory,
+and then:
+
+```
+%APPDATA%\nettail\nettail.conf
+%LOCALAPPDATA%\nettail\nettail.conf
+%PROGRAMDATA%\nettail\nettail.conf
+```
+
+The working directory comes first so that a directory can carry its own
+settings, which is useful and is also the one thing about this feature worth
+being careful with: a `nettail.conf` in the directory you happen to be in is a
+file somebody else may have put there. **Which file was read is printed at
+startup, every time**, and that is the whole mitigation:
+
+```
+settings from /home/you/.nettail/nettail.conf
+```
+
+`--config FILE` reads that file instead of looking for one, and nothing is
+searched for. A file it cannot read, a key it does not know and a value it
+cannot use are each reported and stepped over rather than being fatal: one bad
+line costs its own line, and the collector starts with everything else the file
+said.
+
+### Saving one
+
+`--save-config` writes what this run would have used and exits without
+collecting anything. With no path it writes `~/.nettail/nettail.conf`, which is
+the second place the search looks, so the next run finds it without anything
+else being said.
+
+```bash
+nettail --port 9995 --external-only --web --save-config
+```
+
+What it writes is every option, in the order the help lists them, each under
+its own help text. What this run set is written live; everything else is
+commented out with its default beside it. So the file is a complete list of
+what can be set and a short list of what is set, and a default this program
+changes later still reaches somebody who never touched that option.
+
+```ini
+# only show flows involving a public IP
+external-only = true
+
+# print every decoded field under each flow
+#verbose = false
+```
+
+`--web-token` is the one thing never written out, whatever the run was given.
+It is a secret and a settings file is not: it is the file you edit, copy
+between machines and paste into an issue. `NETTAIL_WEB_TOKEN` in the
+environment is where a token belongs, which is how the installed service
+receives one. Reading a token from a file still works, for somebody who put it
+there on purpose.
+
+`--config` and `--save-config` cannot be given together: they are opposite
+directions through the same door, and a command line asking for both has not
+decided which.
 
 ---
 
@@ -1828,6 +1958,7 @@ subprocesses. Everything else is the package:
 | `values.py` | sizes, rates and durations, written for a column |
 | `sizescale.py` | the colour ramp behind the BYTES column |
 | `services.py` | port names, the system database first and a shipped list after |
+| `config.py` | settings read from a file, and one written back out |
 | `display.py` | laying one flow out as a line of text |
 | `sticky.py` | pinning the column header to the top of the window |
 | `statusbar.py` | the two-line bar along the foot of the window |
@@ -2000,6 +2131,7 @@ another suite's result.
 | `test_summary_key` | the traffic summary printed on demand, and the clock it is dated by |
 | `test_sticky_with_gradient` | the pinned header and the size ramp sharing one screen |
 | `test_services` | the supplemental port names, the parser behind them, the system database keeping precedence, and the ephemeral floor pinned to where netflume actually puts it |
+| `test_config` | every option set in a file against the same option typed on the command line, the search order on platforms this machine is not, and a saved file read back |
 | `test_qr` | the encoder against pinned symbols: the format information and its BCH check, the mask that was chosen, and the padding codewords no reader ever looks at |
 | `test_readme_samples` | the transcripts this README quotes, against what the program prints today |
 | `test_endpoints`, `test_top_talkers` | one definition of a flow's ends, both directions counted, and each address table split by direction |

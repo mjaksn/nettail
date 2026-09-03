@@ -111,6 +111,56 @@ The data file has to stay listed in `[tool.setuptools.package-data]`. Left
 out, the wheel ships without it and every supplemental name silently becomes a
 bare port number.
 
+## Settings from a file
+
+`config.py` reads `nettail.conf` and writes one. The feature's whole claim is
+that anything settable on the command line is settable in a file, and it holds
+because **there is no list of what can be set**: `settable(parser)` reads the
+parser, so `build_parser` goes on being the one place an option exists.
+`test_config` types every option and writes every option and asserts the two
+runs come out with the same arguments, and a new option with no sample value
+in that suite fails rather than turning out to be quietly unsettable.
+
+Four things about it are easy to break.
+
+- **The file is read before the arguments are parsed, and that is what makes
+  the command line win.** Its settings are installed with `set_defaults`, and
+  an argument overrides a default. Merged after the parse it could only have
+  gone the other way round: by then argparse cannot tell a value that was
+  typed from a default that happens to equal it, so a file would silently
+  beat the command line. This is also why the two config options are read by
+  a small parser of their own first; which file to read may itself be an
+  argument.
+- **`--save-config` compares against a baseline taken before any of that.**
+  Once a file's settings are the parser's defaults, a value that came from the
+  file is indistinguishable from one nobody ever chose, and a run that loaded
+  a config and saved it again would write every one of them back out as a
+  comment. `main` takes `config.defaults(ap)` before `set_defaults` and hands
+  it to `write`. There is a check for it in both directions, because the
+  failure is a file that looks fine and has lost half of itself.
+- **Which file was read is printed at startup, every time.** The search starts
+  in the working directory, which is what makes a per-directory config
+  possible and is also a file somebody else may have put there. The line is
+  the whole mitigation and is not decoration; a run that quietly took its
+  options from a stranger's file would be worse than not having the feature.
+  It is printed after the colour is settled rather than where the file is
+  read, because nothing may print before that.
+- **A repeatable option adds rather than replaces.** `--hosts` typed beside a
+  file that lists two gives three, because that is what repeatable means
+  everywhere else in this program. It is the one place "the command line
+  wins" reads differently and it is written down in three places for that
+  reason.
+
+`settable` reaches for `parser._actions`, which is argparse's own and has no
+public spelling. There is no API for "what options does this parser have", and
+the alternative to the attribute is writing the options out again, which is
+the thing the module exists not to do.
+
+`--web-token` is read from a file and never written to one. A settings file is
+the file people edit, copy between machines and paste into an issue, and the
+token is the one thing here this program already goes to trouble to keep out
+of `ps`. `NEVER_WRITTEN` is where that lives.
+
 ## The web interface
 
 `feed.py` is the bus and knows nothing about HTTP; `web.py` is the server and
