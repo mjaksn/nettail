@@ -46,6 +46,7 @@ EVENTS = (
     ("status", "the status bar snapshot, on a clock"),
     ("prose", "a block of text the terminal also printed, ANSI intact"),
     ("clear", "the x key: throw away what is on screen"),
+    ("detail", "the answer to one browser's ask about a flow, by id"),
     ("dropped", "how many events this client missed while it was behind"),
 )
 
@@ -193,6 +194,18 @@ class Feed:
 
     def clear(self):
         self.publish("clear", None)
+
+    def detail(self, payload):
+        """The answer to one browser's ask about a flow.
+
+        Published to every client rather than to the one that asked, and the
+        ask's own id rides on it so a page can tell its answer from somebody
+        else's. Per-client publishing is the other way to do it and would mean
+        the feed learning which client an ask came from, which is a thread
+        boundary this deliberately does not cross; at four watchers the cost
+        of the broadcast is three pages parsing a frame and dropping it.
+        """
+        self.publish("detail", payload)
 
     # -- what a late arrival needs -----------------------------------------
 

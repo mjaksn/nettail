@@ -226,7 +226,8 @@ usage: nettail [-h] [--version] [--config FILE | --save-config [FILE]]
                [--header-every HEADER_EVERY] [--sticky-header] [--hide-status]
                [--no-supplemental-services] [--web] [--web-port PORT]
                [--web-bind ADDR] [--web-host NAME] [--web-token TOKEN]
-               [--web-colour WHEN] [--web-readonly] [--size-scale-max BYTES |
+               [--web-colour WHEN] [--web-readonly]
+               [--web-detail-refresh SECONDS] [--size-scale-max BYTES |
                --size-scale-dynamic] [--size-scale-window FLOWS] [--country]
                [--country-db FILE] [--update-country-db]
                [--country-style {auto,flag,code}] [--resolve {off,dns,all}]
@@ -269,6 +270,7 @@ All off unless `--web` is given. See [The web interface](#the-web-interface).
 | `--web-colour WHEN` | `on` | Colour in the browser view: `on` or `off`. A browser is a colour-capable reader whatever stdout is, so a redirected run does not take the colour out of it. `--web-color` is accepted too |
 | `--web-token TOKEN` | random | Use this token in the URL instead of a fresh random one, so a bookmark survives a restart. Taken from `NETTAIL_WEB_TOKEN` in the environment when the flag is not given, which is how an installed service receives one without it appearing in `ps` |
 | `--web-readonly` | off | Serve the display but accept no keys from the browser |
+| `--web-detail-refresh SECONDS` | `5` | How often the flow details dialog asks the collector for its figures again. `0` leaves them still until **Refresh** is pressed. See [Clicking a flow](#clicking-a-flow) |
 
 ### Sticky header
 
@@ -942,6 +944,66 @@ Everything the terminal shows, arriving as it arrives:
   them, and the exit summary when the collector stops.
 - **A status footer** carrying what the terminal's status bar carries.
 
+And one thing the terminal does not show: click a flow row and a dialog opens
+with everything the collector knows about it. See [Clicking a
+flow](#clicking-a-flow).
+
+### Clicking a flow
+
+A row in the browser is clickable. Clicking one opens a large dialog holding
+four things:
+
+- **The flow**, spelled out. Both ends with their hostname, service name, which
+  side of the boundary they are on and their country where one is known; which
+  way it crossed, in words; its start and end as absolute local times; its
+  duration, size and packet count both exactly and in the short form the table
+  uses; its TCP flags as words rather than as `.A....S.`; why the exporter
+  stopped counting it; and then every remaining field of the record under a
+  label, including elements this build has no name for. It is a superset of
+  what `--verbose` prints under a flow.
+- **The datagram it arrived in**, which nothing else in the program shows: the
+  exporter, the version, the observation domain, the export sequence number,
+  the exporter's clock against this machine's, the size of the datagram and how
+  many flows were in it, the sampling rate in force, and how many exports the
+  sequence number says were missed before it.
+- **Both endpoints**, each with when it was first and last seen by this
+  collector, its flows, bytes and packets, how many addresses it has talked to,
+  what share of everything seen it accounts for, and three tables: by protocol,
+  by service, and its busiest peers.
+- **The pair**, which is the conversation between the two ends whichever of
+  them opened it, with its own protocol and service tables.
+
+**"Received" and "sent" in an endpoint panel are read from that address**, not
+from the edge of the network. An address received what was sent to it and sent
+what it was the source of, so a public web server's panel says it sent what it
+served. The traffic summary's external table is asked a different question
+about the same bytes and calls that same traffic inbound; the two are not
+disagreeing.
+
+Each table shows its busiest twenty rows and says how many it left out.
+
+The figures move on their own every five seconds, and **Refresh** asks for them
+at once. `--web-detail-refresh` sets the interval and `--web-detail-refresh 0`
+holds them still until Refresh is pressed. `Esc`, the backdrop and **Close**
+all shut the dialog. Keys are not forwarded while it is open, so typing `x` in
+it does not clear the table underneath.
+
+The collector keeps the last four thousand flows it published, which is as many
+rows as the page itself keeps. Clicking a row older than that says so, and still
+shows the two endpoint panels and the pair, since those are kept for as long as
+the run. A row left over from before a restart says the same thing, and it is
+worth knowing that it does: a bookmarked tab reconnects with the previous run's
+rows still on the page, and none of them can be looked up in the run that
+replaced it.
+
+It works under `--web-readonly`. Asking what a flow was changes nothing, and a
+view served for watching is still a view worth reading properly.
+
+The terminal has no equivalent. Everything in the dialog is worked out and
+written out by the collector, on the thread that owns the figures, and the page
+lays out what it is handed without naming a single field, flag or protocol of
+its own.
+
 ### Keys and buttons
 
 The keys live in a drawer, shut by default so the flows have the window. Open
@@ -1104,10 +1166,14 @@ of stdout. `--web-colour off` is how a run says otherwise.
   told how many, rather than being shown a gap that looks like continuity.
 - The page keeps the last few thousand rows and trims the rest, saying so when
   it does. A tab left open on a busy link would otherwise become unusable.
+- The collector keeps the last four thousand flows a browser can ask about,
+  matching what the page itself keeps. An older row is still clickable and
+  says the flow itself has gone.
 - IPv4 only, matching the collector socket.
 - The page fetches one thing besides itself, `flags.woff2`, and only when
-  there are country flags on it to draw. Everything else it needs is inside
-  it, and it reaches for nothing off this machine at all.
+  there are country flags on it to draw, and asks one route a question, which
+  is what clicking a flow does. Everything else it needs is inside it, and it
+  reaches for nothing off this machine at all.
 
 ---
 
@@ -1984,14 +2050,26 @@ nettail --json | jq -c 'select(.dst_port == 443)'
 ```
 
 Field names follow the normalised names in the `IE` table, so v5, v9, and IPFIX all
-produce the same keys where the underlying data is equivalent. Three metadata keys
-are added with a leading underscore:
+produce the same keys where the underlying data is equivalent. Metadata keys are
+added with a leading underscore. The first three describe the flow; the rest
+describe the export message it arrived in, which is where the answer lives to
+whether anything was lost on the way and how far behind the exporter's clock
+is:
 
 | Key | Meaning |
 | --- | --- |
 | `_exporter` | Source IP of the exporting device |
 | `_version` | `5`, `9`, or `10` |
 | `_timestamp` | Flow start as a unix float |
+| `_domain` | Observation domain, which on v5 is the engine ID |
+| `_sequence` | The export sequence number of the datagram |
+| `_export_time` | The exporter's own clock when it sent the datagram, as a unix integer |
+| `_uptime` | Milliseconds since the exporter booted, which is the clock `first_switched` and `last_switched` are measured against. Absent on IPFIX, which does not carry one |
+| `_received` | When this collector received the datagram, as a unix float |
+| `_sampling_rate` | The 1-in-N rate in force for this exporter, `1` when unsampled |
+
+A key is written only where the header carried the fact, which is why `_uptime`
+is absent from IPFIX rather than being `null`.
 
 `src_host` and `dst_host` are present only when a hostname is known, so their absence
 is normal and not a schema change. `src_country` and `dst_country` are the same:
@@ -2006,7 +2084,9 @@ Example:
 {"src_addr":"10.0.1.5","dst_addr":"104.244.42.1","src_port":44321,"dst_port":443,
  "proto":6,"tcp_flags":24,"packets":412,"octets":58900,
  "flow_start_ms":1787230327192,"flow_end_ms":1787230339692,"in_if":1,"out_if":2,
- "_exporter":"10.0.0.1","_version":10,"_timestamp":1787230327.192,"src_host":"nas"}
+ "_exporter":"10.0.0.1","_version":10,"_timestamp":1787230327.192,
+ "_domain":0,"_sequence":81423,"_export_time":1787230340,
+ "_received":1787230340.118,"_sampling_rate":1,"src_host":"nas"}
 ```
 
 Unrecognised information elements are preserved rather than dropped. Standard
@@ -2498,7 +2578,7 @@ python tests/run.py tally keys    # only suites whose name contains either
 python tests/run.py -v            # print every check, not only failures
 ```
 
-1993 checks across 37 suites, in about a minute. No test dependencies and
+2210 checks across 39 suites, in about a minute. No test dependencies and
 no test runner to learn: the suites need only netflume and lanname, the same as
 the collector.
 
@@ -2551,6 +2631,8 @@ another suite's result.
 | `test_qr` | the encoder against pinned symbols: the format information and its BCH check, the mask that was chosen, and the padding codewords no reader ever looks at |
 | `test_readme_samples` | the transcripts this README quotes, against what the program prints today |
 | `test_endpoints`, `test_top_talkers` | one definition of a flow's ends, both directions counted, and each address table split by direction |
+| `test_traffic` | per address and per pair accounting, chiefly that a direction there is read from the endpoint rather than from the edge of the network, and that every table it keeps is bounded |
+| `test_detail` | the flow details report, with its TCP flag names and its field labels held against netflume's own tables so an addition upstream fails here rather than arriving as a bare key |
 | `test_web_feed` | the event bus: what it publishes, what it drops when a browser falls behind, and the greeting a late arrival gets |
 | `test_web_server` | the stream against a real server: the greeting, the events, the watcher cap, and the exit summary reaching a browser that is still open |
 | `test_web_security` | everything the web interface refuses: forged tokens, forged `Host` and `Origin` headers, paths that try to reach the filesystem, and keys the collector does not answer |

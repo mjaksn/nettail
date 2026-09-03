@@ -63,6 +63,12 @@ serves it to a browser. That is a mirror rather than a second program. It
 decides nothing about what a flow looks like; it is handed the cells the
 terminal row was built from and lays them out in a table.
 
+It has one thing of its own now, which is the details dialog a click on a row
+opens. That is not a mirror of anything, since there is nowhere on a console
+to put it, but the rule above still holds inside it: every value in that
+dialog is worked out and written out by the collector and the page names no
+field, no flag and no protocol. See "Asking about a flow".
+
 ## Commands
 
 ```bash
@@ -125,6 +131,12 @@ test:
 - **`EPHEMERAL_FLOOR` in `services.py`** repeats a number netflume writes
   inline and exports no constant for. `test_services` finds where netflume
   actually stops naming ports and pins ours to it.
+- **`TCP_FLAG_NAMES` and `FIELD_LABELS` in `detail.py`** are the same kind of
+  deal with the same upstream. The first is keyed by the letters
+  `TCP_FLAG_BITS` writes, the second by the names in `netflume.IE`, and
+  `test_detail` holds each to its table in both directions. An element added
+  upstream would otherwise reach a reader as a bare key in a dialog whose
+  whole claim is that it spells everything out, and nothing would fail.
 - **`COLUMNS` in `display.py`** is every column, its width, its alignment and
   the gap in front of it. `HEADER_LINE` is built from it, so is
   `ENDPOINT_INDENT`, and so is the table head the browser draws, which arrives
@@ -468,11 +480,13 @@ of `ps`. `NEVER_WRITTEN` is where that lives.
 
 `feed.py` is the bus and knows nothing about HTTP; `web.py` is the server and
 touches no collector state. Between them sits one rule that everything else is
-arranged around: **a request thread may read a feed queue and put a key on a
-queue, and that is the whole of its authority.** Everything that changes what
-the collector is doing happens on the receive thread, which drains the key
-queue between datagrams and hands each one to the same `Controls.handle` the
-terminal uses.
+arranged around: **a request thread may read a feed queue and put a key or a
+question on a queue, and that is the whole of its authority.** Everything that
+changes what the collector is doing, and everything that reads what it has
+counted, happens on the receive thread, which drains both queues between
+datagrams: a key goes to the same `Controls.handle` the terminal uses, and a
+question about a flow goes to `detail.report`, which is written for being
+called there. See "Asking about a flow" below.
 
 Eight things about it are easy to break and quiet when broken.
 
@@ -563,6 +577,98 @@ than the same characters: the browser's copy leaves out `esc` and `q`, neither
 of which it can press. `controls.listing` writes to stderr directly rather than
 through `controls.out`, which is a tee and would publish the listing a line at
 a time dressed as replies to keys nobody pressed.
+
+### Asking about a flow
+
+Clicking a row in the browser opens a dialog holding everything known about
+that flow, the datagram it arrived in, statistics for each of its two ends, and
+statistics for the pair. `traffic.py` accumulates the last two, `detail.py`
+writes the report, and `web.py` takes the question. The terminal has no
+equivalent and that is accepted: there is nowhere on a console to put it.
+
+The reasoning that is not in the code:
+
+- **The report is built on the receive thread, and there was never a choice
+  about that.** The tally is mutated there, so no HTTP handler may read it.
+  The dialog therefore works the way the `?` key already works: the page POSTs
+  an ask to a `detail` route, the handler validates it and puts it on a
+  bounded queue, and the receive loop drains that queue beside the key queue,
+  builds the report from state it owns and publishes a `detail` event. What
+  the POST answers is `{"queued":true}` and never the report.
+- **Every browser receives every answer, and the ask's own id is what sorts
+  them out.** Publishing to the one client that asked is the alternative, and
+  it would mean the feed learning which client an ask came from, which is a
+  thread boundary `feed.py` deliberately does not cross. At `MAX_CLIENTS = 4`
+  the cost of the broadcast is three pages parsing a frame and dropping it.
+- **The route is allowed under `--web-readonly`, so the readonly refusal moved
+  under the `key` branch.** Read-only is about not changing what the collector
+  is doing, and asking what a flow was changes nothing. The origin check stays
+  shared, because the reasoning behind it has nothing to do with what the
+  request goes on to ask for.
+- **Direction in `traffic.py` is relative to the endpoint**, where everywhere
+  else in this program it is relative to the network edge. *In* means the
+  endpoint was the destination and *out* that it was the source, so a public
+  server's panel says it sent what it served while the summary's external
+  table calls the same bytes inbound. That is two questions about one set of
+  bytes rather than a disagreement, and it is the one semantic trap in the
+  feature. It is written on the module, in the report, and in the README.
+- **The ring and its bound.** `cli.main` keeps `DETAIL_RING` flows by serial,
+  filled inside `web_flow`, so a run with nobody watching keeps none of it.
+  The figure matches the page's own `MAX_ROWS`: keeping more would be keeping
+  records for rows nothing can click, and keeping fewer would leave rows on
+  the page this could no longer describe. A serial the ring has dropped is the
+  ordinary case rather than an error, and `detail.report` answers it with the
+  endpoint and pair panels, built from the addresses the ask carried. That is
+  what the ends are on the ask for.
+- **The serial is never reset, not even by the c key.** A page holding rows
+  from before a clear must not have them answered by flows from after it.
+- **A serial is checked against the ask's ends before it is believed, and
+  that is not belt and braces.** Serials do start again at 1 on a restart, and
+  `--web-token` exists so that a bookmark survives one, so a reconnecting tab
+  arrives with a page full of the previous run's serials on its rows.
+  Answering one of those out of the new run's ring shows a reader an entirely
+  different flow under a title naming the one they clicked, which is worse
+  than saying nothing. `report` calls it held only when
+  `flow_endpoints(rec)` matches the ends the ask carried, and `test_detail`
+  pins both directions.
+- **Text off the wire may not reach a report unchecked.** `_detail` in
+  `web.py` refuses anything that is not a whole number in range, a bool wearing
+  one (`isinstance(True, int)` is True), a body carrying a field it does not
+  know, or an end that is not an address. Each end is parsed and written back
+  out through `ipaddress`, which gives the spelling netflume decodes into, so
+  that what a browser sends back matches a key in the tally rather than merely
+  looking like one.
+- **Every value in the report is formatted in Python.** The page names no
+  field, no flag and no protocol, for the reason it hardcodes no column and no
+  key: a service name is whatever this machine's services database calls that
+  port, and a second opinion written in JavaScript would be a second thing to
+  keep in step with `values.py`. A section is a title and a list of (label,
+  value) pairs, a table is a head and rows of finished strings, and the page
+  has exactly two renderers. The dialog's own title and the sentence about a
+  flow the ring has dropped come over the wire for the same reason.
+- **The flags are spelled in the decoder's bit order**, so "ACK, SYN" rather
+  than the "SYN, ACK" a handshake is usually described as. That is the order
+  the letters run in the FLAGS column of the row the dialog was opened from,
+  and a reader comparing the two should not have to reorder one in their head.
+
+Two things about the page are easy to get wrong.
+
+- **The keydown handler bails while the dialog is open.** Otherwise `x`, typed
+  into a dialog opened from a row, clears the table underneath it. Escape is
+  safe without any of that: it is in `WEB_EXCLUDED` and never forwarded, and
+  it is what closes a dialog natively.
+- **One `close` listener clears the timer and the outstanding ask.** Escape,
+  the backdrop, the Close button and `park` all end up there, so there is one
+  place the state is put back. The timer is stopped before a new one is
+  started, so two open-and-close cycles cannot leave two timers asking, and
+  the ask id is stepped on so a reply already in flight is not rendered into a
+  dialog the reader has closed. `park` closes the dialog rather than clearing
+  anything itself, since the answer comes back on the stream it has just given
+  up.
+
+Nothing in the suite runs the page, so the dialog's own behaviour is a manual
+check, as the QR code and the flags are. Click a row, watch the figures move on
+their own, press Refresh, close it three ways, and type `x` inside it.
 
 ## There is a QR encoder in here
 

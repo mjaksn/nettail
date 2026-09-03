@@ -70,7 +70,8 @@ check("the display shows the post-NAT addresses",
 tally = main.Tally()
 tally.add(post_nat, HDR)
 check("the pair table uses the same ends",
-      ("192.168.1.10", "8.8.8.8") in tally.pair_bytes, str(dict(tally.pair_bytes)))
+      ("192.168.1.10", "8.8.8.8") in tally.traffic.pairs,
+      str(sorted(tally.traffic.pairs)))
 check("and the talkers table", tally.talkers["8.8.8.8"] == 1000,
       str(dict(tally.talkers)))
 

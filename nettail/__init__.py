@@ -23,6 +23,8 @@ draws what the terminal draws rather than deciding anything of its own.
     sizescale   the colour ramp behind the BYTES column
     services    port names, the system database first and a shipped list after
     display     laying one flow out as a line of text
+    traffic     what each address did, and each pair of them together
+    detail      everything known about one flow, for the browser's dialog
     sticky      pinning the column header to the top of the window
     statusbar   the two-line bar along the foot of the window
     tally       the running totals behind the exit summary
@@ -48,13 +50,19 @@ are about where they are, and none of those words says anything at all here.
 ``qr.render`` is the one name below that could not be brought up, because
 ``display.render`` is already here and means something else entirely: one lays
 a flow out as a line, the other turns a matrix into rows of half blocks. A
-caller wanting the second asks ``qr.render`` for it. Nothing else in that
-module collides.
+caller wanting the second asks ``qr.render`` for it.
+
+``detail`` keeps most of itself back on the same grounds. Its ``spell_flags``
+is about TCP flags where ``country.spell_flags``, already here, is about a
+country flag, and its ``report`` says nothing at all in this namespace. A
+caller wanting either asks ``detail`` for it. The tables that other things are
+held against do come up, since they are what a suite compares to netflume.
 """
 
 __version__ = "0.13.0"
 
 from .cli import (
+    DETAIL_RING,
     WatchedTemplates,
     ask_yes_no,
     at_a_terminal,
@@ -96,6 +104,7 @@ from .country import (
     spell_flags,
     terminal_flags,
 )
+from .detail import DETAIL_ROWS, FIELD_LABELS, TCP_FLAG_NAMES
 from .display import (
     COLUMNS,
     ENDPOINT_INDENT,
@@ -156,14 +165,18 @@ from .sticky import (
     scroll_region,
 )
 from .tally import MAX_SPEED_EVENTS, MAX_TRACKED_KEYS, TOP_N, Tally
+from .traffic import MAX_ENDPOINT_KEYS, Traffic
 from .values import human_bits, human_bytes, human_clock, human_count, human_duration
 from .web import (
+    ASK_QUEUE_MAX,
+    DEFAULT_DETAIL_REFRESH,
     DEFAULT_WEB_PORT,
     HEARTBEAT,
     MAX_CLIENTS,
     WEB_ENDPOINT_WIDTH,
     WebInterface,
     content_policy,
+    detail_refresh_arg,
     host_allowed,
     is_loopback,
     origin_allowed,
@@ -190,6 +203,8 @@ __all__ = [
     "RESIZE_POLL_LINES", "SIZE_RAMP", "SIZE_SCALE_FLOOR",
     "SizeScale", "StickyHeader",
     "MAX_SPEED_EVENTS", "MAX_TRACKED_KEYS", "TOP_N", "Tally",
+    "MAX_ENDPOINT_KEYS", "Traffic",
+    "DETAIL_ROWS", "FIELD_LABELS", "TCP_FLAG_NAMES",
     "human_bits", "human_duration",
     "EPHEMERAL_FLOOR", "SUPPLEMENTAL_SERVICES", "service_name",
     "proto_colour", "write_summary", "write_hosts", "SpanScale",
@@ -199,8 +214,9 @@ __all__ = [
     "human_bytes", "human_count", "main", "render", "report_events",
     "WatchedTemplates", "report_templates",
     "should_show", "size_scale_arg", "size_window_arg",
-    "COLUMNS", "row_cells", "tee", "flow_record",
+    "COLUMNS", "row_cells", "tee", "flow_record", "DETAIL_RING",
     "CLIENT_BACKLOG", "EVENTS", "PROSE_KINDS", "Feed",
+    "ASK_QUEUE_MAX", "DEFAULT_DETAIL_REFRESH", "detail_refresh_arg",
     "DEFAULT_WEB_PORT", "HEARTBEAT", "MAX_CLIENTS", "WEB_ENDPOINT_WIDTH",
     "WEB_EXCLUDED", "WebInterface", "content_policy", "host_allowed",
     "is_loopback", "origin_allowed", "web_keys",

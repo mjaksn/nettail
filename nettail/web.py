@@ -5,10 +5,12 @@ and the queues; this turns one of those queues into a stream a browser can read
 and turns a browser's key press into something the receive loop will act on.
 
 Nothing here touches collector state. A request thread may read from a feed
-queue and it may put a key on a queue, and that is the whole of its authority.
-Everything that changes what the collector is doing happens on the receive
-thread, which drains that key queue between datagrams, so the existing dispatch
-in `Controls` stays the one place a key means anything.
+queue and it may put a key or an ask on a queue, and that is the whole of its
+authority. Everything that changes what the collector is doing, and everything
+that reads what it has counted, happens on the receive thread, which drains
+both queues between datagrams: the existing dispatch in `Controls` stays the
+one place a key means anything, and `detail.report` is called where the tally
+is safe to read.
 
 Nothing here prints, either, and that rule is stricter than it sounds.
 `sticky.py` and `statusbar.py` manage a scroll region on the terminal, and a
@@ -43,10 +45,11 @@ are not optional.
   decided.
 - **An `Origin` check on the control route**, refusing a request that names an
   origin other than this one.
-- **Four routes and no fifth.** The page, the stream, the flags font and the
-  control route, and nothing else. No directory listing, no file handler,
-  nothing that turns part of a request into a path on disk. The page and the
-  font are read once at startup and live in memory.
+- **Five routes and no sixth.** The page, the stream, the flags font, the
+  control route and the one that answers a question about a flow. No
+  directory listing, no file handler, nothing that turns part of a request
+  into a path on disk. The page and the font are read once at startup and
+  live in memory.
 - **A cap on connected browsers.** Each stream holds a thread for as long as
   the tab is open, so the count is bounded rather than left to whoever is
   opening tabs. That cap covers the stream only, which is why there is also
@@ -95,6 +98,20 @@ POLL = 1.0
 # script rather than a person, so the limit exists to bound memory rather than
 # to serve anybody.
 KEY_QUEUE_MAX = 64
+
+# Questions about a flow allowed to queue up before the receive loop answers
+# them. Smaller than the key cap because an ask costs the receive loop real
+# work, where a key costs it a dispatch: the report walks an endpoint's tables
+# twice and a pair's once. A dialog refreshing on a clock in four browsers is
+# four of these every few seconds, so sixteen is a long way past a person and
+# a long way short of a way to keep the collector busy.
+ASK_QUEUE_MAX = 16
+
+# How often the details dialog asks the collector for its figures again, in
+# seconds, and 0 for not at all. Five is short enough that a dialog left open
+# on a live conversation is watching it rather than reading a snapshot, and
+# long enough that the answer has changed by the time it arrives.
+DEFAULT_DETAIL_REFRESH = 5.0
 
 # How large a request body may be. A control message is a few dozen bytes;
 # anything bigger than this is not a browser pressing a key.
@@ -552,6 +569,48 @@ def web_host_arg(text):
     return name
 
 
+def detail_refresh_arg(text):
+    """Seconds between the details dialog re-asking, or 0 for never.
+
+    Its own type rather than a bare `type=float`, which validates nothing: a
+    negative interval, a NaN and an infinity all parse and all reach the page
+    as a `setInterval` argument, where the first two mean "every frame" and
+    the third means the timer never fires while still claiming to.
+    """
+    try:
+        value = float(text)
+    except (TypeError, ValueError):
+        raise argparse.ArgumentTypeError(
+            "%r is not a number of seconds" % (text,)) from None
+    if value != value or value in (float("inf"), float("-inf")):
+        raise argparse.ArgumentTypeError("a refresh interval has to be a "
+                                         "real number of seconds")
+    if value < 0:
+        raise argparse.ArgumentTypeError("a refresh interval cannot be "
+                                         "negative; 0 turns it off")
+    return value
+
+
+# The largest whole number this accepts on the detail route. A serial and an
+# ask are both counters a page produced, so anything past what JavaScript can
+# hold exactly is not one of them; and both are echoed back into every
+# watching browser's frame, so an unbounded integer is a way to make the
+# collector publish a very large number to everybody.
+MAX_ASK = 2 ** 53
+
+
+def _whole(value):
+    """Whether this is a whole number in range, and not a bool wearing one.
+
+    `isinstance(True, int)` is True in Python, so a body carrying `true` where
+    a serial belongs would otherwise pass the type check and index the ring at
+    1. Checked rather than coerced, because a caller sending a bool has not
+    said what it meant.
+    """
+    return (isinstance(value, int) and not isinstance(value, bool)
+            and 0 <= value <= MAX_ASK)
+
+
 def new_token():
     """A fresh path token. Urlsafe, because it goes in a URL."""
     return secrets.token_urlsafe(24)
@@ -563,7 +622,12 @@ def _frame(event, payload):
 
 
 class _Handler(BaseHTTPRequestHandler):
-    """Four routes and nothing else."""
+    """Five routes and nothing else.
+
+    The page, the stream, the flags font, one key press and one question about
+    a flow. Matched exactly rather than by prefix, so a path this does not
+    name is a 404 and never a file on disk.
+    """
 
     # Named so that a response says as little about what is running as it can.
     server_version = "nettail"
@@ -857,22 +921,36 @@ class _Handler(BaseHTTPRequestHandler):
         route = self._checked()
         if route is None:
             return
-        if route != "key":
+        if route not in ("key", "detail"):
             self._refuse(404, "not found")
             return
 
-        if self.site.readonly:
-            self._refuse(403, "this collector is serving the display only")
-            return
         # A cross-origin form or fetch names where it came from. The token in
         # the path already means an attacker has nothing to aim with, but a
         # request that says it came from somewhere else is refused on its own
-        # account rather than on the strength of the token alone.
+        # account rather than on the strength of the token alone. Shared by
+        # both routes, because the reasoning has nothing to do with what the
+        # request goes on to ask for.
         origin = self.headers.get("Origin")
         if origin and not self._origin_ok(origin):
             self._refuse(403, "bad origin")
             return
 
+        if route == "detail":
+            self._detail(raw)
+        else:
+            self._key(raw)
+
+    def _key(self, raw):
+        """One key press, on its way to the dispatch the terminal also uses."""
+        # The readonly refusal lives here rather than beside the origin check,
+        # because it is about changing what the collector is doing and the
+        # other route changes nothing. Asking what a flow was is reading, and
+        # a view served for watching is still a view somebody may want to
+        # read properly.
+        if self.site.readonly:
+            self._refuse(403, "this collector is serving the display only")
+            return
         try:
             payload = json.loads(raw.decode("utf-8"))
             key = payload["key"]
@@ -896,6 +974,73 @@ class _Handler(BaseHTTPRequestHandler):
         except queue.Full:
             self._refuse(503, "the collector is not keeping up with the keys")
             return
+        self._queued()
+
+    def _detail(self, raw):
+        """One question about a flow, on its way to the receive thread.
+
+        Every field is checked here rather than where the report is built,
+        because this is the boundary: what arrives is text off the wire, and
+        the report puts what it is handed in front of every browser watching.
+        An address is parsed and written back out through `ipaddress`, which
+        gives the spelling netflume decodes into, so that what comes back from
+        a browser matches a key in the tally rather than merely looking like
+        one.
+        """
+        try:
+            payload = json.loads(raw.decode("utf-8"))
+            if not isinstance(payload, dict):
+                raise TypeError
+            ask = payload["ask"]
+            serial = payload.get("n")
+            ends = payload.get("ends")
+        except (ValueError, KeyError, TypeError, UnicodeDecodeError):
+            self._refuse(400, "expected an ask, a serial and two ends")
+            return
+        # And nothing else, so a body carrying a field this does not know
+        # about is refused rather than half read. There is one page asking and
+        # this program serves it.
+        if set(payload) - {"ask", "n", "ends"}:
+            self._refuse(400, "that is not a question this collector takes")
+            return
+        if not _whole(ask) or (serial is not None and not _whole(serial)):
+            self._refuse(400, "an ask and a serial are whole numbers")
+            return
+        if ends is None:
+            ends = [None, None]
+        if not isinstance(ends, list) or len(ends) != 2:
+            self._refuse(400, "ends are two addresses, either of which may "
+                              "be null")
+            return
+        checked = []
+        for end in ends:
+            if end is None:
+                checked.append(None)
+                continue
+            if not isinstance(end, str) or len(end) > 64:
+                self._refuse(400, "an end is an address or null")
+                return
+            try:
+                checked.append(str(ipaddress.ip_address(end)))
+            except ValueError:
+                self._refuse(400, "an end is an address or null")
+                return
+
+        try:
+            self.site.asks.put_nowait((ask, serial, tuple(checked)))
+        except queue.Full:
+            self._refuse(503, "the collector is not keeping up with the "
+                              "questions")
+            return
+        self._queued()
+
+    def _queued(self):
+        """The one answer both control routes give: it is on the queue.
+
+        Never the report itself. What was asked for is read on the receive
+        thread and published to the stream, so the useful answer arrives
+        there and this only says the question was accepted.
+        """
         body = b"{\"queued\":true}"
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -943,9 +1088,16 @@ class WebInterface:
 
     def __init__(self, bus, keys, allowed, bind="127.0.0.1",
                  port=DEFAULT_WEB_PORT, token=None, readonly=False,
-                 hosts=()):
+                 hosts=(), asks=None):
         self.bus = bus
         self.keys = keys
+        # Where a browser's questions about a flow wait for the receive loop,
+        # which is the only thread that may read what the collector has
+        # counted. One is made here when a caller has none, so that a server
+        # stood up on its own still answers the route rather than raising on
+        # it; a real run hands over the queue its loop drains.
+        self.asks = asks if asks is not None else queue.Queue(
+            maxsize=ASK_QUEUE_MAX)
         self.allowed = frozenset(allowed)
         self.bind_addr = bind
         self.port = port

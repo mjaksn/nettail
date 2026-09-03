@@ -26,7 +26,7 @@ from netflume import (
     flow_timestamp,
 )
 
-from . import __version__, config, country, services
+from . import __version__, config, country, detail, services
 from .colour import C, PlainStream, behind, colour_on, strip_colour
 from .display import (
     COLUMNS,
@@ -67,17 +67,31 @@ from .sticky import HEADER_ROWS, MIN_STICKY_ROWS, StickyHeader
 from .tally import Tally
 from .values import human_bits, human_bytes, human_clock, human_count, human_duration
 from .web import (
+    ASK_QUEUE_MAX,
+    DEFAULT_DETAIL_REFRESH,
     DEFAULT_WEB_PORT,
     KEY_QUEUE_MAX,
     WEB_ENDPOINT_WIDTH,
     WEB_TOKEN_ENV,
     WebInterface,
+    detail_refresh_arg,
     in_container,
     is_loopback,
     unpad,
     web_host_arg,
     web_token_arg,
 )
+
+# How many flows are kept where a browser can ask about one. Filled inside
+# `web_flow`, so a run with nobody watching keeps none of it and pays nothing.
+#
+# Matched to the page's own MAX_ROWS, which is the number of rows a browser
+# holds before it starts dropping the oldest: keeping more here would be
+# keeping records for rows nothing can click, and keeping fewer would leave
+# rows on the page whose flow this could no longer describe. It is a record
+# and a reference to the header its datagram already owns, so four thousand
+# of them is a few megabytes while a tab is open and nothing when none is.
+DETAIL_RING = 4000
 
 
 def should_show(rec, args):
@@ -107,6 +121,26 @@ def flow_record(rec, hdr, resolver):
     out["_exporter"] = hdr["exporter"]
     out["_version"] = hdr["version"]
     out["_timestamp"] = flow_timestamp(rec, hdr)
+    # What the datagram said about itself, which nothing downstream of the
+    # receive loop used to see. A flow is one record out of one export message,
+    # and half the questions worth asking about it are about the message: which
+    # observation domain it came from, whether anything was lost on the way,
+    # what the exporter's clock said against what this machine's said, and
+    # whether the figures are a sample rather than a count.
+    #
+    # Underscored like the three above, and named after netflume's own
+    # METADATA_KEYS where there is a precedent to follow, so that a parser
+    # reading this alongside a decoder sees one vocabulary. Each is written
+    # only where the header has the fact: a hand-built header, or one from a
+    # version that does not carry the field, says nothing rather than saying
+    # null. `_uptime` is the one that is routinely absent, since IPFIX
+    # replaced the exporter uptime with an absolute export time.
+    for key, field in (("_domain", "domain"), ("_sequence", "sequence"),
+                       ("_export_time", "unix_secs"), ("_uptime", "sys_uptime"),
+                       ("_received", "received"),
+                       ("_sampling_rate", "sampling_rate")):
+        if hdr.get(field) is not None:
+            out[key] = hdr[field]
     src_host = resolver.lookup(rec.get("src_addr"))
     dst_host = resolver.lookup(rec.get("dst_addr"))
     if src_host:
@@ -1281,6 +1315,12 @@ def build_parser():
     web_grp.add_argument("--web-readonly", action="store_true",
                          help="serve the display but accept no keys from the "
                               "browser")
+    web_grp.add_argument("--web-detail-refresh", type=detail_refresh_arg,
+                         default=DEFAULT_DETAIL_REFRESH, metavar="SECONDS",
+                         help="how often the flow details dialog asks the "
+                              "collector for its figures again (default "
+                              "%g, and 0 to leave them still until Refresh "
+                              "is pressed)" % DEFAULT_DETAIL_REFRESH)
 
     size_grp = ap.add_argument_group("flow size colour")
     size_ex = size_grp.add_mutually_exclusive_group()
@@ -1649,7 +1689,20 @@ def main():
     # only thing that can fill it, and unbounded memory is a poor answer to
     # that. A person cannot reach the limit.
     key_queue = queue.Queue(maxsize=KEY_QUEUE_MAX)
-
+    # And where a browser's questions about a flow wait for the same loop.
+    # Bounded for the same reason and more tightly, since answering one is
+    # real work rather than a dispatch; `web.ASK_QUEUE_MAX` says how much.
+    ask_queue = queue.Queue(maxsize=ASK_QUEUE_MAX)
+    # The flows a browser may still ask about, newest last, keyed by the
+    # serial `web_flow` stamped on each. A dict rather than a deque because
+    # what arrives is a serial and what is wanted is the record under it, and
+    # a dict has kept its insertion order since 3.7, which is what makes
+    # dropping the oldest one line.
+    detail_ring = {}
+    # What the next flow published to a browser will be called. Never reset,
+    # not even by the c key: a page holding rows from before a clear must not
+    # find them answered by flows from after it.
+    flow_serial = [0]
     # Keys are read between datagrams, so how long the socket is allowed to
     # wait is also how long a keypress can sit unanswered on a quiet network.
     # A browser's key press waits the same way, which is why the quarter second
@@ -1794,7 +1847,8 @@ def main():
             } & set(controls.actions())
         web = WebInterface(bus, key_queue, web_keyset, bind=args.web_bind,
                            port=args.web_port, token=args.web_token,
-                           readonly=args.web_readonly, hosts=args.web_host)
+                           readonly=args.web_readonly, hosts=args.web_host,
+                           asks=ask_queue)
         try:
             # Bound but not yet answering. The greeting a browser is met with
             # has to be in place before the first one can arrive, and it cannot
@@ -1938,6 +1992,11 @@ def main():
         "modes": dict(MODE_DESC),
         "readonly": bool(args.web_readonly),
         "json": bool(args.json),
+        # How often the details dialog re-asks, in seconds, with 0 meaning
+        # never. In the greeting because this is where a browser learns how
+        # the collector was started, beside readonly and json, and because it
+        # cannot change while the process lives.
+        "detail_refresh": float(args.web_detail_refresh),
     })
 
     # Only now does it start answering. Serving before the greeting was set
@@ -2023,18 +2082,37 @@ def main():
         whatever this machine's services database calls that port, and no
         amount of care in a browser reproduces that.
 
-        The record rides along because it is the shape `--json` prints and it
-        is what anything built on this page later will want. Both halves are
-        assembled only when somebody is watching, and `record` lets the JSON
-        branch hand over the one it has already built rather than have an
-        identical second one made underneath it.
+        The record rides along because it is the shape `--json` prints, and
+        the details dialog is what wanted it. Both halves are assembled only
+        when somebody is watching, and `record` lets the JSON branch hand over
+        the one it has already built rather than have an identical second one
+        made underneath it.
+
+        The serial and the two ends are what make a row clickable. The serial
+        is this program's own counter and means nothing outside the run: the
+        page hands it back and the ring above turns it into the record and the
+        header again. The ends travel beside it so that a row whose flow has
+        since fallen out of the ring can still be asked about, since the
+        endpoint and pair statistics are keyed by address and outlive any one
+        flow.
+
+        The ring is filled here rather than at the tally, which is the other
+        place every flow passes, because that one runs whether or not anybody
+        is watching and this must cost nothing when nobody is.
         """
+        flow_serial[0] += 1
+        serial = flow_serial[0]
+        detail_ring[serial] = (rec, hdr)
+        while len(detail_ring) > DETAIL_RING:
+            del detail_ring[next(iter(detail_ring))]
         return {
             "cells": [for_web(unpad(painted)) for _plain, painted
                       in row_cells(rec, hdr, args, resolver, scale,
                                    endpoint_width=WEB_ENDPOINT_WIDTH)],
             "record": (record if record is not None
                        else flow_record(rec, hdr, resolver)),
+            "n": serial,
+            "ends": list(flow_endpoints(rec)),
         }
 
     def show(rec, hdr):
@@ -2077,6 +2155,22 @@ def main():
                     break
                 controls.handle(web_key,
                                 ask=lambda _prompt, v=web_value: v)
+            # And the questions, answered on this thread for a stronger reason
+            # than the keys are: the tally is mutated here, so nothing else may
+            # read it. What comes back is bounded by the ring, the prune cap
+            # and `detail.DETAIL_ROWS`, so one of these is a few milliseconds
+            # rather than a walk over a whole session.
+            while True:
+                try:
+                    asked = ask_queue.get_nowait()
+                except queue.Empty:
+                    break
+                # A browser that posted and then closed its tab leaves nothing
+                # to publish to, and building the report for it would be work
+                # done for nobody.
+                if bus.active:
+                    bus.detail(detail.report(asked, detail_ring, tally,
+                                             resolver))
             # A request refused because its Host named another port, reported
             # on this thread for the reason browser keys are answered on it:
             # a line written from a request thread lands inside the scroll
@@ -2131,6 +2225,11 @@ def main():
                 data, addr = sock.recvfrom(65535)
             except socket.timeout:
                 continue
+            # Taken here rather than after the decode, so that "received" is
+            # when the datagram arrived rather than when this program got round
+            # to it. On a busy link the two differ by whatever the decode cost,
+            # and the figure is compared against the exporter's own clock.
+            received = time.time()
 
             exporter = addr[0]
             # One call covers the version check, the templates, the counters
@@ -2168,6 +2267,17 @@ def main():
             # from the header alone, here or minutes later on the way out of
             # the pause buffer.
             hdr = message.header
+            # What the message knew and the header did not. The header is a
+            # plain dict netflume hands over and does not keep, and the pause
+            # buffer already carries it beside each held flow, so a flow
+            # replayed minutes later still has all of this attached. Stamped
+            # rather than passed alongside for exactly that reason: there is
+            # no second place to carry it to.
+            hdr["received"] = received
+            hdr["sampling_rate"] = message.sampling_rate
+            hdr["gap"] = message.gap
+            hdr["datagram_bytes"] = len(data)
+            hdr["flow_count"] = len(message.flows)
 
             for rec in message.flows:
                 # Range a dynamic scale against every flow decoded, including

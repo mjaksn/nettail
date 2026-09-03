@@ -231,6 +231,12 @@ tbody td.r { text-align: right; }
    the difference between wrapping and scrolling. */
 tbody td.w { white-space: pre-wrap; overflow-wrap: anywhere; }
 tbody tr.flow:hover td { background: var(--row-hover); }
+/* Only a row the collector stamped a serial on can be asked about, so only
+   that one says it can be clicked. Every flow published by a running
+   collector carries one; a row that does not is one that arrived before the
+   greeting it came with, and offering a pointer over it would be promising
+   a dialog that then had nothing to look up. */
+tbody tr.flow.ask { cursor: pointer; }
 tbody tr.prose td {
   white-space: pre-wrap;
   padding: 6px 8px;
@@ -274,6 +280,100 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
 .a36 { color: var(--accent); }
 .a37 { color: var(--ink); }
 .a90 { color: var(--ink-3); }
+
+/* the flow details dialog
+
+   Large on purpose. What goes in it is two panels of facts, two endpoint
+   panels with three tables each, and a panel for the pair, and the whole
+   point of a dialog rather than a drawer is that there is room to lay them
+   beside each other. The dialog is the scroller, not the regions inside it,
+   so the reader scrolls one thing. */
+
+#detail {
+  width: min(96vw, 1400px);
+  height: 92vh;
+  max-width: none;
+  max-height: none;
+  padding: 0;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--ground);
+  color: var(--ink);
+  font: inherit;
+  overflow: auto;
+}
+#detail::backdrop { background: rgba(0, 0, 0, .55); }
+#detail .dhead {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--panel);
+}
+#detail .dtitle { font-weight: 700; color: var(--accent); }
+#detail .dstatus {
+  padding: 5px 12px;
+  color: var(--ink-3);
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--rule);
+}
+/* The three regions. Two panels fit side by side where there is room for
+   them and stack where there is not, which is the same answer for the flow
+   and datagram pair, the two endpoints, and the pair panel that is one panel
+   wide whatever happens. */
+#detail .dgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(410px, 1fr));
+  gap: 10px;
+  padding: 10px 12px 0 12px;
+}
+#detail .dgrid:last-child { padding-bottom: 12px; }
+#detail .dgrid:empty { display: none; }
+#detail .panel {
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: var(--panel);
+  padding: 8px 10px;
+  min-width: 0;
+}
+#detail .panel h2 {
+  margin: 0 0 6px 0;
+  font-size: 1em;
+  color: var(--accent);
+  letter-spacing: .06em;
+}
+/* A facts list is a label and a value, and the label column is as wide as
+   its widest label rather than a guess: these are whole phrases, and units
+   are part of them. */
+#detail .facts {
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  gap: 0 12px;
+}
+#detail .facts .fl { color: var(--ink-3); }
+#detail .facts .fv { color: var(--ink); overflow-wrap: anywhere; }
+#detail .dtable { margin-top: 10px; overflow-x: auto; }
+#detail .dth {
+  color: var(--ink-2);
+  border-bottom: 1px solid var(--rule);
+  padding-bottom: 3px;
+}
+#detail table { width: 100%; }
+/* Not pinned. The main table has one head and a window's worth of rows under
+   it; a panel here has several short tables, and heads that stuck would pile
+   up against each other at the top of the dialog as it scrolled. */
+#detail thead th { position: static; padding: 3px 8px; }
+#detail tbody td { white-space: nowrap; padding: 1px 8px; }
+/* The first column of every table here holds a name: a protocol, a service,
+   or a peer with its hostname after it. It is the only one that can be long,
+   and it wraps rather than widening the table past the panel. */
+#detail tbody td:first-child { white-space: pre-wrap; overflow-wrap: anywhere; }
+#detail tbody tr:hover td { background: var(--row-hover); }
+#detail .dmore { color: var(--ink-3); padding-top: 3px; }
 
 /* Scrollbars, in the page's own colours rather than the browser's. The two
    syntaxes are not alternatives: the standard properties are what Firefox and
@@ -319,6 +419,18 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
     <tbody id="rows"></tbody>
   </table>
 </main>
+<dialog id="detail">
+  <div class="dhead">
+    <span class="dtitle" id="detailTitle"></span>
+    <span class="spacer"></span>
+    <button type="button" id="detailRefresh">Refresh</button>
+    <button type="button" id="detailClose">Close</button>
+  </div>
+  <div class="dstatus" id="detailStatus"></div>
+  <div class="dgrid" id="detailFlow"></div>
+  <div class="dgrid" id="detailEnds"></div>
+  <div class="dgrid" id="detailPair"></div>
+</dialog>
 <footer id="status"><span><i>waiting for the collector</i></span></footer>
 <script>
 (function () {
@@ -622,9 +734,18 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
     schedule();
   }
 
-  function addFlow(cells) {
+  function addFlow(payload) {
+    var cells = payload.cells || [];
     var tr = document.createElement("tr");
     tr.className = "flow";
+    // The serial and the two ends, kept on the row itself rather than in a
+    // table beside it. A row is trimmed by `keep` from either end of the
+    // history, and anything held elsewhere would have to be trimmed in step
+    // with it; a property on the element is thrown away when the element is.
+    if (typeof payload.n === "number") {
+      tr.detail = { n: payload.n, ends: payload.ends || [null, null] };
+      tr.className = "flow ask";
+    }
     for (var i = 0; i < columns.length; i++) {
       var td = document.createElement("td");
       var classes = [];
@@ -759,6 +880,243 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
     });
   }
 
+  // ---- asking about one flow -------------------------------------------
+  //
+  // Clicking a row asks the collector about it and shows the answer in a
+  // dialog. The collector is the only thing that can answer: the statistics
+  // live on the receive thread and every value in the report is written out
+  // in Python, for the reason the table head and the buttons come over the
+  // wire rather than being typed here. So this half is the click, the ask,
+  // and two renderers, one for a list of facts and one for a table.
+  //
+  // The ask goes out over the control route and the answer comes back on the
+  // stream, which is what lets the collector answer it on the thread that
+  // owns the figures. Every browser watching receives every answer, so each
+  // one is stamped with the id of the ask it belongs to and a page ignores
+  // the ones that are not its own.
+
+  var detail = document.getElementById("detail");
+  var detailTitle = document.getElementById("detailTitle");
+  var detailStatus = document.getElementById("detailStatus");
+  var detailFlow = document.getElementById("detailFlow");
+  var detailEnds = document.getElementById("detailEnds");
+  var detailPair = document.getElementById("detailPair");
+
+  // How long to wait for an answer before saying so. A reply can be lost:
+  // this browser's queue on the collector is bounded, and a page far enough
+  // behind loses the oldest events in it. Saying "asking the collector" for
+  // ever would be the page presenting a lost frame as a slow one.
+  var ASK_WAIT = 8000;
+
+  // How often the dialog asks again, from the greeting, and 0 for not at all.
+  var detailRefreshMs = 5000;
+  // The last id sent. A reply carrying anything else is somebody else's, or
+  // is ours from before the dialog was closed and reopened.
+  var askId = 0;
+  // The id still waiting for a reply, or 0.
+  var awaiting = 0;
+  var askRow = null;
+  var askTimer = 0;
+  var waitTimer = 0;
+
+  function stopAsking() {
+    if (askTimer) { window.clearInterval(askTimer); askTimer = 0; }
+    if (waitTimer) { window.clearTimeout(waitTimer); waitTimer = 0; }
+    awaiting = 0;
+  }
+
+  function openDetail(tr) {
+    askRow = tr;
+    detailTitle.textContent = "";
+    detailFlow.textContent = "";
+    detailEnds.textContent = "";
+    detailPair.textContent = "";
+    if (!detail.open) { detail.showModal(); }
+    // Cleared before a new one is started, so that opening and closing twice
+    // cannot leave two timers asking.
+    stopAsking();
+    if (detailRefreshMs > 0) {
+      askTimer = window.setInterval(askAgain, detailRefreshMs);
+    }
+    askAgain();
+  }
+
+  function askAgain() {
+    if (!askRow) { return; }
+    var what = askRow.detail || { n: null, ends: [null, null] };
+    askId += 1;
+    awaiting = askId;
+    var mine = askId;
+    detailStatus.textContent = "asking the collector";
+    if (waitTimer) { window.clearTimeout(waitTimer); }
+    waitTimer = window.setTimeout(function () {
+      waitTimer = 0;
+      if (awaiting === mine) {
+        detailStatus.textContent = "no answer from the collector. " +
+          "Press Refresh to ask again.";
+      }
+    }, ASK_WAIT);
+    fetch(BASE + "/detail", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ask: mine, n: what.n, ends: what.ends })
+    }).then(function (response) {
+      // The refusal goes in the dialog rather than into the table under it:
+      // it is about this dialog and nothing else, and a gap row would put it
+      // in front of a reader who may not even have one open. The timer is
+      // left running, so the next tick tries again on its own.
+      if (!response.ok && awaiting === mine) {
+        detailStatus.textContent = "the collector refused that request (" +
+          response.status + "). Press Refresh to try again.";
+      }
+    }).catch(function () {
+      if (awaiting === mine) {
+        detailStatus.textContent = "could not reach the collector. " +
+          "Press Refresh to try again.";
+      }
+    });
+  }
+
+  function factsList(facts) {
+    var wrap = document.createElement("div");
+    wrap.className = "facts";
+    facts.forEach(function (fact) {
+      var label = document.createElement("span");
+      label.className = "fl";
+      label.textContent = fact[0];
+      var value = document.createElement("span");
+      value.className = "fv";
+      value.textContent = fact[1];
+      wrap.appendChild(label);
+      wrap.appendChild(value);
+    });
+    return wrap;
+  }
+
+  function factTable(spec) {
+    var head = spec.head || [];
+    var wrap = document.createElement("div");
+    wrap.className = "dtable";
+    var caption = document.createElement("div");
+    caption.className = "dth";
+    caption.textContent = spec.title;
+    wrap.appendChild(caption);
+    var table = document.createElement("table");
+    var thead = document.createElement("thead");
+    var headRow = document.createElement("tr");
+    head.forEach(function (col) {
+      var th = document.createElement("th");
+      th.textContent = col[0];
+      if (col[1] === ">") { th.className = "r"; }
+      headRow.appendChild(th);
+    });
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+    var body = document.createElement("tbody");
+    (spec.rows || []).forEach(function (cells) {
+      var tr = document.createElement("tr");
+      cells.forEach(function (cell, i) {
+        var td = document.createElement("td");
+        if (head[i] && head[i][1] === ">") { td.className = "r"; }
+        td.textContent = cell;
+        tr.appendChild(td);
+      });
+      body.appendChild(tr);
+    });
+    table.appendChild(body);
+    wrap.appendChild(table);
+    if (spec.more) {
+      var more = document.createElement("div");
+      more.className = "dmore";
+      more.textContent = spec.more.toLocaleString() + " more, not shown";
+      wrap.appendChild(more);
+    }
+    return wrap;
+  }
+
+  function panel(section) {
+    var box = document.createElement("section");
+    box.className = "panel";
+    var title = document.createElement("h2");
+    title.textContent = section.title || "";
+    box.appendChild(title);
+    if ((section.facts || []).length) {
+      box.appendChild(factsList(section.facts));
+    }
+    (section.tables || []).forEach(function (spec) {
+      box.appendChild(factTable(spec));
+    });
+    return box;
+  }
+
+  // Built into a fragment and swapped in, rather than the dialog being torn
+  // down and put back. A refresh arrives every few seconds and the reader may
+  // be halfway down a peer table when it does; replacing the three regions'
+  // children leaves the dialog itself, and the scroll position with it, where
+  // they were.
+  function fill(region, sections) {
+    var frag = document.createDocumentFragment();
+    sections.forEach(function (section) { frag.appendChild(panel(section)); });
+    region.textContent = "";
+    region.appendChild(frag);
+  }
+
+  function renderDetail(payload) {
+    awaiting = 0;
+    if (waitTimer) { window.clearTimeout(waitTimer); waitTimer = 0; }
+    detailTitle.textContent = payload.title || "";
+    fill(detailFlow, payload.sections || []);
+    fill(detailEnds, payload.ends || []);
+    fill(detailPair, payload.pair ? [payload.pair] : []);
+    var taken = new Date().toLocaleTimeString();
+    detailStatus.textContent = detailRefreshMs > 0
+      ? "figures as they were at " + taken + ", and again every " +
+        (detailRefreshMs / 1000) + "s"
+      : "figures as they were at " + taken +
+        ", and held there until Refresh is pressed";
+  }
+
+  // One listener on the table rather than one per row. Rows arrive thousands
+  // at a time and are trimmed the same way, and a listener each would be a
+  // listener each to remove.
+  rows.addEventListener("click", function (event) {
+    var target = event.target;
+    var tr = target && target.closest ? target.closest("tr.flow") : null;
+    if (!tr || !tr.detail) { return; }
+    openDetail(tr);
+  });
+
+  document.getElementById("detailRefresh").addEventListener("click", askAgain);
+  document.getElementById("detailClose").addEventListener("click", function () {
+    detail.close();
+  });
+
+  // The backdrop, which every other dialog on the web closes on. Told apart
+  // by where the click landed rather than by what it landed on: a click on
+  // the backdrop targets the dialog element, and so do two clicks that are
+  // plainly inside it. The dialog is a fixed 92vh, so a short report leaves
+  // empty space below its panels, and the dialog is its own scroller, so
+  // letting go of its scrollbar is a click on it too. Closing on either would
+  // be the reader losing the dialog for reading it.
+  detail.addEventListener("click", function (event) {
+    if (event.target !== detail) { return; }
+    var box = detail.getBoundingClientRect();
+    var outside = event.clientX < box.left || event.clientX > box.right ||
+                  event.clientY < box.top || event.clientY > box.bottom;
+    if (outside) { detail.close(); }
+  });
+
+  // Everything that stops the dialog goes through this one listener, so the
+  // Escape key, the backdrop, the Close button and `park` all leave the same
+  // state behind: no timer, no outstanding ask, and no row to ask about. The
+  // id is stepped on so that a reply already on its way is not rendered into
+  // a dialog the reader has closed.
+  detail.addEventListener("close", function () {
+    stopAsking();
+    askId += 1;
+    askRow = null;
+  });
+
   // ---- keys ------------------------------------------------------------
 
   function press(key, value) {
@@ -857,6 +1215,12 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
   }
 
   document.addEventListener("keydown", function (event) {
+    // Nothing is forwarded while the dialog is up. It is the reader's focus
+    // and their keystrokes belong to it, and the one that matters is x, which
+    // would otherwise clear the table underneath a dialog opened from a row
+    // in it. Escape is not forwarded from here in any case: it is in the
+    // collector's WEB_EXCLUDED, and it is what closes a dialog natively.
+    if (detail.open) { return; }
     if (readonly) { return; }
     if (event.ctrlKey || event.metaKey || event.altKey) { return; }
     var target = event.target;
@@ -954,6 +1318,10 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
     if (hiddenFollowing === null) { hiddenFollowing = following(); }
     parked = true;
     parkedAt = lastFlowsShown;
+    // The answer to an ask comes back on the stream, so a dialog left open
+    // over a parked one would sit on "asking the collector" until the tab
+    // came back. Closing it stops its timer through the close listener.
+    if (detail.open) { detail.close(); }
     stream.close();
     stream = null;
     // The clock watcher can reach a tab that is plainly in front of somebody,
@@ -1085,6 +1453,12 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
       if (!greeted) {
         greeted = true;
         readonly = !!hello.readonly;
+        // How the collector was started, like readonly and json beside it.
+        // The dialog works under --web-readonly, which is why this is read
+        // whatever that says: asking what a flow was changes nothing.
+        if (typeof hello.detail_refresh === "number") {
+          detailRefreshMs = Math.max(hello.detail_refresh, 0) * 1000;
+        }
         buildHead(hello.columns || []);
         buildKeys(hello.keys || []);
         pressable = hello.pressable || [];
@@ -1105,8 +1479,7 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
     });
 
     es.addEventListener("flow", function (event) {
-      var payload = JSON.parse(event.data);
-      addFlow(payload.cells || []);
+      addFlow(JSON.parse(event.data));
     });
 
     es.addEventListener("status", function (event) {
@@ -1125,6 +1498,15 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
 
     es.addEventListener("clear", function () {
       clearTable();
+    });
+
+    es.addEventListener("detail", function (event) {
+      var payload = JSON.parse(event.data);
+      // Every watcher is sent every answer, so this is where a page picks out
+      // its own. A reply from before the dialog was closed fails the same
+      // test, because closing steps the id on.
+      if (!detail.open || payload.ask !== askId) { return; }
+      renderDetail(payload);
     });
 
     es.addEventListener("dropped", function (event) {

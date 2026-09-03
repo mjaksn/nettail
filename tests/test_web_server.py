@@ -5,6 +5,7 @@ it with `urllib`. Every read carries a timeout and every server is stopped in a
 `finally`, because a suite that hangs takes a CI job with it and this one runs
 on nine of them.
 """
+import ipaddress
 import json
 import queue
 import re
@@ -17,7 +18,7 @@ import urllib.request
 from harness import check, finish
 
 from nettail.feed import Feed
-from nettail.web import MAX_CLIENTS, WebInterface, unpad
+from nettail.web import ASK_QUEUE_MAX, MAX_CLIENTS, WebInterface, unpad
 
 TIMEOUT = 6.0
 
@@ -79,8 +80,32 @@ check("and a cell of nothing but padding empties",
       unpad("      ") == "")
 
 bus = Feed()
-site = WebInterface(bus, queue.Queue(maxsize=8), {"e"}, bind="127.0.0.1", port=0)
+asks = queue.Queue(maxsize=ASK_QUEUE_MAX)
+site = WebInterface(bus, queue.Queue(maxsize=8), {"e"}, bind="127.0.0.1",
+                    port=0, asks=asks)
 url = site.start()
+
+
+def post(route, payload, origin=None):
+    """POST a json body to one of the control routes, and give back the code.
+
+    Rather less than `test_web_security`'s poster, which has to forge a Host
+    and a token as well. What is being checked here is what the route makes of
+    a body it was given, so everything else about the request is right.
+    """
+    headers = {"Host": "127.0.0.1:%d" % site.port,
+               "Content-Type": "application/json"}
+    if origin:
+        headers["Origin"] = origin
+    request = urllib.request.Request(
+        "http://127.0.0.1:%d/t/%s/%s" % (site.port, site.token, route),
+        data=json.dumps(payload).encode("utf-8"), headers=headers,
+        method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=TIMEOUT) as answer:
+            return answer.status
+    except urllib.error.HTTPError as exc:
+        return exc.code
 
 check("starting reports a url", url.startswith("http://127.0.0.1:"))
 check("with the token in the path", "/t/%s/" % site.token in url)
@@ -245,6 +270,29 @@ try:
     # to be rid of.
     check("a clear empties what is queued behind it", "pendingClear" in body)
 
+    # -- the flow details dialog ------------------------------------------
+    #
+    # Nothing here runs the page, so these are greps again, and each is for a
+    # rule that fails nothing at all when it is quietly dropped.
+    check("a row opens a dialog rather than a panel", "showModal(" in body)
+    check("through one listener on the table rather than one per row",
+          re.search(r'rows\.addEventListener\(\s*"click"', body) is not None)
+    # Typing x into the dialog would otherwise clear the table underneath the
+    # very row the dialog was opened from.
+    check("and no keystroke is forwarded while it is open",
+          re.search(r"if \(detail\.open\)\s*\{\s*return;", body) is not None)
+    # A dialog left open over a parked stream would sit on "asking the
+    # collector" until the tab came back, since the answer comes back there.
+    check("parking the stream closes it", "detail.close()" in body)
+    # The interval starts when the dialog opens and has to stop when it
+    # closes, or two open-and-close cycles leave two timers asking.
+    check("the dialog asks again on a clock", "setInterval(askAgain" in body)
+    check("and the clock is stopped", "clearInterval(" in body)
+    check("on whichever way it was closed, through one close listener",
+          re.search(r'detail\.addEventListener\(\s*"close"', body) is not None)
+    check("the cadence comes from the collector rather than the page",
+          "detail_refresh" in body)
+
     # -- the greeting -----------------------------------------------------
 
     bus.set_hello({
@@ -289,6 +337,102 @@ try:
         check("prose keeps its kind", by_name["prose"]["kind"] == "notice")
         check("and its escape codes, so the browser sees what the terminal saw",
               "\033[33m" in by_name["prose"]["text"])
+
+        # -- asking about a flow -----------------------------------------
+        #
+        # The route a click goes out on. It changes nothing, so it is allowed
+        # under --web-readonly, which `test_web_security` pins beside the
+        # refusal the key route gets there. Everything in the body is text off
+        # the wire that ends up in a report published to every browser
+        # watching, so all of it is checked at this boundary rather than where
+        # the report is built.
+
+        check("a well formed question is accepted",
+              post("detail",
+                   {"ask": 1, "n": 2,
+                    "ends": ["192.168.1.10", "8.8.8.8"]}) == 200)
+        check("and reaches the queue the receive loop drains",
+              asks.get_nowait() == (1, 2, ("192.168.1.10", "8.8.8.8")))
+        check("a question about a flow that is gone still names its ends",
+              post("detail", {"ask": 2, "n": None,
+                              "ends": ["192.168.1.10", None]}) == 200)
+        check("with the missing half kept as nothing",
+              asks.get_nowait() == (2, None, ("192.168.1.10", None)))
+        # An address is parsed and written back out, so that a browser that
+        # spells one differently from the decoder does not ask about a key
+        # that cannot be in the tally.
+        check("an IPv6 address is normalised on the way through",
+              post("detail", {"ask": 3, "n": None,
+                              "ends": ["2001:0DB8:0000:0000:0000:0000:0000:0001",
+                                       None]}) == 200
+              and asks.get_nowait()[2][0] == "2001:db8::1")
+        # And the spelling netflume decodes into survives untouched, which is
+        # the case that actually happens: what the page sends back is what the
+        # collector sent it in the first place.
+        decoded = str(ipaddress.IPv6Address(
+            bytes.fromhex("00000000000000000000ffffc0a8010a")))
+        check("and the decoder's own spelling comes back as itself",
+              post("detail", {"ask": 4, "n": None,
+                              "ends": [decoded, None]}) == 200
+              and asks.get_nowait()[2][0] == decoded, decoded)
+
+        for name, payload in (
+            ("an ask that is not a number", {"ask": "one"}),
+            ("an ask that is a bool", {"ask": True}),
+            ("a negative ask", {"ask": -1}),
+            ("an enormous ask", {"ask": 2 ** 80}),
+            ("no ask at all", {"n": 1}),
+            ("a serial that is not a number", {"ask": 1, "n": "two"}),
+            ("a serial that is a bool", {"ask": 1, "n": False}),
+            ("ends that are not a pair", {"ask": 1, "ends": ["10.0.0.1"]}),
+            ("ends that are not a list", {"ask": 1, "ends": "10.0.0.1"}),
+            ("an end that is not an address",
+             {"ask": 1, "ends": ["not-an-address", None]}),
+            ("an end that is a hostname",
+             {"ask": 1, "ends": ["evil.example.com", None]}),
+            ("an end that is far too long",
+             {"ask": 1, "ends": ["1" * 200, None]}),
+            ("a field this route does not know",
+             {"ask": 1, "n": 1, "ends": [None, None], "extra": 1}),
+            ("a body that is not an object", [1, 2, 3]),
+        ):
+            got = post("detail", payload)
+            check("the detail route refuses %s" % name, got == 400,
+                  "got %r" % (got,))
+        check("nothing refused reached the queue", asks.empty(),
+              repr(list(asks.queue)))
+
+        check("a foreign origin is refused here too",
+              post("detail", {"ask": 1, "n": 1, "ends": [None, None]},
+                   origin="http://evil.example.com") == 403)
+        check("and a matching one is not",
+              post("detail", {"ask": 1, "n": 1, "ends": [None, None]},
+                   origin="http://127.0.0.1:%d" % site.port) == 200)
+        asks.get_nowait()
+
+        # A queue the receive loop is not draining is refused rather than
+        # waited on, which is the one thing a request thread may never do.
+        while not asks.full():
+            asks.put_nowait((0, None, (None, None)))
+        check("a full queue is refused rather than waited on",
+              post("detail", {"ask": 1, "n": 1, "ends": [None, None]}) == 503)
+        while not asks.empty():
+            asks.get_nowait()
+
+        # And an unknown route under a good token is still a 404, so the
+        # branch that added a second one did not open the door to a third.
+        check("no third control route appeared",
+              post("anything", {"ask": 1}) == 404)
+
+        # The answer goes back on the stream rather than in the response,
+        # which is what lets the collector build it on the thread that owns
+        # the figures.
+        bus.detail({"ask": 41, "held": False, "sections": [],
+                    "ends": [], "pair": None})
+        frames = read_frames(stream, 1)
+        check("the answer arrives on the stream",
+              bool(frames) and frames[0][0] == "detail", repr(frames))
+        check("with the ask's id on it", frames[0][1]["ask"] == 41)
 
         # -- falling behind ----------------------------------------------
         #

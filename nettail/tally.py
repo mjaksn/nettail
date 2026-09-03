@@ -16,10 +16,12 @@ from netflume import (
 )
 
 from .services import service_name
+from .traffic import MAX_TRACKED_KEYS, Traffic
 
 TOP_N = 5                    # rows in the busiest-pairs and longest-flows tables
 MAX_SPEED_EVENTS = 100000    # rate changes kept for the concurrency estimate
-MAX_TRACKED_KEYS = 50000     # pairs, services or addresses held at once
+
+__all__ = ["MAX_SPEED_EVENTS", "MAX_TRACKED_KEYS", "TOP_N", "Tally"]
 
 
 class Tally:
@@ -56,8 +58,12 @@ class Tally:
         self.service_in = Counter()
         self.service_out = Counter()
 
-        self.pair_bytes = Counter()
-        self.pair_packets = Counter()
+        # Per address and per pair, which is what the flow details dialog
+        # reports and where the busiest-pairs lists now read from. It used to
+        # be two Counters here, keyed alike and pruned together; folding them
+        # in leaves one object holding everything known about a conversation
+        # rather than a pair of tables beside a growing set of others.
+        self.traffic = Traffic()
 
         # Bytes by address, one trio for each side of the network edge, with
         # the direction counters beside the total they split. The same words
@@ -133,12 +139,16 @@ class Tally:
         if dst_public:
             self.service_out[service] += octets
 
-        if src and dst:
-            # Direction is collapsed: a conversation is a conversation whichever
-            # end opened it, and two rows for one exchange would just split it.
-            pair = (src, dst) if src <= dst else (dst, src)
-            self.pair_bytes[pair] += octets
-            self.pair_packets[pair] += packets
+        # Direction is collapsed for the pair, which is what makes a flow and
+        # its reply one conversation, and kept for each address, where it is
+        # the endpoint's own reading rather than the network edge's. Both are
+        # `traffic`'s to explain and the reasoning is written there.
+        #
+        # Fed here so that there goes on being one place a flow is counted,
+        # and its prune reports into the same total the summary already prints
+        # a line about.
+        self.pruned += self.traffic.add(src, dst, octets, packets, proto_name,
+                                        service, hdr.get("received"))
 
         if dst_public:
             self.talkers[dst] += octets
@@ -171,7 +181,6 @@ class Tally:
             if dst_public:
                 self.outbound_bytes += octets
 
-        self._prune((self.pair_bytes, self.pair_packets))
         self._prune((self.service_bytes, self.service_flows),
                     (self.service_in, self.service_out))
         self._prune((self.talkers,), (self.talkers_in, self.talkers_out))
@@ -278,10 +287,10 @@ class Tally:
                 for duration, _tick, details in sorted(self.longest, reverse=True)]
 
     def top_pairs_by_bytes(self):
-        return self.pair_bytes.most_common(self.top)
+        return self.traffic.top_pairs(self.top)
 
     def top_pairs_by_packets(self):
-        return self.pair_packets.most_common(self.top)
+        return self.traffic.top_pairs(self.top, by_packets=True)
 
     def top_protocols(self, n):
         """The busiest protocols, as (name, bytes, in, out).

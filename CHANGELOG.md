@@ -38,6 +38,69 @@ parsed, and it is treated as public.
   The browser view is sent the same block, under a prose kind of its own so
   that it does not read as something gone wrong.
 
+- **Clicking a flow in the browser opens a dialog holding everything known
+  about it.** The browser showed one row per flow and nothing more, and a row
+  is a line of a table: it has to fit, so most of what the collector decoded
+  never appeared anywhere. The dialog has room, and it holds four things.
+
+  The flow itself, spelled out: both ends with their hostname, service name,
+  which side of the boundary they are on and their country where one is
+  known; which way it crossed, in words rather than as an arrow; its start
+  and end as absolute local times; its size and packet count exactly as well
+  as in the short form the table uses; its TCP flags as words rather than as
+  `.A....S.`; why the exporter stopped counting it; and then every remaining
+  field of the record under a label, elements this build has no name for
+  included. It is a superset of what `--verbose` prints under a flow.
+
+  The datagram it arrived in, which nothing else in this program showed: the
+  exporter, the version, the observation domain, the export sequence number,
+  the exporter's own clock against this machine's, the datagram's size and
+  how many flows were in it, the sampling rate in force, and how many exports
+  the sequence number says were missed before it.
+
+  Statistics for each of the two addresses, none of which were kept before:
+  when the collector first and last saw it, its flows, bytes and packets each
+  split into what it received and what it sent, how many addresses it has
+  talked to, what share of everything seen it accounts for, and three tables,
+  by protocol, by service, and its busiest peers. **In and out there are read
+  from the address**, so a public server's panel says it sent what it served,
+  where the traffic summary's external table asks a different question about
+  the same bytes and calls them inbound.
+
+  And statistics for the pair, which is the conversation between the two ends
+  whichever of them opened it, with protocol and service tables of its own.
+
+  The figures move on their own every five seconds and a Refresh button asks
+  for them at once. `--web-detail-refresh SECONDS` sets the interval, and `0`
+  holds them still until Refresh is pressed. It works under `--web-readonly`,
+  since asking what a flow was changes nothing. The terminal gets no
+  equivalent: there is nowhere on a console to put one.
+
+  Every value in the dialog is worked out and written out by the collector,
+  on the thread that owns the figures, and the page lays out what it is
+  handed without naming a field, a flag or a protocol of its own. That is the
+  same rule the table head and the buttons already follow.
+
+### Changed
+
+- **`--json` gains six metadata keys**, all of them about the export message
+  a flow arrived in rather than about the flow. `_domain` is the observation
+  domain, which on v5 is the engine ID; `_sequence` is the export sequence
+  number; `_export_time` is the exporter's own clock when it sent the
+  datagram; `_uptime` is milliseconds since the exporter booted, which is the
+  clock `first_switched` and `last_switched` are measured against; `_received`
+  is when this collector received the datagram; and `_sampling_rate` is the
+  1-in-N rate in force, `1` when unsampled. None of it survived the receive
+  loop before, so questions about whether anything was lost on the way, or how
+  far behind an exporter's clock is, had no answer in the parseable half of
+  the output. Each is written only where the header carried the fact, which is
+  why `_uptime` is absent from IPFIX rather than being null, and is absent in
+  the same way `src_host` is.
+
+- The busiest-pairs lists in the traffic summary now read from the per-pair
+  table behind the dialog rather than from a pair of counters of their own.
+  What they print is unchanged.
+
 ## [0.12.0] - 2026-09-03
 
 ### Added
