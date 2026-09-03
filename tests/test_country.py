@@ -532,9 +532,44 @@ check("and the spelled out form of the same cell",
       country.spell_flags(quoted) in README, repr(country.spell_flags(quoted)))
 check("and the flag it quotes is the one this program draws",
       country.flag("US") in README)
-for path in country.SEARCH_PATHS:
+for path in country.UNIX_PATHS:
     check("the README lists %s among the places looked in" % path,
           path in README)
+for _variable, tail in country.WINDOWS_PATHS:
+    check("the README lists the Windows %s too" % tail, tail in README)
+
+# Where a database is looked for, on a platform that is not the one running
+# this. A list of Unix paths on Windows is a --country that cannot work and
+# an answer naming four directories that could not have existed, which is
+# what shipped for an afternoon.
+check("the Unix places are the Unix ones",
+      country.search_paths(platform="posix", env={}) == country.UNIX_PATHS)
+windows = country.search_paths(
+    platform="nt", env={"LOCALAPPDATA": r"C:\Users\x\AppData\Local",
+                        "PROGRAMDATA": r"C:\ProgramData"})
+check("Windows gets Windows ones, per user first",
+      windows == (r"C:\Users\x\AppData\Local\nettail\country.mmdb",
+                  r"C:\ProgramData\nettail\country.mmdb"), str(windows))
+check("and none of the Unix ones, which cannot exist there",
+      not any(path.startswith("/") for path in windows), str(windows))
+check("a Windows machine with neither variable set is looked at nowhere",
+      country.search_paths(platform="nt", env={}) == ())
+
+# What a run that finds nothing says, without depending on what this machine
+# happens to have. `load` reads the list through the module, so replacing it
+# is enough.
+real_paths = country.search_paths
+country.search_paths = lambda: ("/nowhere/at/all/country.mmdb",)
+try:
+    note = country.load()
+finally:
+    country.search_paths = real_paths
+check("finding none says where it looked", "/nowhere/at/all" in (note or ""),
+      repr(note))
+check("and names somewhere to put one", "country.mmdb" in (note or ""),
+      repr(note))
+check("and says a free one can be had", "DB-IP" in (note or ""), repr(note))
+country.load(PATH)
 
 country.show(False)
 check("with the marking off a row is exactly what it always was",
@@ -634,7 +669,7 @@ check("and no flag survives to either", US not in out and US not in err)
 # --country on its own goes looking, and says where it looked when it finds
 # nothing. The search paths are absolute and Unix, so on a machine that has
 # none of them this is the whole of what happens.
-if not any(os.path.exists(path) for path in country.SEARCH_PATHS):
+if not any(os.path.exists(path) for path in country.search_paths()):
     out, err = run(["--country"])
     check("--country with nothing to read says where it looked",
           "Looked in" in err, err[:400])

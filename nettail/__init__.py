@@ -66,10 +66,12 @@ from .cli import (
 from .colour import C
 from .country import (
     CACHE_MAX,
-    SEARCH_PATHS,
+    UNIX_PATHS,
+    WINDOWS_PATHS,
     BadDatabase,
     CodeStream,
     country_of,
+    search_paths,
     spell_flags,
     terminal_flags,
 )
@@ -148,8 +150,8 @@ from .web import (
 
 __all__ = [
     "C", "Controls", "DEFAULT_SIZE_SCALE_MAX", "ENDPOINT_INDENT",
-    "CACHE_MAX", "SEARCH_PATHS", "BadDatabase", "CodeStream", "country_of",
-    "spell_flags", "terminal_flags",
+    "CACHE_MAX", "UNIX_PATHS", "WINDOWS_PATHS", "BadDatabase", "CodeStream",
+    "country_of", "search_paths", "spell_flags", "terminal_flags",
     "ENDPOINT_WIDTH", "WAY_WIDTH", "flow_macs", "human_clock", "way",
     "HELP_KEY", "KEY_HELP", "KEY_WIDTH", "KEYS", "Keyboard",
     "PAUSE_BUFFER", "QR_KEY",

@@ -62,10 +62,21 @@ _MARKER = b"\xab\xcd\xefMaxMind.com"
 # the search says what is meant.
 _METADATA_MAX = 128 * 1024
 
-# Where a database is looked for when --country-db named none. The first three
-# are where geoipupdate and the distribution packages put one; the first is
-# where the installer would put one on a machine running this as a service.
-SEARCH_PATHS = (
+# Where a database is looked for when --country-db named none.
+#
+# Two lists, because there are two platforms and neither one's places exist on
+# the other. A Windows machine has no /usr/share/GeoIP and never will, so a
+# list of Unix paths alone is a --country that cannot work there at all, and
+# that answers a reader who asked where it looked by naming four directories
+# which could not have existed. That is what it did.
+#
+# The Unix places are where geoipupdate and the distribution packages put one,
+# with the installer's own directory first. Windows has no convention for this
+# whatever, so these are this program's own, per-user first because that is
+# the one somebody can create without being an administrator. They are
+# assembled with a literal backslash rather than through os.path.join, so that
+# what this answers for a platform does not depend on the platform asking.
+UNIX_PATHS = (
     "/etc/nettail/country.mmdb",
     "/usr/share/GeoIP/GeoLite2-Country.mmdb",
     "/var/lib/GeoIP/GeoLite2-Country.mmdb",
@@ -74,6 +85,26 @@ SEARCH_PATHS = (
     "/usr/share/GeoIP/GeoLite2-City.mmdb",
     "/var/lib/GeoIP/GeoLite2-City.mmdb",
 )
+
+WINDOWS_PATHS = (
+    ("LOCALAPPDATA", "nettail\\country.mmdb"),
+    ("PROGRAMDATA", "nettail\\country.mmdb"),
+)
+
+
+def search_paths(platform=None, env=None):
+    """Where a database is looked for on this machine, in order.
+
+    The platform and the environment are arguments with the real ones as their
+    default, for the reason `terminal_flags` takes them: the list a Windows
+    machine gets is exactly the one a Linux runner can never see for itself.
+    """
+    platform = os.name if platform is None else platform
+    env = os.environ if env is None else env
+    if platform != "nt":
+        return UNIX_PATHS
+    return tuple(env[variable].rstrip("\\/") + "\\" + tail
+                 for variable, tail in WINDOWS_PATHS if env.get(variable))
 
 # Addresses whose answer is remembered. A lookup walks up to 128 nodes and
 # then decodes a record that carries a continent and a country in a dozen
@@ -472,14 +503,18 @@ def load(path=None):
     _showing = False
 
     if path is None:
-        found = [candidate for candidate in SEARCH_PATHS
-                 if os.path.exists(candidate)]
+        places = search_paths()
+        found = [candidate for candidate in places if os.path.exists(candidate)]
         if not found:
             where = dict.fromkeys(os.path.dirname(candidate) or candidate
-                                  for candidate in SEARCH_PATHS)
+                                  for candidate in places)
             return ("no country database found, so no address will be "
-                    "marked. Looked in %s. Point --country-db at a MaxMind "
-                    "format file to have one read." % ", ".join(where))
+                    "marked. Looked in %s. DB-IP and MaxMind both publish a "
+                    "free one: put it at %s, or point --country-db at it "
+                    "wherever it is."
+                    % (", ".join(where) or "nowhere, since this platform has "
+                                           "no usual place for one",
+                       (places or UNIX_PATHS)[0]))
         path = found[0]
 
     try:

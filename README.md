@@ -1521,6 +1521,15 @@ With no `--country-db` the first of these that exists is read:
 /var/lib/GeoIP/GeoLite2-City.mmdb
 ```
 
+On Windows none of those exists or ever could, so two of this program's own
+are looked at instead, the per-user one first because it is the one you can
+create without being an administrator:
+
+```
+%LOCALAPPDATA%\nettail\country.mmdb
+%PROGRAMDATA%\nettail\country.mmdb
+```
+
 Finding none is one line at startup saying where it looked, and the collector
 runs on unmarked. So is a file that will not open or does not read as a
 database. A successful load says which file it read and when the file was

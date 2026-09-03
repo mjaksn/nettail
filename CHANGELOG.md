@@ -29,8 +29,11 @@ parsed, and it is treated as public.
   you point at says: a MaxMind format `.mmdb`, which is what both of the free
   country databases are distributed as and what `geoipupdate` already keeps
   current in `/usr/share/GeoIP` on a good many machines. `--country-db` names
-  one; without it seven usual places are searched and, finding none, the
-  collector says where it looked and runs on unmarked. A City database answers
+  one; without it the usual places for the platform are searched, the GeoIP
+  directories on Unix and `%LOCALAPPDATA%
+ettail` on Windows, which has no
+  convention of its own. Finding none, the collector says where it looked and
+  where a free one can be had, and runs on unmarked. A City database answers
   the same question and is read the same way.
 
   Reading the format is two hundred lines rather than a dependency, for the
