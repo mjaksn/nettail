@@ -132,7 +132,7 @@ parser, so `build_parser` goes on being the one place an option exists.
 runs come out with the same arguments, and a new option with no sample value
 in that suite fails rather than turning out to be quietly unsettable.
 
-Four things about it are easy to break.
+Six things about it are easy to break.
 
 - **The file is read before the arguments are parsed, and that is what makes
   the command line win.** Its settings are installed with `set_defaults`, and
@@ -161,6 +161,24 @@ Four things about it are easy to break.
   everywhere else in this program. It is the one place "the command line
   wins" reads differently and it is written down in three places for that
   reason.
+- **Two options that are alternatives are the one place the ordering does not
+  settle it.** Everywhere else the file and the command line are arguing about
+  one option, so installing the file as a default and letting an argument
+  override it is the whole mechanism. A mutually exclusive group is two
+  options that mean opposite things, and argparse refuses the second only when
+  it was typed, so a file's `size-scale-max` and a typed
+  `--size-scale-dynamic` both survive the parse and nothing downstream can
+  tell a choice was ever meant. That is the file beating the command line at
+  the one thing the ordering exists to prevent, and worse than the ordinary
+  case, because the file's value does not lose an argument, it survives into a
+  run that asked for its opposite. `config.overruled` puts the file's side
+  back, quietly, which is what every other option does when the command line
+  overrides it. It decides nothing about a pair that came from one place: two
+  typed argparse has refused already, and two out of one file is what
+  `conflicts` reports. `EXCLUSIVE_PAIRS` is there because
+  `--size-scale-window` rules out `--size-scale-max` and not
+  `--size-scale-dynamic`, which it implies, and an argparse group excludes in
+  every direction at once, so that pair cannot be expressed as one.
 - **A token goes back only where it already was.** `NEVER_WRITTEN` keeps
   `--web-token` out of a saved file, and `keep` is the exception `main` allows
   when the file about to be written is the file the settings came from. That
@@ -179,7 +197,13 @@ by PowerShell was a traceback out of `main` before the socket was bound.
 `web-color` would be names the command line takes and a file does not.
 `conflicts` exists because argparse enforces a mutually exclusive group
 against what was typed, so two of its options arriving as defaults walk
-straight through it.
+straight through it. `settings` asks whether a file was named and not whether
+the name has anything in it, because `main` asks it that way too when it
+decides a named file that will not read is an error: asked as truthiness,
+`--config ""` went back to searching, and a script written as `--config
+"$CONF"` with the variable unset would have taken its settings from whatever
+the working directory held, which is the one file the printed line exists to
+warn about.
 
 `settable` reaches for `parser._actions`, which is argparse's own and has no
 public spelling. There is no API for "what options does this parser have", and

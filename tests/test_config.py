@@ -195,6 +195,96 @@ check("a repeatable option adds to the file's list",
       written.hosts == ["/etc/hosts.lan", "/etc/hosts.extra"],
       str(written.hosts))
 
+# --- an alternative with one side from each place ---------------------------
+#
+# The one case the ordering in `main` does not settle by itself. A mutually
+# exclusive group is enforced against what was typed, so a file's side arrives
+# as a default and argparse refuses nothing: both come through set, and the
+# file has beaten the command line at the one thing that ordering exists to
+# prevent. `overruled` is what puts the file's side back.
+
+
+def merged(text, argv=()):
+    """What a run comes out with once `main` has settled the alternatives too.
+
+    `from_file` stops at the parse, which is exactly where both sides of an
+    alternative are still set. This carries on the way `main` does.
+    """
+    ap = build_parser()
+    base = config.defaults(ap)
+    values, complaints = config.parse(ap, text, source="test.conf")
+    ap.set_defaults(**values)
+    args = ap.parse_args(list(argv))
+    for dest, value in config.overruled(ap, args, values, base).items():
+        setattr(args, dest, value)
+    return args, complaints
+
+
+written, _ = merged("[nettail]" + NEWLINE + "size-scale-max = 1M" + NEWLINE,
+                    ["--size-scale-dynamic"])
+check("a typed alternative puts the file's side back",
+      written.size_scale_max is None, str(written.size_scale_max))
+check("and the typed one stands", written.size_scale_dynamic)
+check("which is the run the command line alone would have given",
+      written == typed(["--size-scale-dynamic"]),
+      "%r\n         %r" % (written, typed(["--size-scale-dynamic"])))
+
+written, _ = merged("[nettail]" + NEWLINE + "size-scale-dynamic = true"
+                    + NEWLINE, ["--size-scale-max", "1M"])
+check("and it reads the same way round",
+      written == typed(["--size-scale-max", "1M"]),
+      "%r\n         %r" % (written, typed(["--size-scale-max", "1M"])))
+
+# The pair that cannot be a group, because --size-scale-window rules out
+# --size-scale-max and not --size-scale-dynamic, which it implies.
+written, _ = merged("[nettail]" + NEWLINE + "size-scale-max = 1M" + NEWLINE,
+                    ["--size-scale-window", "500"])
+check("the hand-written pair is settled the same way",
+      written == typed(["--size-scale-window", "500"]),
+      "%r\n         %r" % (written, typed(["--size-scale-window", "500"])))
+
+# Nothing is decided about a pair that came from one place. Two out of one
+# file is what `conflicts` reports, two typed argparse has already refused,
+# and both leave this with nothing to say.
+ap = build_parser()
+base = config.defaults(ap)
+values, _ = config.parse(ap, "[nettail]" + NEWLINE + "size-scale-max = 1M"
+                         + NEWLINE + "size-scale-dynamic = true" + NEWLINE)
+ap.set_defaults(**values)
+check("two out of one file are left to the check that reports them",
+      config.overruled(ap, ap.parse_args([]), values, base) == {},
+      str(config.overruled(ap, ap.parse_args([]), values, base)))
+
+ap = build_parser()
+base = config.defaults(ap)
+check("and two typed are left to argparse, which has refused them already",
+      config.overruled(ap, typed(["--size-scale-dynamic"]), {}, base) == {})
+
+# And a file nothing argues with is left exactly as it was.
+written, _ = merged("[nettail]" + NEWLINE + "size-scale-max = 1M" + NEWLINE)
+check("a file's side stands when the command line said nothing about it",
+      written.size_scale_max == typed(["--size-scale-max", "1M"]).size_scale_max,
+      str(written.size_scale_max))
+
+# --- --config with nothing in it --------------------------------------------
+#
+# "Was a file named" and "has the name anything in it" are two questions, and
+# `main` asks the first: a file that was named and will not read is an error
+# rather than a complaint. Asked as truthiness this returned to searching, so
+# a script written as --config "$CONF" with the variable unset would quietly
+# take its settings from whatever the working directory held.
+
+ap = build_parser()
+values, path, complaints = config.settings(ap, ["--config", ""])
+check("an empty --config reads no file at all",
+      values == {} and path is None, str((values, path)))
+check("and says what was wrong with it",
+      len(complaints) == 1 and "empty filename" in complaints[0],
+      str(complaints))
+check("a --config with a name in it still reads that file",
+      config.settings(ap, ["--config", "no-such-file.conf"])[2] != complaints)
+
+
 # --- the shapes a value can take -------------------------------------------
 
 for text, expected in (("true", True), ("yes", True), ("on", True), ("1", True),
@@ -618,6 +708,17 @@ check("a named file that is not there stops the run", code == 2, str(code))
 check("and says which file", "not-here.conf" in err, err)
 check("and nothing claims to have read it", "settings from" not in err, err)
 
+# And a --config with nothing after it, which is what a script written as
+# --config "$CONF" produces when the variable is unset. The name is empty
+# rather than absent, so this is a file that was named and cannot be read and
+# not an invitation to go looking: the working directory here holds a
+# nettail.conf, and quietly taking its settings would be the surprise.
+code, err = refused(["--config", ""], work)
+check("an empty --config stops the run", code == 2, str(code))
+check("and says that is what was wrong", "empty filename" in err, err)
+check("and nothing was read from the working directory",
+      "settings from" not in err, err)
+
 # And a file that sets two options the command line refuses together. argparse
 # enforces a mutually exclusive group against what was typed, so two of them
 # arriving as defaults would walk straight through it.
@@ -630,6 +731,54 @@ check("a file setting both sides of an alternative stops the run",
       code == 2 and "cannot be set together" in err, "%s: %s" % (code, err))
 check("and the message names them",
       "size-scale-max" in err and "size-scale-dynamic" in err, err)
+
+# An alternative with one side from each place, through the real program. The
+# file names a fixed top and the command line asks for a dynamic scale, which
+# argparse cannot refuse because only one of them was typed. What is saved is
+# what the run would have used, so the file's side being commented out there
+# is the whole of the fix visible from outside.
+alternative = tempfile.mkdtemp()
+with io.open(os.path.join(alternative, config.CONFIG_NAME), "w",
+             encoding="utf-8") as handle:
+    handle.write("size-scale-max = 1M" + NEWLINE + "port = 9995" + NEWLINE)
+
+_out, err = run(["--size-scale-dynamic", "--save-config", "chose.conf"],
+                alternative)
+with io.open(os.path.join(alternative, "chose.conf"),
+             encoding="utf-8") as handle:
+    saved = handle.read()
+check("a typed alternative beats the file through the real program",
+      "size-scale-dynamic = true" in saved, saved)
+check("and the file's side is put back, so it saves as unset",
+      "#size-scale-max =" in saved, saved)
+check("and the rest of the file is untouched by any of it",
+      "port = 9995" in saved, saved)
+
+# The pair that is not a group gets the same answer, and this one used to stop
+# the run: the check was written against the merged arguments, so a file's
+# --size-scale-max met a typed --size-scale-window and was refused, which is a
+# file beating a command line by making it fail.
+_out, err = run(["--size-scale-window", "500", "--save-config", "window.conf"],
+                alternative)
+with io.open(os.path.join(alternative, "window.conf"),
+             encoding="utf-8") as handle:
+    saved = handle.read()
+check("a typed window is no longer refused by a file's fixed top",
+      "size-scale-window = 500" in saved, saved)
+check("and that fixed top is what gave way", "#size-scale-max =" in saved,
+      saved)
+
+# Both from one file is still refused, since nothing typed has said which of
+# them was meant.
+pair = os.path.join(work, "window-and-max.conf")
+with io.open(pair, "w", encoding="utf-8") as handle:
+    handle.write("[nettail]" + NEWLINE + "size-scale-max = 1M" + NEWLINE
+                 + "size-scale-window = 500" + NEWLINE)
+code, err = refused(["--config", pair], work)
+check("two of them out of one file still stop the run", code == 2, str(code))
+check("and say which two", "size-scale-window" in err and "size-scale-max"
+      in err, err)
+
 
 # Saving over the file the settings came from keeps the token that was in it.
 # A bare --save-config writes the second place the search looks, so this is

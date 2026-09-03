@@ -357,6 +357,14 @@ The one exception is an option that may be repeated, `--hosts` and
 replacing it, because that is what repeatable means everywhere else here. A run
 that wants none of them wants `--config` pointed at a file that lists none.
 
+Options that are alternatives win the same way, and it is worth saying because
+they are the one place where winning means the file's setting is dropped
+rather than replaced. With `size-scale-max` in your file, `--size-scale-dynamic`
+on the command line gives you a dynamic scale and the file's fixed top is set
+aside for that run, exactly as though it had not been there. The same goes for
+`--size-scale-window`, which rules out a fixed top too. Neither is an error:
+you asked for one of a pair of alternatives and got it.
+
 There is a second thing worth knowing before you rely on it: a switch turned on
 in a file cannot be turned off from the command line, because switches here
 have no `--no-` form. Colour is not quite an exception and is worth spelling
@@ -443,7 +451,13 @@ about a file that has not said what it meant:
   printing a line about a file it never opened would be worse than a refusal.
 - **A file setting two options that are alternatives**, such as
   `size-scale-max` beside `size-scale-dynamic`. The command line refuses those
-  together and so does a file, in the same words.
+  together and so does a file, in the same words. One of each, a file saying
+  one and the command line the other, is not refused: that is the command line
+  winning, and it is described under precedence above.
+- **`--config` with nothing after it**, which is what `--config "$CONF"` in a
+  script comes to when the variable is unset. An empty name is a file that was
+  named and cannot be read rather than a reason to go looking, so the run stops
+  instead of quietly taking its settings from the working directory.
 
 ### Saving one
 

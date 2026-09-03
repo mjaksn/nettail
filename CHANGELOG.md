@@ -32,6 +32,13 @@ parsed, and it is treated as public.
   option, where typing `--hosts` adds to what the file listed rather than
   replacing it, because that is what repeatable means everywhere else here.
 
+  Two options that are alternatives are the one place that ordering does not
+  settle by itself, since argparse refuses a mutually exclusive group's second
+  option only when it was typed and the file's arrives as a default. A file's
+  `size-scale-max` beside a typed `--size-scale-dynamic` would otherwise
+  survive into a run that asked for its opposite, so the file's side is set
+  aside for that run and the command line wins there as everywhere else.
+
   A key it does not know and a value it cannot use are reported and stepped
   over, so that line costs its own line and the rest of the file is used. A
   line the format itself cannot read is different, since an INI file is read
@@ -40,7 +47,10 @@ parsed, and it is treated as public.
   its defaults. Two things do stop it, both being a file that has not said what
   it meant: one named with `--config` that cannot be read, and one setting two
   options that are alternatives, which the command line refuses together and so
-  does a file.
+  does a file. `--config` with an empty name counts as the first of those and
+  not as no `--config` at all, so a script written as `--config "$CONF"` with
+  the variable unset stops rather than quietly taking its settings from
+  whatever the working directory holds.
 
   An option answers to every name it has, so `colour` and `color` are one
   setting as they are one flag, and writing both is reported rather than

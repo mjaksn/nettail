@@ -398,6 +398,74 @@ def conflicts(parser, settings):
     return said
 
 
+# Options that rule each other out without being a mutually exclusive group.
+#
+# `--size-scale-window` rules out `--size-scale-max` and does not rule out
+# `--size-scale-dynamic`, which it implies. An argparse group excludes in every
+# direction at once, so that pair cannot be expressed as one and is written
+# here instead, where `exclusive` picks it up beside the real groups.
+EXCLUSIVE_PAIRS = (("size_scale_window", "size_scale_max"),)
+
+
+def exclusive(parser):
+    """Every pair of options that cannot both be chosen, by dest.
+
+    The mutually exclusive groups flattened into pairs, and the hand-written
+    ones after them. Pairs rather than groups because the question asked of
+    them is about two options at a time: which of these two did the reader
+    type, and which did the file supply.
+    """
+    pairs = []
+    for group in parser._mutually_exclusive_groups:
+        dests = [action.dest for action in group._group_actions]
+        for index, one in enumerate(dests):
+            for other in dests[index + 1:]:
+                pairs.append((one, other))
+    return tuple(pairs) + EXCLUSIVE_PAIRS
+
+
+def overruled(parser, args, settings, baseline):
+    """What a file set that a typed option has just ruled out, by dest.
+
+    A mutually exclusive group is the one place "the command line wins" has to
+    be said rather than left to fall out of the ordering. Everywhere else the
+    two sources are arguing about one option, so a typed value simply replaces
+    the default the file installed and that is the end of it. Here they are
+    different options that mean opposite things: the file's `size-scale-max`
+    arrives as a default and a typed `--size-scale-dynamic` arrives as an
+    argument, argparse refuses a group's second option only when it was typed,
+    and so both come through the parse set. Nothing after that can tell it was
+    ever meant to be a choice.
+
+    Left alone that is the file beating the command line, which is the one
+    thing the ordering in `main` exists to prevent, and it is worse than the
+    ordinary case because the file's value does not merely lose an argument:
+    it survives into a run that asked for its opposite.
+
+    So the file's side goes back to what it held before the file was read, and
+    the dests are handed back for the caller to set. Quietly, which is what
+    every other option does when the command line overrides it, and the run
+    has already printed the file it read.
+
+    Nothing is decided here about a pair whose options came from one place.
+    Two typed together argparse has already refused, and two out of one file
+    `conflicts` reports in argparse's own words.
+    """
+    def chose(dest):
+        """Whether this option ended up holding something somebody asked for."""
+        return (dest in baseline
+                and getattr(args, dest, baseline[dest]) != baseline[dest])
+
+    put_back = {}
+    for one, other in exclusive(parser):
+        if not (chose(one) and chose(other)):
+            continue
+        for dest, rival in ((one, other), (other, one)):
+            if dest in settings and rival not in settings:
+                put_back[dest] = baseline[dest]
+    return put_back
+
+
 def defaults(parser):
     """What every settable option holds before anything has been read.
 
@@ -604,7 +672,20 @@ def settings(parser, argv=None):
     knows whether the rest of the command line was any good.
     """
     named, _save = chosen(argv)
-    path = named if named else find()
+    # Whether a file was named, not whether the name has anything in it. The
+    # two are the same question everywhere but here, and `main` asks it the
+    # second way: it decides a named file that would not read is an error
+    # rather than a complaint by testing `args.config is not None`. Asked as
+    # truthiness this returned to searching for `--config ""`, so a script
+    # written as `--config "$CONF"` with the variable unset would quietly take
+    # its settings from whatever the working directory happened to hold, which
+    # is the one file the printed line exists to warn about.
+    if named is not None and not named.strip():
+        # Said here rather than left to `read`, which would report it as a
+        # file that could not be opened and leave an empty space where the
+        # name goes.
+        return {}, None, ["--config was given an empty filename"]
+    path = named if named is not None else find()
     if path is None:
         return {}, None, []
     values, complaints, opened = read(parser, path)

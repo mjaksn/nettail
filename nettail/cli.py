@@ -1013,6 +1013,14 @@ def main():
     for said in config.conflicts(ap, settings):
         ap.error("%s: %s" % (config_path or "the settings file", said))
 
+    # And the other way that pair can arrive: the file set one of them and the
+    # command line typed the other. argparse saw one option and refused
+    # nothing, so both are set by now, and the file has beaten the command
+    # line at the one thing the ordering above exists to prevent. The file's
+    # side goes back to what it held before the file was read.
+    for dest, value in config.overruled(ap, args, settings, baseline).items():
+        setattr(args, dest, value)
+
     # The token, when the flag did not carry it. This is how the installed
     # service gets one: systemd reads `EnvironmentFile` and compose reads
     # `env_file`, so by the time this runs the value is already here, and
@@ -1035,9 +1043,16 @@ def main():
                 ap.error("%s in the environment cannot be used: %s"
                          % (WEB_TOKEN_ENV, exc))
 
-    # Checked here rather than after the socket is up: argparse catches
-    # --size-scale-max against --size-scale-dynamic for us, but this pair is
-    # ours to check, and a bind failure would otherwise report first.
+    # Checked here rather than after the socket is up, so that a bind failure
+    # does not report first. This pair is ours to check because it cannot be a
+    # mutually exclusive group: --size-scale-window rules out
+    # --size-scale-max and not --size-scale-dynamic, which it implies, and a
+    # group excludes in every direction at once.
+    #
+    # What reaches this is only ever a pair that came from one place, since
+    # `overruled` has already settled the case where one side was typed and
+    # the other came from the file. Two typed, or two out of one file, is a
+    # reader who has asked for both and is told so.
     if args.size_scale_window and args.size_scale_max is not None:
         ap.error("--size-scale-window scopes the dynamic scale and cannot be "
                  "combined with --size-scale-max")
