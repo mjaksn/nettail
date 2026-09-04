@@ -618,9 +618,10 @@ class Controls:
         pressed the key would be told about no template until the collector
         was restarted with the flag.
 
-        The store is not taken away again when the key goes off. It costs a
-        list, and a template learned while nobody was reading is still worth a
-        line to whoever turns the key back on.
+        The store is not taken away again when the key goes off. It costs one
+        entry per template while it is off, which is what `take_templates`
+        bounds it to, and a template learned or changed while nobody was
+        reading is still worth a line to whoever turns the key back on.
         """
         wanted = not getattr(self.args, "templates", False)
         self.args.templates = wanted

@@ -213,6 +213,11 @@ def run(argv, msgs, script=None):
     in `msgs` is decoded. That ordering is what lets the t key be pressed on a
     run that started without the flag and still be shown the template in the
     very next datagram.
+
+    The loop drains the keyboard until it answers None, so a key is written
+    here as the key and then a None, and a datagram nobody types over is a
+    None on its own. Without that a script reads as one press per datagram
+    and is silently two, which is a test that passes for the wrong reason.
     """
     keys = list(script or ())
 
@@ -242,6 +247,13 @@ def run(argv, msgs, script=None):
             return self.left.pop(0), ("10.0.0.1", 2055)
 
     socket.socket = FakeSocket
+    # Put back afterwards rather than left in place. These are attributes of
+    # the class, so a run that patched them and walked away would hand the
+    # next run a keyboard that says it started and answers every poll with
+    # None, which is not the keyboard that run asked for and is not the one
+    # the checks below were written against.
+    real_keyboard = {name: getattr(main.Keyboard, name)
+                     for name in ("start", "stop", "poll")}
     if script is not None:
         main.Keyboard.start = lambda self: setattr(self, "enabled", True) or True
         main.Keyboard.stop = lambda self: setattr(self, "enabled", False)
@@ -254,6 +266,8 @@ def run(argv, msgs, script=None):
         main.main()
     finally:
         sys.stdout, sys.stderr = real_out, real_err
+        for name, method in real_keyboard.items():
+            setattr(main.Keyboard, name, method)
     return plain(out.getvalue()), plain(err.getvalue())
 
 
@@ -342,11 +356,29 @@ check("and still spells the template out",
 # resend, and that is right: the store installed then has seen nothing, so the
 # template really is news to the reader, who was shown nothing about it when it
 # first arrived.
-out, err = run([], [flows, resent, resent], script=[None, "t"])
+out, err = run([], [flows, resent, resent], script=[None, "t", None])
 check("the t key installs the store mid-run",
       err.count("sent template 400:") == 1, repr(err[:700]))
 check("and every resend after it is noted",
       err.count("resent template 400, unchanged") == 1, repr(err[:700]))
+
+# The key turned off again, which is where the store used to grow without any
+# bound: it stayed installed, nothing drained it, and every resend for however
+# long the key was off was counted out to whoever turned it back on. What is
+# held now is the shape and not the drumbeat. Reading the run below: the key
+# goes on, off with the wider layout arriving while it is off, a resend of that
+# passes unwatched, and the key goes on again.
+out, err = run([], [flows, resent, changed, changed, changed],
+               script=[None, "t", None, "t", None, None, "t", None])
+check("a template changed while the key was off is spelled out on return",
+      err.count("sent template 400:") == 2,
+      repr([ln for ln in err.splitlines() if "template 400" in ln]))
+check("and spelled out as it now stands",
+      err.count("tcp_flags:uint/1") == 1,
+      repr([ln for ln in err.splitlines() if "tcp_flags" in ln]))
+check("a resend nobody was watching is not counted out afterwards",
+      err.count("resent template 400, unchanged") == 1,
+      repr([ln for ln in err.splitlines() if "template 400" in ln]))
 
 sampled = ipfix([options_template(300, [(145, 4)], [(34, 4)]),
                  data_set(300, struct.pack("!II", 999, 1000))])

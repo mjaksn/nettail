@@ -34,6 +34,20 @@ parsed, and it is treated as public.
   A run that wants both asks for both. Nothing about the block itself has
   changed, and the browser still receives it under its own prose kind.
 
+### Fixed
+
+- **A run that turned template reporting off grew a list without any bound,
+  and handed the whole of it over at once when reporting came back.** The key
+  that turns it off leaves the store in the decoder's way on purpose, so that
+  a template arriving while nobody is reading is still worth a line later, but
+  nothing emptied the store while it was off. An exporter refreshing thirty
+  templates every minute left a row a minute each, for as long as the key
+  stayed off, and then spelled every one of them out. The store is now emptied
+  on every datagram whatever the key is doing, and what it keeps back is the
+  shape rather than the drumbeat: a template that arrived new or changed while
+  reporting was off is spelled out once when it returns, and the resends
+  nobody was watching are dropped. Present in 0.13.0 behind the `v` key.
+
 ## [0.13.0] - 2026-09-03
 
 ### Added
