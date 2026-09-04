@@ -41,9 +41,15 @@ classifiers = [
 # does, from looking nothing up to querying reverse DNS, with nothing raised
 # and nothing warned. While both are on 0.x a minor bump is where that kind of
 # change is allowed to live, so that is where the ceiling goes.
+#
+# netflume's ceiling is also a floor decision. 0.4.0 is the last release that
+# supports Python 3.9, which this program still supports and still gates CI
+# on, so `<0.5` holds it there deliberately rather than by neglect. Raising it
+# is a question about what nettail runs on before it is a question about the
+# decoder, and the answer belongs beside the classifiers rather than here.
 dependencies = [
     "lanname>=0.2.0,<0.3",
-    "netflume>=0.1.0,<0.2",
+    "netflume>=0.4.0,<0.5",
 ]
 
 [project.scripts]

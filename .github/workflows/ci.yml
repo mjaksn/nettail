@@ -91,7 +91,14 @@ jobs:
       - name: install the two dependencies
         # The program is not installed, only what it imports. The suite runs
         # against the source tree, which is the code being reviewed.
-        run: pip install "lanname>=0.2.0,<0.3" "netflume>=0.1.0,<0.2"
+        #
+        # The ranges are written out rather than resolved from pyproject.toml,
+        # so they are a second copy and have drifted once already: this went on
+        # installing netflume <0.2 after the package had moved to <0.5, which
+        # meant the suite was green against a decoder the wheel would refuse to
+        # be installed beside. Move both together, or teach this step to read
+        # the one in pyproject.toml.
+        run: pip install "lanname>=0.2.0,<0.3" "netflume>=0.4.0,<0.5"
       - name: run the suite
         # Some suites reach the network, and only over loopback: they start
         # a real collector on 127.0.0.1 and send it NetFlow v5 datagrams,

@@ -128,6 +128,29 @@ parsed, and it is treated as public.
   table behind the dialog rather than from a pair of counters of their own.
   What they print is unchanged.
 
+- **netflume is now pinned to `>=0.4.0,<0.5`**, up from `>=0.1.0,<0.2`, and
+  the ceiling is deliberate: 0.4.0 is the last release that supports Python
+  3.9, which this program still supports and still gates CI on. Two things
+  come with it.
+
+  A template that changes kind under an ID already in use is reported as the
+  redefinition it is. Data and options templates are allocated from one pool
+  of IDs, so an exporter may reuse an ID for the other kind without touching a
+  field specification, and netflume before 0.4.0 compared layouts alone and
+  called that a resend. `--verbose` printed the short "unchanged" line for it
+  while every record behind that ID had moved from the flows to the options,
+  and nothing here could have known: the fact never left the decoder.
+
+  `EPHEMERAL_FLOOR` is imported rather than copied. netflume had the number
+  inline and exported nothing to point at, so `services.py` wrote it out and
+  the suite reverse engineered netflume's own floor to hold the two together;
+  netflume publishes it now, so the copy and that machinery are both gone.
+
+  The dependency ranges are also written out a second time, in the step CI
+  installs them with, and they had already drifted apart once. A check holds
+  the two to each other now, and holds the lock file's exact pin inside the
+  range as well.
+
 - **The browser lays its table out from the widths the terminal already
   names.** The table was sized by what it held, under which a column is as
   wide as the widest cell in it, so the browser could not place a new row

@@ -128,9 +128,12 @@ test:
   the two that had no flag; the check is what stops the next one arriving the
   same way. A new key is either added to that suite's list of acts or given
   its flag, and until somebody says which, it fails.
-- **`EPHEMERAL_FLOOR` in `services.py`** repeats a number netflume writes
-  inline and exports no constant for. `test_services` finds where netflume
-  actually stops naming ports and pins ours to it.
+- **`EPHEMERAL_FLOOR` in `services.py`** is netflume's, imported from
+  `netflume.values`. It was a copy while netflume had the number inline and
+  exported nothing, and `test_services` found where netflume actually stopped
+  naming ports and held the copy to it; netflume 0.2.0 published the constant
+  and both went. What is checked now is only that it is still the same object,
+  since an import quietly becoming a local again would read the same.
 - **`TCP_FLAG_NAMES` and `FIELD_LABELS` in `detail.py`** are the same kind of
   deal with the same upstream. The first is keyed by the letters
   `TCP_FLAG_BITS` writes, the second by the names in `netflume.IE`, and
@@ -1022,15 +1025,30 @@ feature means reading both, and their suites.
   nothing raised and nothing warned. Explicit modes are why that release was a
   non-event here. Keep it true.
 - **`WatchedTemplates` rests on `put` returning True, and that is the only
-  thing it rests on.** netflume raises an object for a sampling rate, an
-  export gap and a datagram it could not read; a template it has just learned
-  is not one of them, and the store's return value is where the fact lives.
+  thing it rests on.** The store's return value is where the fact lives, and
   `--verbose` stands a subclass in the decoder's way to hear about it rather
-  than parsing the datagram again. A `TemplateLearned` event upstream would be
-  the better home, and if one ever arrives this should move onto it.
-  `test_templates` pins the store's side of the deal separately from the block
-  it feeds, so an upstream change shows up as the store failing rather than as
-  a run that quietly says nothing.
+  than parsing the datagram again. `test_templates` pins the store's side of
+  the deal separately from the block it feeds, so an upstream change shows up
+  as the store failing rather than as a run that quietly says nothing.
+
+  **The better home now exists and this has not moved onto it yet.** netflume
+  0.3.0 raises a `TemplateLearned` for a template that is new or changed, with
+  the layout it replaced, and 0.4.0 added the kind it replaced beside it. That
+  is the event this note used to wish for. What holds the move up is the half
+  the event deliberately does not cover: it fires for new and changed only, on
+  the same reasoning that a `SamplingChange` fires only on a change, and this
+  program prints a line for a resend as well, because how often a template
+  comes round is visible nowhere else. So moving means the event for new and
+  changed and something thinner kept for the resends, which is a rewrite of
+  this block rather than a swap, and it has not been done.
+
+  One thing did move on its own, though, and it is why the pin is 0.4.0 rather
+  than 0.1.0. Data and options templates are allocated from one pool of IDs,
+  so an exporter may reuse an ID for the other kind without touching a field
+  specification. netflume before 0.4.0 compared layouts alone, took the new
+  kind and returned False, so this block called a redefinition a resend and
+  said "unchanged" while every record for that ID had moved from `flows` to
+  `options`. Nothing here could have known: the fact never reached it.
 
   Every `put` is recorded and not only the ones that return True, because a
   template resent unchanged is worth a line too: how often one comes round is
