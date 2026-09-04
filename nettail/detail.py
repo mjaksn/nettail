@@ -6,13 +6,17 @@ queue and put an ask on a queue, and that is the whole of its authority. The
 report they build goes back to the browser as a `detail` event with the ask's
 id echoed on it.
 
-**Every value here is formatted in Python.** The page names no field, no flag
-and no protocol, for the reason it hardcodes no column and no key: a service
-name is whatever this machine's services database calls that port, a country
-is whatever the reader's database says, and a second opinion written in
-JavaScript would be a second thing to keep in step with `values.py`. So a
-section is a title and a list of (label, value) pairs, a table is a head and
-rows of finished strings, and the page has exactly two renderers.
+**Every value here is formatted in Python, and painted here too.** The page
+names no field, no flag and no protocol, for the reason it hardcodes no column
+and no key: a service name is whatever this machine's services database calls
+that port, a country is whatever the reader's database says, and a second
+opinion written in JavaScript would be a second thing to keep in step with
+`values.py`. So a section is a title and a list of (label, value) pairs, a
+table is a head and rows of finished strings, and the page has exactly two
+renderers. The colour rides to the browser as escape codes inside those
+finished strings, which `web.html` turns back into spans exactly as it does
+for a flow row; how a colour is chosen is set out in the comment above
+`_paint` below.
 
 Nothing is reimplemented that netflume or the display already answers.
 `flow_endpoints`, `flow_timestamp`, `flow_duration`, `PROTO_NAMES`,
@@ -37,7 +41,8 @@ from netflume import (
 )
 
 from . import country
-from .display import way
+from .colour import C
+from .display import address_colour, proto_colour, way
 from .services import service_name
 from .values import human_bytes, human_count, human_duration
 
@@ -184,6 +189,111 @@ WAY_WORDS = {
 }
 
 
+# -- how a value is painted ------------------------------------------------
+#
+# This dialog is the browser's alone, and a browser is a colour-capable reader
+# whatever stdout happens to be, so every value below is painted at full
+# strength here. A browser that refused colour has it taken out at the
+# boundary, by `cli.detail_for_web`, rather than by a setting threaded down
+# through every function that builds a row.
+#
+# The vocabulary is the one the flow rows and the traffic summary already use,
+# so that the dialog reads as part of the same program:
+#
+# - **A figure is cyan, and whatever restates or measures it is grey**: the
+#   units after a size, the short form in brackets, the "3m20s ago" after a
+#   clock reading. That is what the summary's own rows do, and it is what lets
+#   a panel of a dozen figures be scanned for the one somebody came for.
+# - **An identity is coloured by what it is.** An address takes
+#   `display.address_colour`, the three colours the summary's tables give one;
+#   a hostname is green, as it is there; a protocol takes
+#   `display.proto_colour`, so it matches the PROTO column of the row the
+#   dialog was opened from; a service is split at its slash, the port cyan and
+#   the name green, exactly as the summary's services table splits one.
+# - **A direction takes the colour `display.way` chose for the arrow**, so the
+#   sentence here and the arrow in the row above it agree without the question
+#   being asked twice.
+# - **Prose and raw record fields are left alone.** Grey arrives in the page as
+#   the ink the label column is drawn in, so a whole value greyed stops looking
+#   like a value at all, and a sentence saying there is nothing to report is
+#   not a fact to be picked out of a list.
+
+
+def _paint(*pieces):
+    """One value built from (text, colour) pieces.
+
+    `cli._painted` is the same idea for a terminal row and hands back the
+    plain text as well, because a column there is padded to what a reader sees
+    and escape codes are not seen. Nothing in a dialog is padded, so only the
+    painted half is wanted here.
+
+    An empty piece is dropped and an uncoloured one is left bare, so a run with
+    the codes blanked comes out as the text and nothing around it.
+    """
+    return "".join("%s%s%s" % (colour, text, C.RESET) if colour else text
+                   for text, colour in pieces if text)
+
+
+def _nothing():
+    """The stand-in for a field the exporter did not send."""
+    return _paint(("-", C.GREY))
+
+
+def _figure(text, aside=""):
+    """A number, with whatever restates or measures it beside it."""
+    return _paint((text, C.CYAN), (aside, C.GREY))
+
+
+def _stat(value):
+    """One figure the exporter sent, with nothing to restate it."""
+    return _nothing() if value is None else _figure(str(value))
+
+
+def _address(addr, bracket=False):
+    """One address, in the colour its kind is drawn in everywhere else.
+
+    `bracket` is for the flow's own two ends, which put an IPv6 address in
+    square brackets exactly as the SOURCE and DESTINATION columns of a row do.
+    Nothing else here does, because nothing else has a port after it.
+    """
+    text = str(addr)
+    if bracket and ":" in text:
+        text = "[%s]" % text
+    return _paint((text, address_colour(addr)))
+
+
+def _hostname(host):
+    """A name something on this network answered to."""
+    return _paint((host, C.GREEN))
+
+
+def _kind(addr):
+    """Which side of the boundary an address is on, in that side's colour.
+
+    The word and the address above it come out the same colour, which is the
+    cheapest way of saying that the one explains the other.
+    """
+    return _paint((addr_kind(addr), address_colour(addr)))
+
+
+def _protocol(name):
+    """A protocol, in the colour the PROTO column of a row gives it."""
+    return _paint((name, proto_colour(name)))
+
+
+def _service(name):
+    """A service key, split at its slash the way the summary splits one.
+
+    "443/https" is a number the exporter sent and a convention this machine
+    happens to hold, and which half is which is worth seeing at a glance. A
+    key with no slash in it is all convention.
+    """
+    port, slash, named = name.partition("/")
+    if not slash:
+        return _paint((name, C.GREEN))
+    return _paint((port, C.CYAN), (slash, C.GREY), (named, C.GREEN))
+
+
 def spell_flags(value):
     """The TCP flags as words, with the byte that carried them.
 
@@ -199,17 +309,25 @@ def spell_flags(value):
     rather than for scanning.
     """
     if value is None:
-        return "-"
+        return _nothing()
     names = [TCP_FLAG_NAMES[letter] for bit, letter in TCP_FLAG_BITS
              if value & bit]
-    return "%s (0x%02x)" % (", ".join(names) if names else "none", value)
+    # The words are left plain and the byte is the grey aside behind them,
+    # which is the shape every figure in the dialog takes. "none" is grey
+    # instead, being the absence of the thing the row is about.
+    return _paint((", ".join(names) if names else "none",
+                   None if names else C.GREY),
+                  (" (0x%02x)" % value, C.GREY))
+
+
+def _clock(when):
+    """A wall clock time, to the millisecond, in this machine's own zone."""
+    return datetime.fromtimestamp(when).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
 
 
 def at(when):
-    """A wall clock time, to the millisecond, in this machine's own zone."""
-    if not when:
-        return "-"
-    return datetime.fromtimestamp(when).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+    """That reading as a value in the report."""
+    return _paint((_clock(when), C.CYAN)) if when else _nothing()
 
 
 def since(when, now):
@@ -219,11 +337,11 @@ def since(when, now):
     going on", which is the question somebody clicking a row usually has.
     """
     if not when:
-        return "-"
+        return _nothing()
     gap = now - when
     if gap < 0:
         return at(when)
-    return "%s (%s ago)" % (at(when), human_duration(gap))
+    return _figure(_clock(when), " (%s ago)" % human_duration(gap))
 
 
 def _count(n):
@@ -234,15 +352,16 @@ def _count(n):
     against the BYTES column should not have to convert one to the other.
     """
     if n is None:
-        return "-"
+        return _nothing()
     short = human_count(n)
-    return "{:,}".format(n) if short == str(n) else "{:,} ({})".format(n, short)
+    return _figure("{:,}".format(n),
+                   "" if short == str(n) else " ({})".format(short))
 
 
 def _size(n):
     if n is None:
-        return "-"
-    return "{:,} bytes ({})".format(n, human_bytes(n))
+        return _nothing()
+    return _figure("{:,}".format(n), " bytes ({})".format(human_bytes(n)))
 
 
 def _halves(total, inward, outward):
@@ -252,7 +371,10 @@ def _halves(total, inward, outward):
     carries one: "1,500 bytes (1.5K) (0B received, 1.5K sent)" is two nested
     parentheticals and reads as neither.
     """
-    return "%s, of which %s received and %s sent" % (total, inward, outward)
+    return _paint((total, None),
+                  (", of which ", C.GREY), (inward, C.CYAN),
+                  (" received and ", C.GREY), (outward, C.CYAN),
+                  (" sent", C.GREY))
 
 
 def _addr_facts(title, addr, port, proto, resolver):
@@ -265,18 +387,22 @@ def _addr_facts(title, addr, port, proto, resolver):
     facts = []
     if not addr:
         return [[title, "the exporter sent no address for this end"]]
-    facts.append([title, "[%s]" % addr if ":" in str(addr) else str(addr)])
+    facts.append([title, _address(addr, bracket=True)])
     if port:
         named = service_name(port, proto)
         facts.append(["%s port" % title,
-                      "%d/%s" % (port, named) if named else str(port)])
+                      _service("%d/%s" % (port, named)) if named
+                      else _figure(str(port))])
     host = resolver.lookup(addr) if resolver else None
     if host:
-        facts.append(["%s name" % title, host])
-    facts.append(["%s kind" % title, addr_kind(addr)])
+        facts.append(["%s name" % title, _hostname(host)])
+    facts.append(["%s kind" % title, _kind(addr)])
     code = country.country_of(addr)
     if code:
-        facts.append(["%s country" % title, code])
+        # Grey, as the summary paints a country marker, and it is the one
+        # value here whose colour hardly matters: what reaches a browser is a
+        # flag, which brings its own.
+        facts.append(["%s country" % title, _paint((code, C.GREY))])
     return facts
 
 
@@ -300,20 +426,26 @@ def flow_section(rec, hdr, resolver):
     facts.extend(_addr_facts(END_TITLES[1], dst, rec.get("dst_port"), proto,
                              resolver))
 
-    arrow, _colour = way(src, dst)
+    # The arrow's own colour, so the sentence here and the arrow in the row
+    # the dialog was opened from say the same thing twice over.
+    arrow, arrow_colour = way(src, dst)
     facts.append(["Direction",
-                  WAY_WORDS.get(arrow, "neither end is on this network")])
-    facts.append(["Protocol",
-                  "%s (%s)" % (proto_name, proto) if proto is not None
-                  else proto_name])
+                  _paint((WAY_WORDS.get(arrow,
+                                        "neither end is on this network"),
+                          arrow_colour))])
+    proto_pieces = [(proto_name, proto_colour(proto_name))]
+    if proto is not None:
+        proto_pieces.append((" (%s)" % proto, C.GREY))
+    facts.append(["Protocol", _paint(*proto_pieces)])
 
     start = flow_timestamp(rec, hdr)
     duration = flow_duration(rec, hdr)
     facts.append(["Started", at(start)])
     if duration is not None:
         facts.append(["Ended", at(start + duration)])
-        facts.append(["Duration", "%s (%.3f seconds)"
-                      % (human_duration(duration), duration)])
+        facts.append(["Duration",
+                      _figure(human_duration(duration),
+                              " (%.3f seconds)" % duration)])
     else:
         facts.append(["Duration",
                       "the exporter sent no start and end for this flow"])
@@ -323,10 +455,10 @@ def flow_section(rec, hdr, resolver):
     facts.append(["Bytes", _size(octets)])
     facts.append(["Packets", _count(packets)])
     if octets and packets:
-        facts.append(["Mean packet size", human_bytes(octets / packets)])
+        facts.append(["Mean packet size", _figure(human_bytes(octets / packets))])
     if duration and octets:
         facts.append(["Mean rate over its lifetime",
-                      "%s per second" % human_bytes(octets / duration)])
+                      _figure(human_bytes(octets / duration), " per second")])
 
     if proto == 6 or rec.get("tcp_flags") is not None:
         facts.append(["TCP flags", spell_flags(rec.get("tcp_flags"))])
@@ -364,15 +496,16 @@ def datagram_section(hdr):
     """
     version = hdr.get("version")
     named = {5: "NetFlow v5", 9: "NetFlow v9", 10: "IPFIX (version 10)"}
+    exporter = hdr.get("exporter")
     facts = [
-        ["Exporter", str(hdr.get("exporter", "-"))],
+        ["Exporter", _address(exporter) if exporter else _nothing()],
         ["Version", named.get(version, str(version))],
         # v5 has no observation domain and puts the engine id in the same
         # field, which is what netflume decodes it into, so it is named for
         # what it actually is on each version rather than for one of them.
         ["Engine ID" if version == 5 else "Observation domain",
-         _value(hdr.get("domain"))],
-        ["Sequence", _value(hdr.get("sequence"))],
+         _stat(hdr.get("domain"))],
+        ["Sequence", _stat(hdr.get("sequence"))],
         ["Export time", at(hdr.get("unix_secs"))],
     ]
     uptime = hdr.get("sys_uptime")
@@ -380,8 +513,8 @@ def datagram_section(hdr):
         # Milliseconds since the exporter booted, which is also the clock the
         # switched pair above is measured against.
         facts.append(["Exporter uptime",
-                      "%s (%s ms)" % (human_duration(uptime / 1000.0),
-                                      "{:,}".format(uptime))])
+                      _figure(human_duration(uptime / 1000.0),
+                              " (%s ms)" % "{:,}".format(uptime))])
     facts.append(["Received here", at(hdr.get("received"))])
     # The export time is whole seconds, so the sub-second part of the arrival
     # is not a difference between two clocks, it is the resolution of one of
@@ -392,9 +525,9 @@ def datagram_section(hdr):
         drift = hdr["received"] - hdr["unix_secs"]
         if abs(drift) >= 1:
             facts.append(["Exporter's clock",
-                          "%s %s this machine's"
-                          % (human_duration(abs(drift)),
-                             "behind" if drift > 0 else "ahead of")])
+                          _figure(human_duration(abs(drift)),
+                                  " %s this machine's"
+                                  % ("behind" if drift > 0 else "ahead of"))])
     size = hdr.get("datagram_bytes")
     if size is not None:
         facts.append(["Datagram size", _size(size)])
@@ -404,8 +537,10 @@ def datagram_section(hdr):
     rate = hdr.get("sampling_rate")
     if rate is not None:
         facts.append(["Sampling in force",
-                      "1 in %s, as the exporter advertised it" % "{:,}".format(rate)
-                      if rate and rate > 1 else "unsampled"])
+                      _figure("1 in %s" % "{:,}".format(rate),
+                              ", as the exporter advertised it")
+                      if rate and rate > 1
+                      else _paint(("unsampled", C.GREY))])
     gap = hdr.get("gap")
     if gap is not None:
         facts.append(["Exports missed before this one", _count(gap)])
@@ -415,7 +550,10 @@ def datagram_section(hdr):
 def _label(addr, resolver):
     """An address with its name after it, where one is known."""
     host = resolver.lookup(addr) if resolver else None
-    return "%s (%s)" % (addr, host) if host else str(addr)
+    return _paint((str(addr), address_colour(addr)),
+                  (" (" if host else "", C.GREY),
+                  (host or "", C.GREEN),
+                  (")" if host else "", C.GREY))
 
 
 def _table(title, head, keys, rank, cells):
@@ -442,26 +580,36 @@ PAIR_HEAD = (["Flows", ">"], ["Bytes", ">"], ["Packets", ">"])
 
 
 def _counts_cells(counts):
-    return [human_count(counts.total.flows), human_bytes(counts.total.bytes),
-            human_bytes(counts.inward.bytes), human_bytes(counts.outward.bytes),
-            human_count(counts.total.packets)]
+    """The figure columns of an endpoint's table.
+
+    The totals are cyan and the two halves grey, which is how `_halves` splits
+    the same figures in a facts list and for the same reason: received and
+    sent are the total beside them broken up rather than three figures of
+    equal standing. Five columns in one colour would say nothing about any of
+    them.
+    """
+    return [_figure(human_count(counts.total.flows)),
+            _figure(human_bytes(counts.total.bytes)),
+            _paint((human_bytes(counts.inward.bytes), C.GREY)),
+            _paint((human_bytes(counts.outward.bytes), C.GREY)),
+            _figure(human_count(counts.total.packets))]
 
 
 def _leg_cells(leg):
-    return [human_count(leg.flows), human_bytes(leg.bytes),
-            human_count(leg.packets)]
+    return [_figure(human_count(leg.flows)), _figure(human_bytes(leg.bytes)),
+            _figure(human_count(leg.packets))]
 
 
-def _counts_table(title, first, table):
+def _counts_table(title, first, table, paint):
     return _table(title, [[first, "<"]] + list(END_HEAD), table,
                   lambda key: table[key].total.bytes,
-                  lambda key: [key] + _counts_cells(table[key]))
+                  lambda key: [paint(key)] + _counts_cells(table[key]))
 
 
-def _leg_table(title, first, table):
+def _leg_table(title, first, table, paint):
     return _table(title, [[first, "<"]] + list(PAIR_HEAD), table,
                   lambda key: table[key].bytes,
-                  lambda key: [key] + _leg_cells(table[key]))
+                  lambda key: [paint(key)] + _leg_cells(table[key]))
 
 
 def endpoint_report(traffic, addr, resolver, title, now):
@@ -489,14 +637,14 @@ def endpoint_report(traffic, addr, resolver, title, now):
                 "tables": []}
 
     counts = end.counts
-    facts = [["Address", str(addr)]]
+    facts = [["Address", _address(addr)]]
     host = resolver.lookup(addr) if resolver else None
     if host:
-        facts.append(["Name", host])
-    facts.append(["Kind", addr_kind(addr)])
+        facts.append(["Name", _hostname(host)])
+    facts.append(["Kind", _kind(addr)])
     code = country.country_of(addr)
     if code:
-        facts.append(["Country", code])
+        facts.append(["Country", _paint((code, C.GREY))])
     facts.append(["First seen", since(end.first, now)])
     facts.append(["Last seen", since(end.last, now)])
     facts.append(["Flows", _halves(_count(counts.total.flows),
@@ -510,15 +658,18 @@ def endpoint_report(traffic, addr, resolver, title, now):
                                      human_count(counts.outward.packets))])
     facts.append(["Distinct peers", _count(len(end.peers))])
     if traffic.total.bytes:
-        facts.append(["Share of all bytes seen", "%.1f%%"
-                      % (100.0 * counts.total.bytes / traffic.total.bytes)])
+        facts.append(["Share of all bytes seen",
+                      _figure("%.1f%%" % (100.0 * counts.total.bytes
+                                          / traffic.total.bytes))])
     if counts.total.flows:
         facts.append(["Mean flow size",
-                      human_bytes(counts.total.bytes / counts.total.flows)])
+                      _figure(human_bytes(counts.total.bytes
+                                          / counts.total.flows))])
     if end.dropped:
         facts.append(["Dropped from its own tables",
-                      "%s quiet protocols or services, to keep them bounded"
-                      % _count(end.dropped)])
+                      _paint((_count(end.dropped), None),
+                             (" quiet protocols or services, to keep them "
+                              "bounded", C.GREY))])
 
     peers = sorted(end.peers)
     pairs = [(peer, traffic.pair_of(addr, peer)) for peer in peers]
@@ -532,13 +683,16 @@ def endpoint_report(traffic, addr, resolver, title, now):
         # endpoint to read it from.
         sent = pair.a_to_b if pair.a == addr else pair.b_to_a
         got = pair.b_to_a if pair.a == addr else pair.a_to_b
-        return [_label(peer, resolver), human_count(pair.total.flows),
-                human_bytes(pair.total.bytes), human_bytes(got.bytes),
-                human_bytes(sent.bytes), human_count(pair.total.packets)]
+        return [_label(peer, resolver),
+                _figure(human_count(pair.total.flows)),
+                _figure(human_bytes(pair.total.bytes)),
+                _paint((human_bytes(got.bytes), C.GREY)),
+                _paint((human_bytes(sent.bytes), C.GREY)),
+                _figure(human_count(pair.total.packets))]
 
     tables = [
-        _counts_table("By protocol", "Protocol", end.protos),
-        _counts_table("By service", "Service", end.services),
+        _counts_table("By protocol", "Protocol", end.protos, _protocol),
+        _counts_table("By service", "Service", end.services, _service),
         _table("Peers", [["Peer", "<"]] + list(END_HEAD), by_peer,
                lambda peer: by_peer[peer].total.bytes, peer_row),
     ]
@@ -562,22 +716,25 @@ def pair_report(traffic, a, b, resolver, now):
     pair = traffic.pair_of(a, b)
     if pair is None:
         return {"title": title,
-                "facts": [["Between", "%s and %s" % (a, b)],
+                "facts": [["Between",
+                           _paint((_address(a), None), (" and ", C.GREY),
+                                  (_address(b), None))],
                           ["Seen", "this pair is not in the collector's "
                                    "tables. It was either cleared with the c "
                                    "key or dropped to keep them bounded."]],
                 "tables": []}
     facts = [
-        ["Between", "%s and %s" % (_label(pair.a, resolver),
-                                   _label(pair.b, resolver))],
+        ["Between", _paint((_label(pair.a, resolver), None),
+                           (" and ", C.GREY),
+                           (_label(pair.b, resolver), None))],
         ["First seen", since(pair.first, now)],
         ["Last seen", since(pair.last, now)],
         ["Flows", _count(pair.total.flows)],
         ["Bytes", _size(pair.total.bytes)],
         ["Packets", _count(pair.total.packets)],
     ]
-    tables = [_leg_table("By protocol", "Protocol", pair.protos),
-              _leg_table("By service", "Service", pair.services)]
+    tables = [_leg_table("By protocol", "Protocol", pair.protos, _protocol),
+              _leg_table("By service", "Service", pair.services, _service)]
     return {"title": title, "facts": facts, "tables": tables}
 
 

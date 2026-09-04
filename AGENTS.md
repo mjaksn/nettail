@@ -716,6 +716,28 @@ The reasoning that is not in the code:
   value) pairs, a table is a head and rows of finished strings, and the page
   has exactly two renderers. The dialog's own title and the sentence about a
   flow the ring has dropped come over the wire for the same reason.
+- **And painted in Python, in the vocabulary the rest of the program
+  already uses.** The colour rides to the browser as escape codes inside those
+  finished strings, and `web.html` turns them back into spans with the `ansi`
+  converter a flow row and the captured prose already go through, so the
+  renderers put their text on the page with `appendChild(ansi(...))` rather
+  than into `textContent`. A per-field class chosen in JavaScript would be the
+  page deciding what a field is, which is the one thing this whole feature is
+  arranged to stop; `test_web_server` greps for both calls, since escape codes
+  assigned as text would appear on the page as characters and nothing at
+  either end would fail. The rule the colours themselves follow is set out in
+  the comment above `_paint` in `detail.py`: a figure is cyan and whatever
+  restates or measures it is grey, an identity takes the colour its kind is
+  given elsewhere, a direction takes the colour `display.way` chose for the
+  arrow, and prose and raw record fields are left alone, because grey arrives
+  in the page as the ink the label column is drawn in. `address_colour` moved
+  from `cli.py` to `display.py` for that: the summary and the dialog both
+  paint an address, and two mappings for one question would be two things to
+  drift apart. A browser refusing colour has it taken out at the boundary by
+  `cli.detail_for_web`, which is `for_web` for a structure rather than for a
+  block of prose, and it stands on `colour.strip_payload`. Nothing threads a
+  colour setting down into the report, for the reason nothing threads one into
+  the summary.
 - **The flags are spelled in the decoder's bit order**, so "ACK, SYN" rather
   than the "SYN, ACK" a handshake is usually described as. That is the order
   the letters run in the FLAGS column of the row the dialog was opened from,

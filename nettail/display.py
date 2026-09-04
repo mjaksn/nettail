@@ -30,6 +30,27 @@ def proto_colour(name):
             "ICMP": C.MAGENTA, "ICMP6": C.MAGENTA}.get(name, C.GREY)
 
 
+def address_colour(addr):
+    """Cyan for a public address, blue for a local one, grey for the rest.
+
+    Looked up when it is needed rather than held in a table, so that disabling
+    colour after import still takes effect.
+
+    Here rather than beside the traffic summary that first wanted it, because
+    the details dialog paints an address too and two mappings for one question
+    would be two things to drift apart. It is not what a flow row does with
+    the DESTINATION column, which has a reading of its own written on
+    `row_cells`: that column is about which end of one flow is worth looking
+    at, and this is about what an address is.
+    """
+    kind = addr_kind(addr) if addr else "unknown"
+    if kind == "public":
+        return C.CYAN
+    if kind == "private":
+        return C.BLUE
+    return C.GREY
+
+
 def endpoint(addr, port, proto, width, resolver=None, named=False):
     """Render "ip:port/service (hostname)", trimmed to fit width.
 

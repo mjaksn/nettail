@@ -68,6 +68,28 @@ def strip_colour(text):
     return _SGR.sub("", text)
 
 
+def strip_payload(value):
+    """The same, for a structure of finished strings rather than one block.
+
+    `strip_colour` is the boundary for prose, which arrives as a block of text
+    somebody printed. The details report arrives as nested lists of strings
+    painted where they were built, with a serial, a flag and a count among
+    them, so taking the colour out of it means walking it. What is not a
+    string, a list, a tuple or a dict comes back untouched, which is what
+    leaves a serial a serial and a flag a flag.
+
+    A tuple comes back as a list, which is what the payload becomes on its way
+    through JSON in any case.
+    """
+    if isinstance(value, str):
+        return strip_colour(value)
+    if isinstance(value, dict):
+        return dict((key, strip_payload(item)) for key, item in value.items())
+    if isinstance(value, (list, tuple)):
+        return [strip_payload(item) for item in value]
+    return value
+
+
 class FilterStream:
     """A stream that rewrites what passes through it on its way to another.
 

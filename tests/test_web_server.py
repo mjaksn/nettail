@@ -333,6 +333,15 @@ try:
           re.search(r'detail\.addEventListener\(\s*"close"', body) is not None)
     check("the cadence comes from the collector rather than the page",
           "detail_refresh" in body)
+    # Every value and every table cell arrives painted, in the escape codes a
+    # flow row already carries, because the colour is the collector's to
+    # decide for the reason the columns and the buttons are. Assigned straight
+    # into textContent the codes would appear on the page as characters, and
+    # nothing at either end would fail, so it is a grep.
+    check("a fact's value is rendered through the ansi converter",
+          re.search(r"value\.appendChild\(ansi\(", body) is not None)
+    check("and so is every cell of a table in the dialog",
+          re.search(r"td\.appendChild\(ansi\(", body) is not None)
 
     # The down arrow works the Follow box, and is the one key the page answers
     # by itself: following the tail is the tab's business and the collector has
