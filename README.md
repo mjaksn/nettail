@@ -94,8 +94,11 @@ nettail --port 2055 --external-only
 # Passive name resolution plus your own static mappings
 nettail --resolve dns --hosts ./lan-hosts
 
-# Dump every decoded field under each flow, and the templates as they arrive
+# Dump every decoded field under each flow
 nettail --verbose
+
+# Spell out each template an exporter sends, without the field lines
+nettail --templates
 
 # Machine readable, one object per line
 nettail --json > flows.jsonl
@@ -222,11 +225,11 @@ different reason.
 ```
 usage: nettail [-h] [--version] [--config FILE | --save-config [FILE]]
                [--bind BIND] [--port PORT] [--external-only] [--names]
-               [--macs] [--verbose] [--json] [--colour WHEN] [--no-color]
-               [--header-every HEADER_EVERY] [--sticky-header] [--hide-status]
-               [--no-supplemental-services] [--web] [--web-port PORT]
-               [--web-bind ADDR] [--web-host NAME] [--web-token TOKEN]
-               [--web-colour WHEN] [--web-readonly]
+               [--macs] [--verbose] [--templates] [--json] [--colour WHEN]
+               [--no-color] [--header-every HEADER_EVERY] [--sticky-header]
+               [--hide-status] [--no-supplemental-services] [--web]
+               [--web-port PORT] [--web-bind ADDR] [--web-host NAME]
+               [--web-token TOKEN] [--web-colour WHEN] [--web-readonly]
                [--web-detail-refresh SECONDS] [--size-scale-max BYTES |
                --size-scale-dynamic] [--size-scale-window FLOWS] [--country]
                [--country-db FILE] [--update-country-db]
@@ -248,7 +251,8 @@ usage: nettail [-h] [--version] [--config FILE | --save-config [FILE]]
 | `--external-only` | off | Only display flows where the source or destination is a public IP. Everything is still counted in the summary |
 | `--names` | off | Show a host by its name in place of its address, where a name is known. The `n` key turns it off and on while running |
 | `--macs` | off | Show hardware addresses on a line under each flow, on the exporters that send them. The `p` key turns it off and on while running |
-| `--verbose` | off | Print every decoded field on an indented line under each flow. Also spells out each template the first time an exporter sends it, notes in one line each time a template is sent again, and surfaces parse errors. The `v` key moves the same setting mid-run |
+| `--verbose` | off | Print every decoded field on an indented line under each flow, and report datagrams that could not be decoded. The `v` key moves the same setting mid-run |
+| `--templates` | off | Spell out each template the first time an exporter sends it, and note in one line each time a template is sent again. v9 and IPFIX only; v5 carries no templates. The `t` key moves the same setting mid-run |
 | `--json` | off | Emit one JSON object per flow on stdout instead of the table |
 | `--colour WHEN` | `auto` | When to use ANSI colour **on this terminal**: `auto`, `always` or `never`. Under `auto` a terminal gets colour and a redirected stream does not, and `NO_COLOR` in the environment turns it off. The browser view has its own switch, `--web-colour`, and is not decided by this one. `--color` is accepted too |
 | `--no-color` | off | The same as `--colour never`, and like it, about this terminal |
@@ -503,8 +507,8 @@ changes later still reaches somebody who never touched that option.
 # only show flows involving a public IP
 external-only = true
 
-# print every decoded field under each flow, spell out each template the
-# first time an exporter sends it, and note each time one is sent again
+# print every decoded field under each flow, and report datagrams that
+# could not be decoded
 #verbose = false
 ```
 
@@ -699,6 +703,7 @@ keyboard has no reason to press anything, `?` included.
 | `n` | Show a host by its name in place of its address, where a name is known |
 | `p` | Show hardware (MAC) addresses on a line under the flow |
 | `v` | Print every decoded field on a line under the flow, which is what `--verbose` asks for at startup |
+| `t` | Spell out each template an exporter sends, which is what `--templates` asks for at startup |
 | `f` | Toggle full domain names |
 | `e` | Toggle showing only flows with a public endpoint |
 | `g` | Mark public addresses with the country they are in, or stop. See [Country marking](#country-marking) |
@@ -780,6 +785,7 @@ Keyboard controls
       n  show a host by its name in place of its address
       p  show hardware addresses on a line under each flow
       v  print every decoded field on a line under each flow, or stop
+      t  spell out each template an exporter sends, or stop
       f  show full domain names instead of the first label
       e  show only flows with a public endpoint, or show all
       g  mark external addresses with the country they are in, or stop

@@ -401,9 +401,9 @@ class WatchedTemplates(TemplateStore):
     same length: the shape is news once, and after that the news is only that
     the exporter is still refreshing it, which is a line.
 
-    Only `--verbose` installs one, so a run that would never print a template
-    does not remember one either. That is also what bounds the list: the
-    receive loop drains it after every datagram, and nothing accumulates
+    Only `--templates` installs one, so a run that would never print a
+    template does not remember one either. That is also what bounds the list:
+    the receive loop drains it after every datagram, and nothing accumulates
     between two of them.
     """
 
@@ -1263,9 +1263,13 @@ def build_parser():
                          "on the exporters that send them. The p key turns it "
                          "off and on while running")
     ap.add_argument("--verbose", action="store_true",
-                    help="print every decoded field under each flow, spell "
-                         "out each template the first time an exporter sends "
-                         "it, and note each time one is sent again. The v key "
+                    help="print every decoded field under each flow, and "
+                         "report datagrams that could not be decoded. The v "
+                         "key turns it off and on while running")
+    ap.add_argument("--templates", action="store_true",
+                    help="spell out each template the first time an exporter "
+                         "sends it, and note each time one is sent again. v9 "
+                         "and IPFIX only; v5 carries no templates. The t key "
                          "turns it off and on while running")
     ap.add_argument("--json", action="store_true",
                     help="emit one JSON object per flow instead of a table")
@@ -1736,15 +1740,15 @@ def main():
     # The one thing on that list the decoder notices and says nothing about.
     # Swapped in before a byte is read, so that an exporter's opening burst of
     # templates, which is what its first datagrams usually are, is caught.
-    if args.verbose:
+    if args.templates:
         decoder.templates = WatchedTemplates()
 
     def watch_templates():
-        """Install that store later, for a v key pressed on a quiet run.
+        """Install that store later, for a t key pressed on a quiet run.
 
         Idempotent because the key can be pressed any number of times and
-        because a run that started with --verbose already has one; swapping in
-        a fresh store would throw away every template learned so far and
+        because a run that started with --templates already has one; swapping
+        in a fresh store would throw away every template learned so far and
         report them all again as though the exporter had resent them.
         """
         if not isinstance(decoder.templates, WatchedTemplates):
@@ -1762,7 +1766,7 @@ def main():
 
     controls = Controls(args, scale, resolver, sticky, stats, tally, sequences,
                         bar=bar, on_clear=bus.clear,
-                        on_verbose=watch_templates)
+                        on_templates=watch_templates)
     # Attached rather than passed in: the report has to read the start time
     # from the controls themselves, since the c key moves it.
     #
@@ -2299,7 +2303,7 @@ def main():
             # taught this collector the template in its earlier one, and the
             # shape of what is about to be read is worth more on a datagram
             # that went wrong than on one that did not.
-            if args.verbose:
+            if args.templates:
                 shapes = decoder.templates.take_templates()
                 if shapes:
                     tee(bus, "template",

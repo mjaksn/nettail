@@ -11,6 +11,29 @@ but it is a program rather than a library, and the names inside it may move
 without that being a breaking change. `--json` output is the part meant to be
 parsed, and it is treated as public.
 
+## [0.13.1] - 2026-09-04
+
+### Added
+
+- **`--templates` and a `t` key, which is where spelling a template out now
+  lives.** It prints exactly what `--verbose` printed in 0.13.0: each template
+  in full the first time an exporter sends it, a line for each resend, and the
+  full block again when the fields change under an ID already in use. The `t`
+  key moves the same setting mid-run, and a settings file can hold it as
+  `templates = true`.
+
+### Changed
+
+- **`--verbose` no longer spells out templates.** It is the field lines under
+  each flow and the report of a datagram that could not be decoded, and
+  nothing else. The two rode on one flag for one release and should not have:
+  a template is a burst at startup and a line every few minutes, where the
+  field lines are one under every flow for as long as the run lasts, so the
+  reader the feature was written for, the one looking at a field that arrived
+  as a bare `ie150`, had to drown the flows to see the block explaining them.
+  A run that wants both asks for both. Nothing about the block itself has
+  changed, and the browser still receives it under its own prose kind.
+
 ## [0.13.0] - 2026-09-03
 
 ### Added
@@ -862,6 +885,7 @@ console: the part that decides what a flow should look like on a terminal.
   reminder line under the startup banner can be a pointer rather than a
   two-hundred-character list that wrapped and then scrolled away.
 
+[0.13.1]: https://github.com/mjaksn/nettail/releases/tag/v0.13.1
 [0.13.0]: https://github.com/mjaksn/nettail/releases/tag/v0.13.0
 [0.12.0]: https://github.com/mjaksn/nettail/releases/tag/v0.12.0
 [0.11.0]: https://github.com/mjaksn/nettail/releases/tag/v0.11.0

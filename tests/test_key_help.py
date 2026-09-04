@@ -197,6 +197,7 @@ SETTINGS = {
     "f": "fqdn",
     "e": "external_only",
     "v": "verbose",
+    "t": "templates",
 }
 
 # The acts that are still plainly on or off while a run is going. Pause is the
