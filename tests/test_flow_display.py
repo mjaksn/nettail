@@ -8,11 +8,13 @@ import io
 import sys
 
 from harness import check, finish, plain
+from netflume import tcp_flags_str
 
 import nettail as main
 from nettail.display import (
     ENDPOINT_INDENT,
     ENDPOINT_WIDTH,
+    FLAGS_WIDTH,
     HEADER_LINE,
     flow_macs,
     render,
@@ -140,5 +142,32 @@ widths = {len(rows(rec, Names(), named_hosts=named)[0].rstrip())
           for rec in (flow(), flow(src_addr="10.9.9.9"),
                       flow(dst_addr="224.0.0.251"))}
 check("every row is laid out on the same grid", len(widths) <= 2, str(widths))
+
+# --- the flags width is netflume's, and this is what holds it there --------
+#
+# COLUMNS gives FLAGS no width, because on a terminal it is last and nothing
+# is padded against it. The browser's table has to size every column it
+# draws, so FLAGS_WIDTH stands in, and it is taken from the string netflume
+# actually produces rather than counted off a screen. A release that added a
+# flag or dropped one would otherwise leave the column a character out with
+# nothing failing to say so: the cells would still be right and the heading
+# above them would sit over the wrong place.
+#
+# Every flag set and none of them, because the string is meant to be the
+# same width either way. That is what makes it sortable, and it is the whole
+# reason a single width is the right thing to send.
+check("the flags width is what netflume writes with nothing set",
+      FLAGS_WIDTH == len(tcp_flags_str(0)), str(FLAGS_WIDTH))
+check("and with every flag set, the string being fixed width",
+      FLAGS_WIDTH == len(tcp_flags_str(0xFF)),
+      repr(tcp_flags_str(0xFF)))
+check("and it is a width, not a zero standing in for one", FLAGS_WIDTH > 0,
+      str(FLAGS_WIDTH))
+
+# An exporter that sent no flags at all gets an empty cell rather than a row
+# of dots, which is a different thing from every flag being clear, so the
+# width above is what the column is sized to and not what every cell holds.
+check("an exporter that sent no flags at all says nothing",
+      tcp_flags_str(None) == "", repr(tcp_flags_str(None)))
 
 finish("flow display")

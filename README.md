@@ -248,7 +248,7 @@ usage: nettail [-h] [--version] [--config FILE | --save-config [FILE]]
 | `--external-only` | off | Only display flows where the source or destination is a public IP. Everything is still counted in the summary |
 | `--names` | off | Show a host by its name in place of its address, where a name is known. The `n` key turns it off and on while running |
 | `--macs` | off | Show hardware addresses on a line under each flow, on the exporters that send them. The `p` key turns it off and on while running |
-| `--verbose` | off | Print every decoded field on an indented line under each flow. Also spells out each template the first time an exporter sends it, notes in one line each time a template is sent again, and surfaces parse errors |
+| `--verbose` | off | Print every decoded field on an indented line under each flow. Also spells out each template the first time an exporter sends it, notes in one line each time a template is sent again, and surfaces parse errors. The `v` key moves the same setting mid-run |
 | `--json` | off | Emit one JSON object per flow on stdout instead of the table |
 | `--colour WHEN` | `auto` | When to use ANSI colour **on this terminal**: `auto`, `always` or `never`. Under `auto` a terminal gets colour and a redirected stream does not, and `NO_COLOR` in the environment turns it off. The browser view has its own switch, `--web-colour`, and is not decided by this one. `--color` is accepted too |
 | `--no-color` | off | The same as `--colour never`, and like it, about this terminal |
@@ -692,12 +692,13 @@ keyboard has no reason to press anything, `?` included.
 | `s` | Print the traffic summary now, without stopping |
 | `l` | List the local addresses seen this session and the names they answered to |
 | `c` | Clear the collected statistics and restart the runtime clock |
-| `b` | Hide the status bar, or bring it back. See [The status bar](#the-status-bar) |
+| `b` | Hide the status bar, or bring it back, in both views at once. See [The status bar](#the-status-bar) |
 | `d` | Toggle re-ranging of the size colour scale |
 | `m` | Ask for a new fixed top for the size colour scale, and switch to it |
 | `h` | Cycle host name resolution: off, dns, all |
 | `n` | Show a host by its name in place of its address, where a name is known |
 | `p` | Show hardware (MAC) addresses on a line under the flow |
+| `v` | Print every decoded field on a line under the flow, which is what `--verbose` asks for at startup |
 | `f` | Toggle full domain names |
 | `e` | Toggle showing only flows with a public endpoint |
 | `g` | Mark public addresses with the country they are in, or stop. See [Country marking](#country-marking) |
@@ -778,6 +779,7 @@ Keyboard controls
       h  cycle host name resolution: off, dns, all
       n  show a host by its name in place of its address
       p  show hardware addresses on a line under each flow
+      v  print every decoded field on a line under each flow, or stop
       f  show full domain names instead of the first label
       e  show only flows with a public endpoint, or show all
       g  mark external addresses with the country they are in, or stop
@@ -999,10 +1001,17 @@ replaced it.
 It works under `--web-readonly`. Asking what a flow was changes nothing, and a
 view served for watching is still a view worth reading properly.
 
-The terminal has no equivalent. Everything in the dialog is worked out and
-written out by the collector, on the thread that owns the figures, and the page
-lays out what it is handed without naming a single field, flag or protocol of
-its own.
+The colour is the collector's too, and it is the same colour the rest of the
+program uses: an address takes the colour of the side of the boundary it is
+on, a hostname is green, a protocol is the colour of the PROTO column, a
+service is split at its slash the way the traffic summary splits one, and a
+figure is picked out against the units and short forms that restate it. Under
+`--web-colour off` the dialog is plain along with everything else.
+
+The terminal has no equivalent. Everything in the dialog is worked out,
+written out and coloured by the collector, on the thread that owns the
+figures, and the page lays out what it is handed without naming a single
+field, flag or protocol of its own.
 
 ### Keys and buttons
 

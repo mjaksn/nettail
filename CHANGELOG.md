@@ -76,10 +76,16 @@ parsed, and it is treated as public.
   since asking what a flow was changes nothing. The terminal gets no
   equivalent: there is nowhere on a console to put one.
 
-  Every value in the dialog is worked out and written out by the collector,
-  on the thread that owns the figures, and the page lays out what it is
-  handed without naming a field, a flag or a protocol of its own. That is the
-  same rule the table head and the buttons already follow.
+  Every value in the dialog is worked out, written out and coloured by the
+  collector, on the thread that owns the figures, and the page lays out what
+  it is handed without naming a field, a flag or a protocol of its own. That
+  is the same rule the table head and the buttons already follow. The colour
+  is the one the flow rows and the traffic summary use, so the dialog reads
+  as part of the same program: an address takes the colour of the side of the
+  boundary it is on, a hostname is green, a protocol is the colour of the
+  PROTO column, a service is split at its slash as the summary splits one,
+  and a figure is picked out against the units and short forms beside it.
+  `--web-colour off` leaves it plain, along with everything else.
 
 - **The down arrow toggles Follow in the browser view**, from anywhere on the
   page, which saves reaching for the box every time something worth reading
@@ -95,6 +101,12 @@ parsed, and it is treated as public.
   drawer nor the `?` listing, both of which are the collector's key table:
   a console cannot hold its view still without holding the flows back, and
   holding the flows back is what `space` already does.
+
+- **A `v` key toggles `--verbose` while a run is going**, which was the one
+  display switch with a flag and no key beside it. Turning it on installs the
+  template store the flag installs at startup, so a run that began quiet still
+  spells out each template from that point rather than staying silent about
+  them until it is restarted.
 
 ### Changed
 
@@ -138,6 +150,51 @@ parsed, and it is treated as public.
   installs them with, and they had already drifted apart once. A check holds
   the two to each other now, and holds the lock file's exact pin inside the
   range as well.
+
+- **The browser lays its table out from the widths the terminal already
+  names.** The table was sized by what it held, under which a column is as
+  wide as the widest cell in it, so the browser could not place a new row
+  without measuring every row already on the page, and the cost of showing one
+  flow grew with the history behind it. A long session slowing to a stop
+  looked like the memory the history takes and was this. `COLUMNS` in
+  `display.py` already names a width for all but one column, and the greeting
+  carries that table to the page, so the page now builds a `colgroup` from it
+  and fixes the layout: a column is settled before any row is read, and an
+  append costs the same at ten rows as at ten thousand. The endpoint columns
+  are left to share what remains, so a hostname nobody expected still has the
+  width of a wide window and wraps rather than pushing the table past it.
+  Nothing about what a row says changes.
+
+### Fixed
+
+- **Four keys did nothing, or nothing visible, in the browser view.** They had
+  one cause between them and it is worth naming: what a key does was being
+  decided in the view rather than by the collector, so each of them worked on
+  a terminal and stopped at the edge of the page.
+
+  The buttons in the browser's key drawer showed whether a setting was on by
+  consulting a list of four written into `web.html`, so `b`, `n`, `p`, `g` and
+  `h` never lit up however they were pressed, from a keyboard or from the
+  drawer. Nothing failed when that list went stale, because a key missing from
+  it was invisible rather than wrong. `Controls.toggles` answers it now, the
+  page names no key at all, and the parity is held by a test in both
+  directions.
+
+  The `p` key put hardware addresses under a flow on the console and nothing
+  in the browser, and the same was true of every field `--verbose` prints
+  under a row. Both lines were built inside the terminal's own render path,
+  which a browser never calls, so it was handed the cells of the row and
+  nothing else. They are built once now, beside the cells, and both views are
+  given them.
+
+  The `b` key hid the terminal's status bar and left the browser's footer
+  where it was, and on a run with no terminal at all it did nothing anywhere,
+  because the setting only ever moved as a side effect of the bar being
+  redrawn. The setting and the drawing are separate now: the key means the
+  status bar in both views, and the guards that keep the bar off a redirected
+  or `--json` stdout still decide only whether it draws. The footer keeps the
+  country credit when it hides the figures, since the flags are still in the
+  rows above and the licence asks for the attribution to travel with them.
 
 ## [0.12.0] - 2026-09-03
 

@@ -53,6 +53,7 @@ KEYS = (
     ("h", "cycle host name resolution: off, dns, all"),
     ("n", "show a host by its name in place of its address"),
     ("p", "show hardware addresses on a line under each flow"),
+    ("v", "print every decoded field on a line under each flow, or stop"),
     ("f", "show full domain names instead of the first label"),
     ("e", "show only flows with a public endpoint, or show all"),
     ("g", "mark external addresses with the country they are in, or stop"),
@@ -290,7 +291,7 @@ class Controls:
 
     def __init__(self, args, scale, resolver, sticky, stats, talkers,
                  sequences, started=None, out=None, summary=None, hosts=None,
-                 bar=None, on_clear=None):
+                 bar=None, on_clear=None, on_verbose=None):
         self.args = args
         self.scale = scale
         self.resolver = resolver
@@ -309,6 +310,11 @@ class Controls:
         # this terminal can clear itself too. None when there is no such view,
         # which is every run without the web interface.
         self.on_clear = on_clear
+        # Called when the v key turns verbosity on, so that whoever holds the
+        # decoder can install the template store --verbose would have installed
+        # at startup. None where there is nothing to install, which is every
+        # caller that has no decoder to hand.
+        self.on_verbose = on_verbose
         # What the ? key prints. Unlike the summary and the host list this
         # needs nothing from the collector, so the default below answers it
         # here; the hook exists so that whoever has a second view to write the
@@ -361,6 +367,7 @@ class Controls:
             "b": self._status_bar,
             "n": self._named_hosts,
             "p": self._show_macs,
+            "v": self._verbose,
             "d": self._dynamic,
             "m": lambda: self._fixed_max(ask),
             "h": self._resolve_mode,
@@ -369,6 +376,43 @@ class Controls:
             "g": self._country,
             QR_KEY: self._qr,
             HELP_KEY: self._help,
+        }
+
+    def toggles(self):
+        """Which of the keys are showing as on, keyed as `actions` keys them.
+
+        The companion to `actions`, and here for the same reason: what the
+        keys are currently doing can be read without pressing one. A browser
+        draws a key as active from this, so the page holds no list of which
+        keys are settings and cannot fall behind one that grows. That it used
+        to hold one is why b, n, p, g and h never lit up there: a key absent
+        from a table written in JavaScript was not wrong, it was invisible,
+        and nothing failed when a key was added without somebody remembering
+        to edit a second language.
+
+        Two of these are not quite the yes or no the others are, and both
+        answer here rather than leaving a page to decide. The h key cycles
+        three ways and counts as on whenever names are being looked up at all,
+        which is what a reader glancing at its button wants to know. Pause is
+        an act rather than a setting, so no flag sets it and it is in no
+        settings file, but it is plainly on or off while a run is going and a
+        button that did not say so would be the odd one out.
+
+        Read off the live objects wherever there is one, for the reason the f
+        key writes to the resolver and to `args` both: the object is what the
+        display consults, and `args` is the copy.
+        """
+        return {
+            " ": bool(self.paused),
+            "b": bool(getattr(self.args, "hide_status", False)),
+            "d": bool(self.scale.dynamic),
+            "e": bool(getattr(self.args, "external_only", False)),
+            "f": bool(self.resolver.fqdn),
+            "g": bool(country.showing()),
+            "h": self.resolver.mode != "off",
+            "n": bool(getattr(self.args, "named_hosts", False)),
+            "p": bool(getattr(self.args, "show_macs", False)),
+            "v": bool(getattr(self.args, "verbose", False)),
         }
 
     def handle(self, key, ask=None):
@@ -491,19 +535,27 @@ class Controls:
     def _status_bar(self):
         """Take the status bar off the foot of the window, or put it back.
 
-        Nothing happens where there was never a bar to toggle, which is
-        the case under --json and when output is redirected into a file. It is
-        the same silence those runs get from every other key needing a screen.
+        The setting and the drawing are two questions, and answering them
+        as one was the defect here. `hide_status` says what the reader asked
+        for and moves whatever is watching; the bar on stdout is one of the
+        things that may be watching, and a browser showing a footer of its own
+        is another. A run with no terminal used to leave the flag exactly
+        where it started, so the key did nothing anywhere, and a reader
+        pressing it in a browser watched their own footer stay put.
 
-        Under --json that used to be true by accident rather than by rule: the
-        keyboard is off there, so this could not be reached. A browser can
-        reach it, and the bar draws itself on stdout, so one press would put a
-        scroll region and two rows of status bar into the middle of somebody's
-        data and then repaint them every half second. The bar belongs to a
-        terminal, so like the x key it does nothing where there is not one.
+        The bar itself keeps every guard it had. It draws on stdout, so under
+        --json one press would put a scroll region and two rows of status bar
+        into the middle of somebody's data and then repaint them twice a
+        second, and where output is redirected there is no window to hold a
+        region at all. Those runs move the setting and leave the bar alone,
+        which is the same bargain the x key strikes.
         """
-        if self.bar is None or getattr(self.args, "json", False):
-            return None
+        drawable = self.bar is not None and not getattr(self.args, "json",
+                                                        False)
+        wanted = not getattr(self.args, "hide_status", False)
+        if not drawable:
+            self.args.hide_status = wanted
+            return ("status bar hidden" if wanted else "status bar shown")
         if self.bar.active:
             self.bar.stop()
             self.args.hide_status = True
@@ -544,6 +596,28 @@ class Controls:
             return "hiding mac addresses"
         return ("showing mac addresses, on the exporters that send them "
                 "(v5 never does)")
+
+    def _verbose(self):
+        """Print every decoded field under each flow, or stop.
+
+        Turning it on asks `on_verbose` for the template store that
+        --verbose installs at startup. Without that call the key would half
+        work: the fields under a flow would appear, and the templates behind
+        them would go on being learned by a store that records nothing, so a
+        reader who turned verbosity on would be told about no template until
+        the collector was restarted with the flag.
+
+        The store is not taken away again when verbosity goes off. It costs a
+        list, and a template learned while nobody was reading is still worth a
+        line to whoever turns the key back on.
+        """
+        wanted = not getattr(self.args, "verbose", False)
+        self.args.verbose = wanted
+        if wanted and self.on_verbose is not None:
+            self.on_verbose()
+        if not wanted:
+            return "no longer printing decoded fields"
+        return "printing every decoded field under each flow"
 
     def _clear_stats(self):
         self.stats.clear()

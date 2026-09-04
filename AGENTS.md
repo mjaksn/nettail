@@ -144,17 +144,44 @@ test:
   the gap in front of it. `HEADER_LINE` is built from it, so is
   `ENDPOINT_INDENT`, and so is the table head the browser draws, which arrives
   over the wire in the `hello` event rather than being written down again in
-  `web.html`. The same goes for the buttons, which come from `KEYS` by the same
-  route. **The page hardcodes nothing the terminal already names**, and that is
-  the rule to hold: a second list of columns or keys living in the HTML is a
-  second thing to go stale, and nothing in the page would fail loudly when it
-  did.
+  `web.html`. The widths travel with it and are what the page's `colgroup` is
+  built from, a character count being a width on the page because the font is
+  monospace. `FLAGS` is the one column `COLUMNS` gives no width, since a
+  terminal has nothing to pad it against, and `FLAGS_WIDTH` fills that in for
+  the table by asking netflume how long the string it produces is rather than
+  counting it off a screen. The same goes for the buttons, which come from
+  `KEYS` by the same route. **The page hardcodes nothing the terminal already
+  names**, and that is the rule to hold: a second list of columns or keys
+  living in the HTML is a second thing to go stale, and nothing in the page
+  would fail loudly when it did.
 - **`row_cells` in `display.py`** builds one flow's cells once, plain and
   painted, and both views use them. A browser must never work a cell out for
   itself. It could not do it correctly in any case, since a service name is
   whatever this machine's services database calls that port, and reimplementing
   the protocol names, the size ramp or the arrow in JavaScript would be two
   implementations to keep in step.
+
+  **`extra_lines` beside it is the same bargain for what goes under a row**,
+  and it exists because that bargain was not being kept. The `p` key writes the
+  hardware addresses and the `v` key writes the fields the row has no column
+  for, and both were built inside `render`, which is the terminal's path and
+  only ever the terminal's. A browser was handed the cells and nothing else, so
+  either key moved the console and left the page exactly as it was, whichever
+  view it was pressed from. Anything new that goes under a flow belongs here
+  rather than in `render`, and the terminal's indent travels with it: the font
+  is monospace at both ends, and a style threaded through so the two views
+  could disagree about it is what this whole arrangement avoids.
+- **`Controls.toggles` in `keys.py`** is which keys are showing as on, and the
+  browser draws every active key from it. The page held its own list before,
+  of four, so `b`, `n`, `p`, `g` and `h` never lit however they were pressed
+  and nothing failed: a key missing from a table written in JavaScript is
+  invisible rather than wrong. `test_key_help` holds it against `KEYS` in both
+  directions, and `test_web_server` greps the page for a key named inside
+  `setToggles`, bluntly, the way it greps for `innerHTML`. Two entries are not
+  the plain yes or no the rest are and both are answered in Python: `h` cycles
+  three ways and counts as on whenever names are being looked up at all, and
+  pause is an act with no flag behind it but is plainly on or off while a run
+  is going.
 - **The version** appears in `pyproject.toml`, `nettail/__init__.py` and
   `CHANGELOG.md`. `release.yml` refuses to publish unless the tag agrees with
   the first two, and the release notes it posts are the changelog's section
@@ -595,6 +622,19 @@ Pause is the other way round, holding the browser view while stdout keeps
 flowing, because `--json` is the part of the interface documented as parseable.
 `test_web_keys` pins all three.
 
+The `b` key is the one of those where the setting and the drawing had to come
+apart, and answering them as one was a defect rather than a simplification. It
+means the status bar, and there are two of those: the rows on the terminal and
+the footer in the browser. `hide_status` is what both read, so the key moves it
+whatever is watching, and a run with no terminal used to leave it exactly where
+it started, which is why the key did nothing anywhere and a reader pressing it
+in a browser watched their own footer stay put. What the guards still decide is
+whether the bar on stdout draws, never what the setting says. The browser's
+footer keeps the country credit when it hides the figures, because the flags
+are still up in the rows above and CC BY 4.0 asks for the attribution to be
+wherever the material is: a reader who wanted fewer figures did not waive
+DB-IP's credit.
+
 Whether a key may be pressed and whether it deserves a button are two
 questions, so `keys.py` keeps two tables. `WEB_EXCLUDED` is what a browser may
 not press at all, and holds `esc` and `q`. `WEB_UNLISTED` is what it may press
@@ -679,6 +719,28 @@ The reasoning that is not in the code:
   value) pairs, a table is a head and rows of finished strings, and the page
   has exactly two renderers. The dialog's own title and the sentence about a
   flow the ring has dropped come over the wire for the same reason.
+- **And painted in Python, in the vocabulary the rest of the program
+  already uses.** The colour rides to the browser as escape codes inside those
+  finished strings, and `web.html` turns them back into spans with the `ansi`
+  converter a flow row and the captured prose already go through, so the
+  renderers put their text on the page with `appendChild(ansi(...))` rather
+  than into `textContent`. A per-field class chosen in JavaScript would be the
+  page deciding what a field is, which is the one thing this whole feature is
+  arranged to stop; `test_web_server` greps for both calls, since escape codes
+  assigned as text would appear on the page as characters and nothing at
+  either end would fail. The rule the colours themselves follow is set out in
+  the comment above `_paint` in `detail.py`: a figure is cyan and whatever
+  restates or measures it is grey, an identity takes the colour its kind is
+  given elsewhere, a direction takes the colour `display.way` chose for the
+  arrow, and prose and raw record fields are left alone, because grey arrives
+  in the page as the ink the label column is drawn in. `address_colour` moved
+  from `cli.py` to `display.py` for that: the summary and the dialog both
+  paint an address, and two mappings for one question would be two things to
+  drift apart. A browser refusing colour has it taken out at the boundary by
+  `cli.detail_for_web`, which is `for_web` for a structure rather than for a
+  block of prose, and it stands on `colour.strip_payload`. Nothing threads a
+  colour setting down into the report, for the reason nothing threads one into
+  the summary.
 - **The flags are spelled in the decoder's bit order**, so "ACK, SYN" rather
   than the "SYN, ACK" a handshake is usually described as. That is the order
   the letters run in the FLAGS column of the row the dialog was opened from,
@@ -786,14 +848,22 @@ its event comes in, held in a `DocumentFragment`, and put on the page once per
 animation frame, with a single `toTail` at the end of it.
 
 What that removes is layout, not building. `toTail` reads `scrollHeight`, which
-makes the browser lay the table out there and then, and a table lays out whole:
-under `table-layout: auto` every column is as wide as the widest cell in it, so
-laying out after one append is a pass over every row the page is holding. A
-reconnect hands over a backlog of up to `CLIENT_BACKLOG` events inside a single
-task, and letting go of pause does the same. A task that spends itself on
-thousands of full-table layouts is, from the outside, a tab that has frozen. A
-long session seizing up looked at first like the memory the history takes, and
-the code says it is this.
+makes the browser lay the table out there and then, so the queue turns one such
+measurement per event into one per frame. A reconnect hands over a backlog of up
+to `CLIENT_BACKLOG` events inside a single task, and letting go of pause does
+the same. A task that stops to measure the page thousands of times is, from the
+outside, a tab that has frozen. A long session seizing up looked at first like
+the memory the history takes, and the code says it is this.
+
+What each measurement costs is the colgroup's business rather than the queue's,
+and the two were written a release apart. Under `table-layout: auto` a column is
+as wide as the widest cell in it, so laying the table out is a pass over every
+row there is, and the cost of showing one flow grows with the history behind it.
+`table-layout: fixed` with widths from `COLUMNS` settles every column before a
+row is read and takes that growth out. Neither replaces the other: the fixed
+layout makes a measurement cheap, the queue makes there be one measurement a
+frame, and the queue is also what keeps rows in the order they arrived in, which
+nothing about layout would.
 
 Four things about the arrangement are easy to break.
 

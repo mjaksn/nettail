@@ -27,11 +27,21 @@ from netflume import (
 )
 
 from . import __version__, config, country, detail, services
-from .colour import C, PlainStream, behind, colour_on, strip_colour
+from .colour import (
+    C,
+    PlainStream,
+    behind,
+    colour_on,
+    strip_colour,
+    strip_payload,
+)
 from .display import (
     COLUMNS,
     ENDPOINT_WIDTH,
+    FLAGS_WIDTH,
     HEADER_LINE,
+    address_colour,
+    extra_lines,
     proto_colour,
     render,
     row_cells,
@@ -180,6 +190,19 @@ def for_web(text):
     return text if _WEB_COLOUR else strip_colour(text)
 
 
+def detail_for_web(payload):
+    """A details report on its way to the feed, with the same question asked.
+
+    `for_web` is this for a block of prose. The report is not one block but
+    nested lists of finished strings, painted in `detail.py` in the vocabulary
+    the rows and the summary already use, so the browser's half of the colour
+    question is asked by walking it. There is no terminal half to ask: a
+    console has nowhere to put a dialog, and this payload goes to the feed and
+    nowhere else.
+    """
+    return payload if _WEB_COLOUR else strip_payload(payload)
+
+
 def colour_choice(args, isatty, no_colour_env):
     """Whether the terminal and the browser each take colour.
 
@@ -302,20 +325,6 @@ def _painted(*pieces):
     painted = "".join(f"{colour}{text}{C.RESET}" if colour else text
                       for text, colour in pieces)
     return plain_text, painted
-
-
-def _address_colour(addr):
-    """Cyan for a public address, blue for a local one, grey for the rest.
-
-    Looked up when it is needed rather than held in a table, so that turning
-    colour off after import still takes effect.
-    """
-    kind = addr_kind(addr) if addr else "unknown"
-    if kind == "public":
-        return C.CYAN
-    if kind == "private":
-        return C.BLUE
-    return C.GREY
 
 
 PAIR_ARROW = " <-> "     # between the two ends of one conversation
@@ -626,7 +635,7 @@ def write_summary(stats, tally, resolver, sequences, sampling, args,
         a terminal spelling the flag out as two letters would otherwise have
         them read as part of the address.
         """
-        pieces = [(str(addr) if addr else "-", _address_colour(addr))]
+        pieces = [(str(addr) if addr else "-", address_colour(addr))]
         if port:
             pieces.append((f":{port}", C.GREY))
         pieces.append((country.mark(addr), C.GREY))
@@ -1256,7 +1265,8 @@ def build_parser():
     ap.add_argument("--verbose", action="store_true",
                     help="print every decoded field under each flow, spell "
                          "out each template the first time an exporter sends "
-                         "it, and note each time one is sent again")
+                         "it, and note each time one is sent again. The v key "
+                         "turns it off and on while running")
     ap.add_argument("--json", action="store_true",
                     help="emit one JSON object per flow instead of a table")
     ap.add_argument("--colour", "--color", choices=("auto", "always", "never"),
@@ -1728,6 +1738,18 @@ def main():
     # templates, which is what its first datagrams usually are, is caught.
     if args.verbose:
         decoder.templates = WatchedTemplates()
+
+    def watch_templates():
+        """Install that store later, for a v key pressed on a quiet run.
+
+        Idempotent because the key can be pressed any number of times and
+        because a run that started with --verbose already has one; swapping in
+        a fresh store would throw away every template learned so far and
+        report them all again as though the exporter had resent them.
+        """
+        if not isinstance(decoder.templates, WatchedTemplates):
+            decoder.templates = WatchedTemplates()
+
     stats = decoder.stats
     sampling = decoder.sampling
     sequences = decoder.sequence
@@ -1739,7 +1761,8 @@ def main():
     bar = StatusBar(sticky=sticky)
 
     controls = Controls(args, scale, resolver, sticky, stats, tally, sequences,
-                        bar=bar, on_clear=bus.clear)
+                        bar=bar, on_clear=bus.clear,
+                        on_verbose=watch_templates)
     # Attached rather than passed in: the report has to read the start time
     # from the controls themselves, since the c key moves it.
     #
@@ -1985,7 +2008,14 @@ def main():
                      # than the window. Said here rather than worked out
                      # in the page, which would mean naming the columns
                      # over there and having two lists to keep in step.
-                     "wrap": width >= ENDPOINT_WIDTH}
+                     "wrap": width >= ENDPOINT_WIDTH,
+                     # What the page lays the column out at, so that a
+                     # width lives in one file and not in two. FLAGS is
+                     # the only column COLUMNS gives no width, because a
+                     # terminal pads nothing against it, and a table has
+                     # to size it anyway: hence the fallback rather than
+                     # a zero the page would have to interpret.
+                     "width": width or FLAGS_WIDTH}
                     for name, width, align, _gap in COLUMNS],
         "keys": [{"key": key, "doc": doc} for key, doc in web_buttons()],
         # Every key the browser may press, as the characters a keypress
@@ -2045,6 +2075,14 @@ def main():
             # than in the greeting because the g key moves it, and a status
             # frame follows any key within a repaint interval.
             "countries": country.showing(),
+            # Which keys are showing as on, keyed as the page keys its
+            # buttons. It comes from the collector for the reason the buttons
+            # and the table head do: a list of which keys are settings, kept
+            # in the page, is a second list to go stale, and this one had.
+            # Sent on the status rather than in the greeting because every one
+            # of them moves, and a status frame follows any key within a
+            # repaint interval.
+            "toggles": controls.toggles(),
             # The credit the database in hand asks for, as the words and the
             # address rather than as anything the page could mistake for
             # markup, or null where none is owed. DB-IP's licence asks a page
@@ -2114,6 +2152,12 @@ def main():
             "cells": [for_web(unpad(painted)) for _plain, painted
                       in row_cells(rec, hdr, args, resolver, scale,
                                    endpoint_width=WEB_ENDPOINT_WIDTH)],
+            # What the p and v keys write under the row. Finished and
+            # painted by the same function the terminal prints, so that the
+            # two views cannot come to disagree about what a hardware address
+            # or a decoded field looks like. Empty on the runs where both keys
+            # are off, which is nearly all of them.
+            "extra": [for_web(line) for line in extra_lines(rec, args)],
             "record": (record if record is not None
                        else flow_record(rec, hdr, resolver)),
             "n": serial,
@@ -2174,8 +2218,8 @@ def main():
                 # to publish to, and building the report for it would be work
                 # done for nobody.
                 if bus.active:
-                    bus.detail(detail.report(asked, detail_ring, tally,
-                                             resolver))
+                    bus.detail(detail_for_web(
+                        detail.report(asked, detail_ring, tally, resolver)))
             # A request refused because its Host named another port, reported
             # on this thread for the reason browser keys are answered on it:
             # a line written from a request thread lands inside the scroll

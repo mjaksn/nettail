@@ -26,7 +26,13 @@ import urllib.request
 from harness import check, finish
 
 import nettail as main
-from nettail.cli import colour_choice, for_web, tee, write_hosts
+from nettail.cli import (
+    colour_choice,
+    detail_for_web,
+    for_web,
+    tee,
+    write_hosts,
+)
 from nettail.colour import C, PlainStream, colour_on, strip_colour
 from nettail.feed import Feed
 
@@ -298,10 +304,31 @@ check("and an empty one says so rather than going back to the resolver",
 
 check("prose keeps its colour by default", for_web("\033[36mx\033[0m")
       == "\033[36mx\033[0m")
+
+# The details report asks the same question of a structure. It is not one
+# block somebody printed, so `for_web` cannot answer for it, and a report
+# that kept its colour past a browser refusing colour would put escape
+# codes on that page as characters: it renders what it is handed.
+report = {"n": 7, "held": True,
+          "sections": [{"title": "Flow",
+                        "facts": [["Bytes", "\033[36m1,500\033[0m"]],
+                        "tables": [{"title": "Peers",
+                                    "head": [["Peer", "<"]],
+                                    "rows": [["\033[36m8.8.8.8\033[0m"]],
+                                    "more": 0}]}]}
+check("a details report keeps its colour by default",
+      detail_for_web(report) == report, str(detail_for_web(report)))
 main.cli._WEB_COLOUR = False
 try:
     check("and loses it when the browser is not having any",
           for_web("\033[36mx\033[0m") == "x")
+    stripped = detail_for_web(report)
+    check("and so does every string in a details report, however deep",
+          stripped["sections"][0]["facts"][0] == ["Bytes", "1,500"]
+          and stripped["sections"][0]["tables"][0]["rows"][0]
+          == ["8.8.8.8"], str(stripped))
+    check("while what is not a string comes through as it was",
+          stripped["n"] == 7 and stripped["held"] is True, str(stripped))
 finally:
     main.cli._WEB_COLOUR = True
 

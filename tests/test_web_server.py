@@ -22,6 +22,10 @@ from nettail.web import ASK_QUEUE_MAX, MAX_CLIENTS, WebInterface, unpad
 
 TIMEOUT = 6.0
 
+# A quoted single character used as an object key, which is how a hand-written
+# table of keys looks and how nothing else in that function does.
+KEY_LITERAL = r"""['"][a-z ]['"]\s*:"""
+
 
 def open_stream(site, host=None):
     host = host or "127.0.0.1:%d" % site.port
@@ -147,6 +151,43 @@ try:
     # the same class of mistake as building markup, so it is checked here.
     check("nor a selector out of what it was given",
           re.search(r"querySelector(All)?\s*\([^)]*\+", body) is None)
+
+    # -- and no list of which keys are settings ---------------------------
+    # `setToggles` used to hold one, of four, so b, n, p, g and h never lit
+    # however they were pressed. Nothing failed then and nothing would fail
+    # now: a key absent from a table written over there is invisible rather
+    # than wrong, which is exactly the failure a grep is good for. What the
+    # page may do is look a key up in what the collector sent; what it may
+    # not do is name one itself. Blunt in the way the markup check above is
+    # blunt, and for the same reason.
+    start = body.find("function setToggles(")
+    check("the page has a setToggles to check", start != -1)
+    inside = body[start:body.find("\n  }", start)]
+    check("which names no key of its own",
+          re.search(KEY_LITERAL, inside) is None,
+          "a key written here is a second list of the settings")
+    check("and reads the collector's answer instead",
+          "payload.toggles" in body)
+
+    # -- the fixed table layout, and what it must not reach ---------------
+    # The flow table is laid out from the widths COLUMNS names, which is what
+    # keeps an append from costing a pass over every row already on the page.
+    # The dialog builds tables of its own with no colgroup and no widths, and
+    # a fixed layout gives such a column an equal share of the panel, so the
+    # rule has to name the table it means. It began as a bare `table` selector
+    # written a release before the dialog existed, and nothing failed: no test
+    # here draws, so both halves are greps.
+    check("the flow table is laid out fixed",
+          re.search(r"#flows\s*\{[^}]*table-layout:\s*fixed", body) is not None,
+          "the performance fix is gone or has been renamed")
+    check("and nothing else in the page is",
+          re.search(r"(?<!#flows)\btable\s*\{[^}]*table-layout", body) is None,
+          "a bare selector reaches the dialog's tables too")
+    check("the flow table carries the id the rule names",
+          re.search(r"<table\s+id=\"flows\"", body) is not None)
+    check("and the head is built from the widths the greeting carried",
+          "col.width" in body and "colgroup.appendChild" in body,
+          "the colgroup is what the fixed layout is fixed at")
 
     # -- the flags font ---------------------------------------------------
     # The one thing this interface serves besides the page, and the exception
@@ -292,6 +333,15 @@ try:
           re.search(r'detail\.addEventListener\(\s*"close"', body) is not None)
     check("the cadence comes from the collector rather than the page",
           "detail_refresh" in body)
+    # Every value and every table cell arrives painted, in the escape codes a
+    # flow row already carries, because the colour is the collector's to
+    # decide for the reason the columns and the buttons are. Assigned straight
+    # into textContent the codes would appear on the page as characters, and
+    # nothing at either end would fail, so it is a grep.
+    check("a fact's value is rendered through the ansi converter",
+          re.search(r"value\.appendChild\(ansi\(", body) is not None)
+    check("and so is every cell of a table in the dialog",
+          re.search(r"td\.appendChild\(ansi\(", body) is not None)
 
     # The down arrow works the Follow box, and is the one key the page answers
     # by itself: following the tail is the tab's business and the collector has
