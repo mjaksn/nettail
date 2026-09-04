@@ -999,10 +999,17 @@ replaced it.
 It works under `--web-readonly`. Asking what a flow was changes nothing, and a
 view served for watching is still a view worth reading properly.
 
-The terminal has no equivalent. Everything in the dialog is worked out and
-written out by the collector, on the thread that owns the figures, and the page
-lays out what it is handed without naming a single field, flag or protocol of
-its own.
+The colour is the collector's too, and it is the same colour the rest of the
+program uses: an address takes the colour of the side of the boundary it is
+on, a hostname is green, a protocol is the colour of the PROTO column, a
+service is split at its slash the way the traffic summary splits one, and a
+figure is picked out against the units and short forms that restate it. Under
+`--web-colour off` the dialog is plain along with everything else.
+
+The terminal has no equivalent. Everything in the dialog is worked out,
+written out and coloured by the collector, on the thread that owns the
+figures, and the page lays out what it is handed without naming a single
+field, flag or protocol of its own.
 
 ### Keys and buttons
 

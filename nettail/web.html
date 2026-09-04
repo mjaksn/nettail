@@ -895,6 +895,17 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
   // owns the figures. Every browser watching receives every answer, so each
   // one is stamped with the id of the ask it belongs to and a page ignores
   // the ones that are not its own.
+  //
+  // The colour is the collector's too. Every value and every table cell
+  // arrives painted in the same escape codes a flow row carries, in the
+  // vocabulary the terminal and the traffic summary already use, so both
+  // renderers below put their text on the page through ansi() rather than
+  // straight into textContent. Nothing here decides that an address is public
+  // or that a protocol is TCP; it renders what it was handed, exactly as it
+  // does for a row. The titles are the exception and stay on textContent,
+  // because the panel headings and the dialog's own are styled by this page
+  // and are not painted at the other end. Painting one there without changing
+  // this would show a reader the escape codes, and nothing would fail.
 
   var detail = document.getElementById("detail");
   var detailTitle = document.getElementById("detailTitle");
@@ -987,7 +998,7 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
       label.textContent = fact[0];
       var value = document.createElement("span");
       value.className = "fv";
-      value.textContent = fact[1];
+      value.appendChild(ansi(String(fact[1] === undefined ? "" : fact[1])));
       wrap.appendChild(label);
       wrap.appendChild(value);
     });
@@ -1019,7 +1030,7 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
       cells.forEach(function (cell, i) {
         var td = document.createElement("td");
         if (head[i] && head[i][1] === ">") { td.className = "r"; }
-        td.textContent = cell;
+        td.appendChild(ansi(String(cell === undefined ? "" : cell)));
         tr.appendChild(td);
       });
       body.appendChild(tr);

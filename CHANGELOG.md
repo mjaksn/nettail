@@ -76,10 +76,16 @@ parsed, and it is treated as public.
   since asking what a flow was changes nothing. The terminal gets no
   equivalent: there is nowhere on a console to put one.
 
-  Every value in the dialog is worked out and written out by the collector,
-  on the thread that owns the figures, and the page lays out what it is
-  handed without naming a field, a flag or a protocol of its own. That is the
-  same rule the table head and the buttons already follow.
+  Every value in the dialog is worked out, written out and coloured by the
+  collector, on the thread that owns the figures, and the page lays out what
+  it is handed without naming a field, a flag or a protocol of its own. That
+  is the same rule the table head and the buttons already follow. The colour
+  is the one the flow rows and the traffic summary use, so the dialog reads
+  as part of the same program: an address takes the colour of the side of the
+  boundary it is on, a hostname is green, a protocol is the colour of the
+  PROTO column, a service is split at its slash as the summary splits one,
+  and a figure is picked out against the units and short forms beside it.
+  `--web-colour off` leaves it plain, along with everything else.
 
 - **The down arrow toggles Follow in the browser view**, from anywhere on the
   page, which saves reaching for the box every time something worth reading

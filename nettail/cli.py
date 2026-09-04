@@ -27,11 +27,19 @@ from netflume import (
 )
 
 from . import __version__, config, country, detail, services
-from .colour import C, PlainStream, behind, colour_on, strip_colour
+from .colour import (
+    C,
+    PlainStream,
+    behind,
+    colour_on,
+    strip_colour,
+    strip_payload,
+)
 from .display import (
     COLUMNS,
     ENDPOINT_WIDTH,
     HEADER_LINE,
+    address_colour,
     proto_colour,
     render,
     row_cells,
@@ -180,6 +188,19 @@ def for_web(text):
     return text if _WEB_COLOUR else strip_colour(text)
 
 
+def detail_for_web(payload):
+    """A details report on its way to the feed, with the same question asked.
+
+    `for_web` is this for a block of prose. The report is not one block but
+    nested lists of finished strings, painted in `detail.py` in the vocabulary
+    the rows and the summary already use, so the browser's half of the colour
+    question is asked by walking it. There is no terminal half to ask: a
+    console has nowhere to put a dialog, and this payload goes to the feed and
+    nowhere else.
+    """
+    return payload if _WEB_COLOUR else strip_payload(payload)
+
+
 def colour_choice(args, isatty, no_colour_env):
     """Whether the terminal and the browser each take colour.
 
@@ -302,20 +323,6 @@ def _painted(*pieces):
     painted = "".join(f"{colour}{text}{C.RESET}" if colour else text
                       for text, colour in pieces)
     return plain_text, painted
-
-
-def _address_colour(addr):
-    """Cyan for a public address, blue for a local one, grey for the rest.
-
-    Looked up when it is needed rather than held in a table, so that turning
-    colour off after import still takes effect.
-    """
-    kind = addr_kind(addr) if addr else "unknown"
-    if kind == "public":
-        return C.CYAN
-    if kind == "private":
-        return C.BLUE
-    return C.GREY
 
 
 PAIR_ARROW = " <-> "     # between the two ends of one conversation
@@ -621,7 +628,7 @@ def write_summary(stats, tally, resolver, sequences, sampling, args,
         a terminal spelling the flag out as two letters would otherwise have
         them read as part of the address.
         """
-        pieces = [(str(addr) if addr else "-", _address_colour(addr))]
+        pieces = [(str(addr) if addr else "-", address_colour(addr))]
         if port:
             pieces.append((f":{port}", C.GREY))
         pieces.append((country.mark(addr), C.GREY))
@@ -2169,8 +2176,8 @@ def main():
                 # to publish to, and building the report for it would be work
                 # done for nobody.
                 if bus.active:
-                    bus.detail(detail.report(asked, detail_ring, tally,
-                                             resolver))
+                    bus.detail(detail_for_web(
+                        detail.report(asked, detail_ring, tally, resolver)))
             # A request refused because its Host named another port, reported
             # on this thread for the reason browser keys are answered on it:
             # a line written from a request thread lands inside the scroll
