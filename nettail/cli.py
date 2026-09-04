@@ -378,9 +378,14 @@ class WatchedTemplates(TemplateStore):
     datagram it could not read, and a template it has just learned is not one
     of them. The fact exists in exactly one place, which is `put` returning
     True, so standing a subclass in the decoder's way is how this program
-    hears about it without parsing the datagram a second time. An event
-    upstream would be the better home for it, and this is the seam until
-    there is one.
+    hears about it without parsing the datagram a second time.
+
+    netflume 0.3.0 raises a `TemplateLearned`, which is the better home this
+    note used to say it was waiting for, and this has not moved onto it. The
+    event fires for a template that is new or changed and deliberately not for
+    one resent unchanged, and the resend line below is a thing this program
+    prints, so moving means taking the event for one half and keeping a
+    counter for the other. Worth doing, not done.
 
     A template resent unchanged is remembered too, and marked as such rather
     than dropped. Both are worth saying and they are not worth saying at the

@@ -20,6 +20,7 @@ behaves exactly as it did before this module existed.
 import os
 
 from netflume import service_name as system_service_name
+from netflume.values import EPHEMERAL_FLOOR
 
 # Where the shipped list lives. Beside this module, so it travels with the
 # package however the package was fetched.
@@ -30,13 +31,18 @@ SUPPLEMENTAL_SERVICES = os.path.join(
 # above this and so does the table below: a name up there would describe
 # whichever port the kernel happened to hand a client, not a service.
 #
-# The number is repeated rather than imported because netflume writes it inline
-# and exports no constant to import, so there is nothing to point at. Repeated
-# numbers drift apart quietly, which is the part worth doing something about:
-# test_services pins this one against where netflume actually stops naming
-# ports, so a release that moved the floor would fail a check here rather than
-# leave the two halves of one rule disagreeing in silence.
-EPHEMERAL_FLOOR = 49152
+# Imported rather than repeated. It was written out here while netflume had
+# the number inline and exported nothing to point at, with a test that found
+# where netflume actually stopped naming ports and held this copy to it, which
+# was the best that could be done about two halves of one rule sitting in two
+# places. netflume 0.2.0 published the constant, so the copy went and the test
+# that reverse engineered it went with it.
+#
+# It comes from `netflume.values` rather than from the package, which is the
+# line netflume draws rather than an accident: the package exports what a
+# consumer of flows needs, and a module exports what a caller drawing the same
+# line as that module needs. This is the second kind. `service_name` above is
+# the first, and the two arriving by different routes is the rule working.
 
 PROTO_NUMBERS = {"tcp": 6, "udp": 17}
 

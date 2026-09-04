@@ -7,7 +7,6 @@ one machine to the next, which is the very problem the list exists to solve
 and no basis for an assertion.
 """
 import os
-import socket
 import tempfile
 
 import netflume.values as netflume_values
@@ -30,30 +29,19 @@ def system_says(answers):
 
 real_system = services.system_service_name
 
-# --- the ephemeral floor is netflume's, and this is what holds it there -----
+# --- the ephemeral floor is netflume's, and now it is only netflume's -------
 #
-# EPHEMERAL_FLOOR repeats a number netflume writes inline and exports no
-# constant for, so there is nothing to import and the two can only ever drift
-# apart. This finds where netflume actually stops naming ports and pins ours to
-# it, so a release that moved the floor fails a check here rather than leaving
-# one rule with two different ideas of where the ephemeral range begins.
-#
-# Every port is given a name for the duration. netflume answers None both for a
-# port it declines to name and for a port the database has never heard of, and
-# without that there is no telling the two apart.
-real_getservbyport = socket.getservbyport
-socket.getservbyport = lambda port, proto: "named"
-netflume_values._service_cache.clear()
-try:
-    below = real_system(services.EPHEMERAL_FLOOR - 1, TCP)
-    at = real_system(services.EPHEMERAL_FLOOR, TCP)
-finally:
-    socket.getservbyport = real_getservbyport
-    netflume_values._service_cache.clear()
-
-check("netflume still names the port below our floor", below == "named",
-      repr(below))
-check("and still declines to name the one at it", at is None, repr(at))
+# This used to fake the system database, clear netflume's cache and ask it
+# about the ports either side of our own copy of the floor, because the number
+# was written out in both places and finding where netflume actually stopped
+# naming was the only way to hold them together. netflume 0.2.0 exports the
+# constant, so `services` imports it and there is one number. What is left to
+# check is that it is still that one, since an import that quietly became a
+# local again would look exactly like this line passing.
+check("the floor is netflume's own constant, not a copy",
+      services.EPHEMERAL_FLOOR is netflume_values.EPHEMERAL_FLOOR,
+      "%r is not %r" % (services.EPHEMERAL_FLOOR,
+                        netflume_values.EPHEMERAL_FLOOR))
 
 # --- the shipped file -------------------------------------------------------
 note = services.load()
