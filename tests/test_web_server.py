@@ -169,6 +169,26 @@ try:
     check("and reads the collector's answer instead",
           "payload.toggles" in body)
 
+    # -- the fixed table layout, and what it must not reach ---------------
+    # The flow table is laid out from the widths COLUMNS names, which is what
+    # keeps an append from costing a pass over every row already on the page.
+    # The dialog builds tables of its own with no colgroup and no widths, and
+    # a fixed layout gives such a column an equal share of the panel, so the
+    # rule has to name the table it means. It began as a bare `table` selector
+    # written a release before the dialog existed, and nothing failed: no test
+    # here draws, so both halves are greps.
+    check("the flow table is laid out fixed",
+          re.search(r"#flows\s*\{[^}]*table-layout:\s*fixed", body) is not None,
+          "the performance fix is gone or has been renamed")
+    check("and nothing else in the page is",
+          re.search(r"(?<!#flows)\btable\s*\{[^}]*table-layout", body) is None,
+          "a bare selector reaches the dialog's tables too")
+    check("the flow table carries the id the rule names",
+          re.search(r"<table\s+id=\"flows\"", body) is not None)
+    check("and the head is built from the widths the greeting carried",
+          "col.width" in body and "colgroup.appendChild" in body,
+          "the colgroup is what the fixed layout is fixed at")
+
     # -- the flags font ---------------------------------------------------
     # The one thing this interface serves besides the page, and the exception
     # to its being a single file. It is asked for through BASE like the stream

@@ -206,14 +206,30 @@ button:disabled { opacity: .45; cursor: default; }
   cursor: pointer;
 }
 main { flex: 1 1 auto; overflow: auto; }
+table { border-collapse: collapse; width: 100%; }
 /* Fixed layout, sized by the colgroup the greeting's widths build.
    Under `table-layout: auto` a column is as wide as the widest cell
    in it, so the browser cannot place a new row without measuring
    every row already there, and the cost of showing one flow grows
    with the history behind it. Fixed, a column's width is settled
    before any row is read and an append costs the same at ten rows
-   as at ten thousand. */
-table { border-collapse: collapse; width: 100%; table-layout: fixed; }
+   as at ten thousand.
+
+   Addressed by its id, and that is the load-bearing part rather than
+   a matter of taste. This began life as a bare `table` selector,
+   written a release before the flow details dialog existed, and the
+   dialog builds tables of its own in JavaScript with no colgroup and
+   no width on any column. Fixed layout gives such a column an equal
+   share of what is left, so every one of those tables divided itself
+   into sixths: a peer's address and hostname wrapped to four lines
+   while a packet count sat alone in eleven characters, a head label
+   as ordinary as `Received` overflowed rather than widening, and the
+   `overflow-x` those tables are wrapped in could never engage again,
+   since a table at `width: 100%` that cannot outgrow its container
+   has nothing to scroll. None of it fails a test, because nothing in
+   the suite draws. The id is also what stops it coming back the next
+   time somebody adds a table. */
+#flows { table-layout: fixed; }
 thead th {
   position: sticky;
   top: 0;
@@ -377,8 +393,8 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
 /* Not pinned. The main table has one head and a window's worth of rows under
    it; a panel here has several short tables, and heads that stuck would pile
    up against each other at the top of the dialog as it scrolled. */
-#detail thead th { position: static; padding: 3px 8px; }
-#detail tbody td { white-space: nowrap; padding: 1px 8px; }
+#detail thead th { position: static; padding: 3px var(--cell-pad); }
+#detail tbody td { white-space: nowrap; padding: 1px var(--cell-pad); }
 /* The first column of every table here holds a name: a protocol, a service,
    or a peer with its hostname after it. It is the only one that can be long,
    and it wraps rather than widening the table past the panel. */
@@ -426,7 +442,7 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
 </header>
 <div id="keys" hidden></div>
 <main id="scroll">
-  <table>
+  <table id="flows">
     <colgroup id="cols"></colgroup>
     <thead><tr id="head"></tr></thead>
     <tbody id="rows"></tbody>

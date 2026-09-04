@@ -161,7 +161,7 @@ parsed, and it is treated as public.
   without measuring every row already on the page, and the cost of showing one
   flow grew with the history behind it. A long session slowing to a stop
   looked like the memory the history takes and was this. `COLUMNS` in
-  `display.py` already names a width for every column and the greeting already
+  `display.py` already names a width for all but one column, and the greeting
   carries that table to the page, so the page now builds a `colgroup` from it
   and fixes the layout: a column is settled before any row is read, and an
   append costs the same at ten rows as at ten thousand. The endpoint columns
