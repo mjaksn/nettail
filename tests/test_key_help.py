@@ -160,10 +160,13 @@ check("an empty key is not a key", panel.handle("") is None)
 # them before there is anything on screen means nothing. Everything else in
 # KEYS changes what the display is doing and belongs on the command line too.
 #
-# Written down here and nowhere else, and it is the one table in this file. A
-# key added to KEYS is either an act, and belongs in this list, or a setting,
-# and wants a flag; either way somebody has to say which, and until they do
-# this fails rather than letting a setting arrive with no way to ask for it.
+# Written down here and not in the program, which is the point of it: this is
+# the second opinion, and a table the program handed over would agree with
+# itself and say nothing. A key added to KEYS is either an act, and belongs in
+# this list, or a setting, and wants a flag; either way somebody has to say
+# which, and until they do this fails rather than letting a setting arrive with
+# no way to ask for it. `Controls.toggles` is checked against these two at the
+# foot of the file for the same reason and in the same direction.
 ACTIONS = {
     "space",    # pause and resume
     "x",        # clear the screen
@@ -193,7 +196,15 @@ SETTINGS = {
     "p": "show_macs",
     "f": "fqdn",
     "e": "external_only",
+    "v": "verbose",
 }
+
+# The acts that are still plainly on or off while a run is going. Pause is the
+# only one: it sets nothing a file could hold, which is why it is an act, but a
+# reader can see perfectly well that it is on and a button that would not say
+# so would be the odd one out. Written here so that `toggles` gaining a key
+# that is neither a setting nor this fails rather than passing quietly.
+STATEFUL_ACTS = {"space"}
 
 keys = [key for key, _doc in main.KEYS]
 check("every key is either an act or a setting",
@@ -207,5 +218,28 @@ for key, dest in sorted(SETTINGS.items()):
           % (key, flags.get(dest, "missing")), dest in flags,
           "no command line option sets %r, so a settings file cannot either"
           % dest)
+
+# --- the collector answers which keys are showing as on ---------------------
+
+# `Controls.toggles` is what a browser draws an active key from, and before it
+# existed the page kept a list of four written in JavaScript. b, n, p, g and h
+# were absent from it and so never lit, however they were pressed, and nothing
+# failed: a key missing from that table was invisible rather than wrong. Held
+# here in both directions, so a setting added to KEYS with no state to report
+# fails, and so does a state reported for a key that is neither a setting nor
+# one of the acts above.
+#
+# The space key is keyed as `actions` keys it and as the page keys its buttons,
+# which is the character rather than the word.
+CHAR = {"space": " "}
+expected = {CHAR.get(key, key)
+            for key in set(SETTINGS) | STATEFUL_ACTS}
+reported = set(controls().toggles())
+check("every setting reports whether it is on",
+      expected <= reported,
+      "no state reported for: %s" % sorted(expected - reported))
+check("and nothing reports a state that is not a setting or a stateful act",
+      reported <= expected,
+      "unaccounted for: %s" % sorted(reported - expected))
 
 finish("key help")

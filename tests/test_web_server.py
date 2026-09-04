@@ -22,6 +22,10 @@ from nettail.web import ASK_QUEUE_MAX, MAX_CLIENTS, WebInterface, unpad
 
 TIMEOUT = 6.0
 
+# A quoted single character used as an object key, which is how a hand-written
+# table of keys looks and how nothing else in that function does.
+KEY_LITERAL = r"""['"][a-z ]['"]\s*:"""
+
 
 def open_stream(site, host=None):
     host = host or "127.0.0.1:%d" % site.port
@@ -147,6 +151,23 @@ try:
     # the same class of mistake as building markup, so it is checked here.
     check("nor a selector out of what it was given",
           re.search(r"querySelector(All)?\s*\([^)]*\+", body) is None)
+
+    # -- and no list of which keys are settings ---------------------------
+    # `setToggles` used to hold one, of four, so b, n, p, g and h never lit
+    # however they were pressed. Nothing failed then and nothing would fail
+    # now: a key absent from a table written over there is invisible rather
+    # than wrong, which is exactly the failure a grep is good for. What the
+    # page may do is look a key up in what the collector sent; what it may
+    # not do is name one itself. Blunt in the way the markup check above is
+    # blunt, and for the same reason.
+    start = body.find("function setToggles(")
+    check("the page has a setToggles to check", start != -1)
+    inside = body[start:body.find("\n  }", start)]
+    check("which names no key of its own",
+          re.search(KEY_LITERAL, inside) is None,
+          "a key written here is a second list of the settings")
+    check("and reads the collector's answer instead",
+          "payload.toggles" in body)
 
     # -- the flags font ---------------------------------------------------
     # The one thing this interface serves besides the page, and the exception

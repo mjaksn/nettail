@@ -697,4 +697,60 @@ result = run([], [v5_packet(0)], argv=["--web-readonly"])
 check("a read-only run offers the browser no keys", result["site"].allowed == set())
 check("and says so in the banner", "watching only" in plain(result["err"]))
 
+# -- what a browser draws an active key from ----------------------------
+#
+# The page used to hold its own list of which keys are settings, of four, so b,
+# n, p, g and h never lit however they were pressed and nothing failed. The
+# collector answers it now, and these are the checks that it answers at all and
+# that a key moves what it reports.
+
+result = run([], [v5_packet(0)], settle=0.6)
+reported = [s["toggles"] for s in statuses(result) if "toggles" in s]
+check("the status says which keys are showing as on", reported != [])
+# Not every button is here and none should be: x, s, l, c and m are acts, and
+# an act has nothing to be on. What must hold is the other direction, that
+# nothing is reported for a key a browser could not press, since the page looks
+# each one up against a button. `test_key_help` holds the settings side.
+check("and reports nothing for a key the browser cannot press",
+      all(set(t) <= {KEY_CHARS.get(key, key) for key, _doc in web_keys()}
+          for t in reported),
+      str(sorted(reported[0])) if reported else "none")
+
+# The b key under --json, which is the run with no bar to draw: stdout is
+# somebody's data and the bar would be two rows of status in the middle of it.
+# This is the case the fix was for. The flag used to stay where it started, so
+# the key did nothing anywhere, and a reader pressing it in a browser watched
+# their own footer stay exactly where it was.
+result = run([(2, "b", None)], [v5_packet(0), v5_packet(2)], settle=0.6,
+             argv=["--json"])
+after = [s["toggles"]["b"] for s in statuses(result) if "toggles" in s]
+check("the b key moves the setting with no terminal bar to draw",
+      True in after, str(after))
+
+# -- the lines under a flow ---------------------------------------------
+#
+# The p and v keys each write a line under the row, and both were built inside
+# `render`, which is the terminal's path alone. A browser was handed the cells
+# and nothing else, so both keys moved the console and left the page as it was.
+# v5 carries no hardware addresses, so v is the one of the two these packets
+# can show.
+
+result = run([], [v5_packet(0)])
+check("a flow carries no extra lines when neither key is on",
+      all(f.get("extra") == [] for f in result["flows"]),
+      str([f.get("extra") for f in result["flows"]]))
+
+result = run([(0, "v", None)],
+             [v5_packet(0), v5_packet(2), v5_packet(4), v5_packet(6)])
+check("the v key is answered",
+      "printing every decoded field" in plain(result["err"]))
+extras = [f.get("extra") for f in result["flows"] if f.get("extra")]
+check("and the fields reach the browser under the flow", extras != [],
+      "no flow published a line under it")
+check("as one finished line, written in Python",
+      all(len(e) == 1 and isinstance(e[0], str) for e in extras),
+      str(extras[:1]))
+check("holding a field the row has no column for",
+      any("=" in e[0] for e in extras), str(extras[:1]))
+
 finish("web keys")

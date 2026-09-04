@@ -157,6 +157,28 @@ test:
   whatever this machine's services database calls that port, and reimplementing
   the protocol names, the size ramp or the arrow in JavaScript would be two
   implementations to keep in step.
+
+  **`extra_lines` beside it is the same bargain for what goes under a row**,
+  and it exists because that bargain was not being kept. The `p` key writes the
+  hardware addresses and the `v` key writes the fields the row has no column
+  for, and both were built inside `render`, which is the terminal's path and
+  only ever the terminal's. A browser was handed the cells and nothing else, so
+  either key moved the console and left the page exactly as it was, whichever
+  view it was pressed from. Anything new that goes under a flow belongs here
+  rather than in `render`, and the terminal's indent travels with it: the font
+  is monospace at both ends, and a style threaded through so the two views
+  could disagree about it is what this whole arrangement avoids.
+- **`Controls.toggles` in `keys.py`** is which keys are showing as on, and the
+  browser draws every active key from it. The page held its own list before,
+  of four, so `b`, `n`, `p`, `g` and `h` never lit however they were pressed
+  and nothing failed: a key missing from a table written in JavaScript is
+  invisible rather than wrong. `test_key_help` holds it against `KEYS` in both
+  directions, and `test_web_server` greps the page for a key named inside
+  `setToggles`, bluntly, the way it greps for `innerHTML`. Two entries are not
+  the plain yes or no the rest are and both are answered in Python: `h` cycles
+  three ways and counts as on whenever names are being looked up at all, and
+  pause is an act with no flag behind it but is plainly on or off while a run
+  is going.
 - **The version** appears in `pyproject.toml`, `nettail/__init__.py` and
   `CHANGELOG.md`. `release.yml` refuses to publish unless the tag agrees with
   the first two, and the release notes it posts are the changelog's section
@@ -596,6 +618,19 @@ bar into the middle of somebody's data and then repaints them twice a second.
 Pause is the other way round, holding the browser view while stdout keeps
 flowing, because `--json` is the part of the interface documented as parseable.
 `test_web_keys` pins all three.
+
+The `b` key is the one of those where the setting and the drawing had to come
+apart, and answering them as one was a defect rather than a simplification. It
+means the status bar, and there are two of those: the rows on the terminal and
+the footer in the browser. `hide_status` is what both read, so the key moves it
+whatever is watching, and a run with no terminal used to leave it exactly where
+it started, which is why the key did nothing anywhere and a reader pressing it
+in a browser watched their own footer stay put. What the guards still decide is
+whether the bar on stdout draws, never what the setting says. The browser's
+footer keeps the country credit when it hides the figures, because the flags
+are still up in the rows above and CC BY 4.0 asks for the attribution to be
+wherever the material is: a reader who wanted fewer figures did not waive
+DB-IP's credit.
 
 Whether a key may be pressed and whether it deserves a button are two
 questions, so `keys.py` keeps two tables. `WEB_EXCLUDED` is what a browser may

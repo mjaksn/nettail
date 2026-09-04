@@ -720,6 +720,19 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
       trimmed += 1;
       total -= 1;
     }
+    // An extra line belongs to the flow above it, so a trim that took the
+    // flow takes its lines with it rather than leaving them at the top of the
+    // history under nothing. They are not counted as rows dropped: the flow
+    // they describe was counted already, and a reader told that four thousand
+    // rows went when three thousand flows did would be reading the wrong
+    // number.
+    while (true) {
+      var lead = (held ? rows : pending).firstElementChild;
+      if (!lead || lead.className !== "extra") { break; }
+      (held ? rows : pending).removeChild(lead);
+      if (held) { held -= 1; }
+      total -= 1;
+    }
     untold = true;
   }
 
@@ -796,6 +809,19 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
       tr.appendChild(td);
     }
     queue(tr);
+    // What the p and v keys put under the row, one row each, spanning the
+    // table the way prose does. Queued after the flow and never before it, so
+    // a trim taking the oldest from the front can separate the two but can
+    // never reorder them. `keep` is what puts the front back together.
+    (payload.extra || []).forEach(function (line) {
+      var extra = document.createElement("tr");
+      extra.className = "extra";
+      var cell = document.createElement("td");
+      cell.colSpan = Math.max(columns.length, 1);
+      cell.appendChild(ansi(String(line)));
+      extra.appendChild(cell);
+      queue(extra);
+    });
   }
 
   function addProse(kind, text) {
@@ -897,20 +923,36 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
     if (payload.credit && payload.credit.text && payload.credit.url) {
       statusBar.appendChild(creditLink(payload.credit));
     }
-    setToggles(s);
+    setToggles(payload.toggles || {});
+    // The b key takes this footer down as well as the terminal's bar, which
+    // is what it means by the status bar: one collector, and these are two
+    // views of it. The credit stays whatever it says, and that is a licence
+    // matter rather than a display one. The flags are still up in the rows
+    // above, so the material is still on show, and CC BY 4.0 asks for the
+    // attribution to be wherever the material is. A reader who wanted fewer
+    // figures did not thereby waive DB-IP's credit.
+    var quiet = !!(payload.toggles || {}).b;
+    if (quiet) {
+      statusBar.textContent = "";
+      if (payload.credit && payload.credit.text && payload.credit.url) {
+        statusBar.appendChild(creditLink(payload.credit));
+      }
+    }
+    statusBar.hidden = quiet && !statusBar.firstChild;
   }
 
   // Buttons that mirror a setting show whether it is on. Read off the status
   // rather than tracked here, so a key pressed at the terminal or in another
   // browser moves this one too: there is one collector and these are views of
   // it, not four independent programs.
-  function setToggles(s) {
-    var on = {
-      " ": !!s.paused,
-      e: !!s.external_only,
-      f: !!s.fqdn,
-      d: !!s.scale_dynamic
-    };
+  //
+  // Which keys those are is the collector's answer as well, and that is the
+  // fix for a real defect rather than tidiness. This held a list of four, so
+  // b, n, p, g and h never lit however they were pressed, and nothing failed:
+  // a key missing from a table written over here was not wrong, it was
+  // invisible. `Controls.toggles` is the one list now, and a key added there
+  // arrives with its button already working.
+  function setToggles(on) {
     Array.prototype.forEach.call(keysBar.children, function (button) {
       var key = button.getAttribute("data-key");
       if (key in on) { button.setAttribute("data-on", on[key] ? "1" : "0"); }

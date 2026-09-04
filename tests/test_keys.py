@@ -350,10 +350,18 @@ check("the region is claimed again", "\033[1;28r" in screen.getvalue(),
 check("the flag follows it back", bar_args.hide_status is False)
 bar_resolver.shutdown()
 
-# A run with no bar to toggle, under --json or redirected into a file, hears
-# nothing back, the same as every other key that needs a screen.
+# A run with no bar to toggle, under --json or redirected into a file, still
+# moves the setting. The bar is one of the things that watches it and a
+# browser's own footer is another, so answering for the bar alone left a
+# reader pressing b in a browser watching nothing happen. What those runs do
+# not do is draw: there is no window to hold a scroll region, and under --json
+# there is somebody's data on stdout.
 c, _out = build()
-check("b says nothing where there is no bar", c.handle("b") is None)
+check("b hides the bar where there is none to draw",
+      c.handle("b") == "status bar hidden")
+check("and the setting moved with it", c.args.hide_status is True)
+check("b brings it back", c.handle("b") == "status bar shown")
+check("and the setting came back too", c.args.hide_status is False)
 c.resolver.shutdown()
 
 # --- reading a line ---------------------------------------------------------

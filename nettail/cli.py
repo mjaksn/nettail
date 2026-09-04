@@ -33,6 +33,7 @@ from .display import (
     ENDPOINT_WIDTH,
     FLAGS_WIDTH,
     HEADER_LINE,
+    extra_lines,
     proto_colour,
     render,
     row_cells,
@@ -1252,7 +1253,8 @@ def build_parser():
     ap.add_argument("--verbose", action="store_true",
                     help="print every decoded field under each flow, spell "
                          "out each template the first time an exporter sends "
-                         "it, and note each time one is sent again")
+                         "it, and note each time one is sent again. The v key "
+                         "turns it off and on while running")
     ap.add_argument("--json", action="store_true",
                     help="emit one JSON object per flow instead of a table")
     ap.add_argument("--colour", "--color", choices=("auto", "always", "never"),
@@ -1724,6 +1726,18 @@ def main():
     # templates, which is what its first datagrams usually are, is caught.
     if args.verbose:
         decoder.templates = WatchedTemplates()
+
+    def watch_templates():
+        """Install that store later, for a v key pressed on a quiet run.
+
+        Idempotent because the key can be pressed any number of times and
+        because a run that started with --verbose already has one; swapping in
+        a fresh store would throw away every template learned so far and
+        report them all again as though the exporter had resent them.
+        """
+        if not isinstance(decoder.templates, WatchedTemplates):
+            decoder.templates = WatchedTemplates()
+
     stats = decoder.stats
     sampling = decoder.sampling
     sequences = decoder.sequence
@@ -1735,7 +1749,8 @@ def main():
     bar = StatusBar(sticky=sticky)
 
     controls = Controls(args, scale, resolver, sticky, stats, tally, sequences,
-                        bar=bar, on_clear=bus.clear)
+                        bar=bar, on_clear=bus.clear,
+                        on_verbose=watch_templates)
     # Attached rather than passed in: the report has to read the start time
     # from the controls themselves, since the c key moves it.
     #
@@ -2048,6 +2063,14 @@ def main():
             # than in the greeting because the g key moves it, and a status
             # frame follows any key within a repaint interval.
             "countries": country.showing(),
+            # Which keys are showing as on, keyed as the page keys its
+            # buttons. It comes from the collector for the reason the buttons
+            # and the table head do: a list of which keys are settings, kept
+            # in the page, is a second list to go stale, and this one had.
+            # Sent on the status rather than in the greeting because every one
+            # of them moves, and a status frame follows any key within a
+            # repaint interval.
+            "toggles": controls.toggles(),
             # The credit the database in hand asks for, as the words and the
             # address rather than as anything the page could mistake for
             # markup, or null where none is owed. DB-IP's licence asks a page
@@ -2117,6 +2140,12 @@ def main():
             "cells": [for_web(unpad(painted)) for _plain, painted
                       in row_cells(rec, hdr, args, resolver, scale,
                                    endpoint_width=WEB_ENDPOINT_WIDTH)],
+            # What the p and v keys write under the row. Finished and
+            # painted by the same function the terminal prints, so that the
+            # two views cannot come to disagree about what a hardware address
+            # or a decoded field looks like. Empty on the runs where both keys
+            # are off, which is nearly all of them.
+            "extra": [for_web(line) for line in extra_lines(rec, args)],
             "record": (record if record is not None
                        else flow_record(rec, hdr, resolver)),
             "n": serial,

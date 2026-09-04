@@ -298,12 +298,28 @@ def row_cells(rec, hdr, args, resolver, scale, endpoint_width=None):
     ]
 
 
-def render(rec, hdr, args, resolver, scale):
-    cells = row_cells(rec, hdr, args, resolver, scale)
-    # Every cell arrives padded to its own column, so the row is the painted
-    # halves with the gaps from the table between them and nothing else.
-    print("".join(" " * column[3] + painted
-                  for column, (_plain, painted) in zip(COLUMNS, cells)))
+def extra_lines(rec, args):
+    """The lines that go under one flow's row, finished and painted.
+
+    Two keys put a line under a row: p writes the hardware addresses and v
+    writes every field the row had no column for. Both used to be written
+    inside `render`, which is the terminal's path and only ever the
+    terminal's, so a browser was handed the cells `row_cells` builds and
+    nothing else. Pressing either key moved the console and left the page
+    exactly as it was, whichever view the key was pressed from.
+
+    Built here for the reason `row_cells` is built where it is: one place
+    decides what a line says and both views read it. A page could not work
+    either line out for itself in any case, since the fields are whatever the
+    decoder put in the record and the names are its names.
+
+    The indent is the terminal's, and it travels rather than being taken off
+    for the browser. It is the character offset of the SOURCE column, the
+    font at both ends is monospace, and a style threaded through here so the
+    two views could disagree about it is the thing this module is arranged to
+    avoid.
+    """
+    lines = []
 
     if getattr(args, "show_macs", False):
         src_mac, dst_mac = flow_macs(rec)
@@ -312,12 +328,12 @@ def render(rec, hdr, args, resolver, scale):
         # once per flow. v5 never carries them, and plenty of v9 exporters
         # leave the elements out.
         if src_mac or dst_mac:
-            print(f"{' ' * ENDPOINT_INDENT}"
-                  f"{C.DIM}{src_mac or '-':<{ENDPOINT_WIDTH}}{C.RESET} "
-                  f"{' ' * WAY_WIDTH} "
-                  f"{C.DIM}{dst_mac or '-'}{C.RESET}")
+            lines.append(f"{' ' * ENDPOINT_INDENT}"
+                         f"{C.DIM}{src_mac or '-':<{ENDPOINT_WIDTH}}{C.RESET} "
+                         f"{' ' * WAY_WIDTH} "
+                         f"{C.DIM}{dst_mac or '-'}{C.RESET}")
 
-    if args.verbose:
+    if getattr(args, "verbose", False):
         skip = {"src_addr", "dst_addr", "src_port", "dst_port", "proto",
                 "packets", "octets", "tcp_flags"}
         extras = []
@@ -328,4 +344,17 @@ def render(rec, hdr, args, resolver, scale):
                 v = FLOW_END_REASON.get(v, v)
             extras.append(f"{k}={v}")
         if extras:
-            print(f"    {C.GREY}{'  '.join(extras)}{C.RESET}")
+            lines.append(f"    {C.GREY}{'  '.join(extras)}{C.RESET}")
+
+    return lines
+
+
+def render(rec, hdr, args, resolver, scale):
+    cells = row_cells(rec, hdr, args, resolver, scale)
+    # Every cell arrives padded to its own column, so the row is the painted
+    # halves with the gaps from the table between them and nothing else.
+    print("".join(" " * column[3] + painted
+                  for column, (_plain, painted) in zip(COLUMNS, cells)))
+
+    for line in extra_lines(rec, args):
+        print(line)
