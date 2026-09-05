@@ -1026,10 +1026,22 @@ feature means reading both, and their suites.
   non-event here. Keep it true.
 - **`WatchedTemplates` rests on `put` returning True, and that is the only
   thing it rests on.** The store's return value is where the fact lives, and
-  `--verbose` stands a subclass in the decoder's way to hear about it rather
+  `--templates` stands a subclass in the decoder's way to hear about it rather
   than parsing the datagram again. `test_templates` pins the store's side of
   the deal separately from the block it feeds, so an upstream change shows up
   as the store failing rather than as a run that quietly says nothing.
+
+  **It has its own flag because the two things rode on one for a release and
+  should not have.** `--verbose` printed the templates as well as the field
+  lines until 0.13.1, and the volumes are nothing alike: a template is a burst
+  at startup and a line every few minutes, where the field lines are one under
+  every flow for as long as the run lasts. The reader the feature was written
+  for, the one looking at a field that arrived as a bare `ie150`, had to
+  drown the flows to see the block explaining them. Implication would have
+  been the cheaper split and is the wrong one: with `--verbose` turning
+  templates on as well, the `t` key pressed on a `--verbose` run moves its own
+  setting and changes nothing on screen. That is a key which appears to work
+  and visibly does not, which is the reason `q` is kept off the browser.
 
   **The better home now exists and this has not moved onto it yet.** netflume
   0.3.0 raises a `TemplateLearned` for a template that is new or changed, with

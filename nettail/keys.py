@@ -54,6 +54,7 @@ KEYS = (
     ("n", "show a host by its name in place of its address"),
     ("p", "show hardware addresses on a line under each flow"),
     ("v", "print every decoded field on a line under each flow, or stop"),
+    ("t", "spell out each template an exporter sends, or stop"),
     ("f", "show full domain names instead of the first label"),
     ("e", "show only flows with a public endpoint, or show all"),
     ("g", "mark external addresses with the country they are in, or stop"),
@@ -291,7 +292,7 @@ class Controls:
 
     def __init__(self, args, scale, resolver, sticky, stats, talkers,
                  sequences, started=None, out=None, summary=None, hosts=None,
-                 bar=None, on_clear=None, on_verbose=None):
+                 bar=None, on_clear=None, on_templates=None):
         self.args = args
         self.scale = scale
         self.resolver = resolver
@@ -310,11 +311,11 @@ class Controls:
         # this terminal can clear itself too. None when there is no such view,
         # which is every run without the web interface.
         self.on_clear = on_clear
-        # Called when the v key turns verbosity on, so that whoever holds the
-        # decoder can install the template store --verbose would have installed
-        # at startup. None where there is nothing to install, which is every
-        # caller that has no decoder to hand.
-        self.on_verbose = on_verbose
+        # Called when the t key turns templates on, so that whoever holds the
+        # decoder can install the template store --templates would have
+        # installed at startup. None where there is nothing to install, which
+        # is every caller that has no decoder to hand.
+        self.on_templates = on_templates
         # What the ? key prints. Unlike the summary and the host list this
         # needs nothing from the collector, so the default below answers it
         # here; the hook exists so that whoever has a second view to write the
@@ -368,6 +369,7 @@ class Controls:
             "n": self._named_hosts,
             "p": self._show_macs,
             "v": self._verbose,
+            "t": self._templates,
             "d": self._dynamic,
             "m": lambda: self._fixed_max(ask),
             "h": self._resolve_mode,
@@ -412,6 +414,7 @@ class Controls:
             "h": self.resolver.mode != "off",
             "n": bool(getattr(self.args, "named_hosts", False)),
             "p": bool(getattr(self.args, "show_macs", False)),
+            "t": bool(getattr(self.args, "templates", False)),
             "v": bool(getattr(self.args, "verbose", False)),
         }
 
@@ -598,26 +601,36 @@ class Controls:
                 "(v5 never does)")
 
     def _verbose(self):
-        """Print every decoded field under each flow, or stop.
-
-        Turning it on asks `on_verbose` for the template store that
-        --verbose installs at startup. Without that call the key would half
-        work: the fields under a flow would appear, and the templates behind
-        them would go on being learned by a store that records nothing, so a
-        reader who turned verbosity on would be told about no template until
-        the collector was restarted with the flag.
-
-        The store is not taken away again when verbosity goes off. It costs a
-        list, and a template learned while nobody was reading is still worth a
-        line to whoever turns the key back on.
-        """
+        """Print every decoded field under each flow, or stop."""
         wanted = not getattr(self.args, "verbose", False)
         self.args.verbose = wanted
-        if wanted and self.on_verbose is not None:
-            self.on_verbose()
         if not wanted:
             return "no longer printing decoded fields"
         return "printing every decoded field under each flow"
+
+    def _templates(self):
+        """Spell out the templates an exporter sends, or stop.
+
+        Turning it on asks `on_templates` for the template store that
+        --templates installs at startup. Without that call the key would go
+        quiet rather than work: templates would go on being learned by the
+        store the decoder came with, which records nothing, and a reader who
+        pressed the key would be told about no template until the collector
+        was restarted with the flag.
+
+        The store is not taken away again when the key goes off. It costs one
+        entry per template while it is off, which is what `take_templates`
+        bounds it to, and a template learned or changed while nobody was
+        reading is still worth a line to whoever turns the key back on.
+        """
+        wanted = not getattr(self.args, "templates", False)
+        self.args.templates = wanted
+        if wanted and self.on_templates is not None:
+            self.on_templates()
+        if not wanted:
+            return "no longer spelling out templates"
+        return ("spelling out each template an exporter sends, and noting "
+                "each resend")
 
     def _clear_stats(self):
         self.stats.clear()

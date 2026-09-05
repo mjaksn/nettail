@@ -5,7 +5,12 @@ field read afterwards is read through that. Printing it is this program's
 work: netflume learns the template and raises nothing about it, so the store
 this suite exercises is the seam. The shape once, a line for each refresh
 after that, the shape again when the fields change under an ID already in
-use, and none of it without --verbose.
+use, and none of it without --templates.
+
+That flag is its own and not `--verbose`, which printed these until 0.13.1.
+The two are checked apart at the end: a run with the field lines on says
+nothing about a template, and a run spelling templates out puts no field line
+under a flow.
 """
 import io
 import os
@@ -197,10 +202,25 @@ check("a set holding one of each is reported in the order it arrived",
 
 
 # --------------------------------------------------------------------------
-# end to end: through a run, on stderr, and only under --verbose
+# end to end: through a run, on stderr, and only under --templates
 # --------------------------------------------------------------------------
 
-def run(argv, msgs):
+def run(argv, msgs, script=None):
+    """Drive main() with a scripted socket, and a scripted keyboard for a key.
+
+    A key is polled at the top of the loop and the datagram read at the foot
+    of it, so a key in `script` has taken effect before the datagram beside it
+    in `msgs` is decoded. That ordering is what lets the t key be pressed on a
+    run that started without the flag and still be shown the template in the
+    very next datagram.
+
+    The loop drains the keyboard until it answers None, so a key is written
+    here as the key and then a None, and a datagram nobody types over is a
+    None on its own. Without that a script reads as one press per datagram
+    and is silently two, which is a test that passes for the wrong reason.
+    """
+    keys = list(script or ())
+
     class FakeSocket:
         def __init__(self, *a, **kw):
             self.left = list(msgs)
@@ -219,10 +239,25 @@ def run(argv, msgs):
 
         def recvfrom(self, _n):
             if not self.left:
+                # Keys left to type are keys the loop has to come round for,
+                # so a quiet moment rather than the end of the run.
+                if keys:
+                    raise socket.timeout
                 raise KeyboardInterrupt
             return self.left.pop(0), ("10.0.0.1", 2055)
 
     socket.socket = FakeSocket
+    # Put back afterwards rather than left in place. These are attributes of
+    # the class, so a run that patched them and walked away would hand the
+    # next run a keyboard that says it started and answers every poll with
+    # None, which is not the keyboard that run asked for and is not the one
+    # the checks below were written against.
+    real_keyboard = {name: getattr(main.Keyboard, name)
+                     for name in ("start", "stop", "poll")}
+    if script is not None:
+        main.Keyboard.start = lambda self: setattr(self, "enabled", True) or True
+        main.Keyboard.stop = lambda self: setattr(self, "enabled", False)
+        main.Keyboard.poll = lambda self: keys.pop(0) if keys else None
     out, err = FakeTTY(), io.StringIO()
     real_out, real_err = sys.stdout, sys.stderr
     sys.stdout, sys.stderr = out, err
@@ -231,6 +266,8 @@ def run(argv, msgs):
         main.main()
     finally:
         sys.stdout, sys.stderr = real_out, real_err
+        for name, method in real_keyboard.items():
+            setattr(main.Keyboard, name, method)
     return plain(out.getvalue()), plain(err.getvalue())
 
 
@@ -239,15 +276,15 @@ resent = ipfix([data_template(400, FLOW_FIELDS),
                 data_set(400, flow_payload())], seq=1)
 changed = ipfix([data_template(400, WIDER_FIELDS)], seq=2)
 
-out, err = run(["--verbose"], [flows])
-check("a run under --verbose spells the template out",
+out, err = run(["--templates"], [flows])
+check("a run under --templates spells the template out",
       "sent template 400" in err, repr(err[:400]))
 check("the block lists the fields", "src_addr:ipv4/4" in err, repr(err[:400]))
 check("the block goes to stderr and not into the flows",
       "sent template 400" not in out, repr(out))
 check("the flow itself is still shown", "8.8.8.8" in out, repr(out))
 
-out, err = run(["--verbose"], [flows, resent])
+out, err = run(["--templates"], [flows, resent])
 check("a template resent is not spelled out twice",
       err.count("sent template 400:") == 1,
       repr([ln for ln in err.splitlines() if "template 400" in ln]))
@@ -258,12 +295,12 @@ check("that line carries no field list",
       err.count("src_addr:ipv4/4") == 1,
       repr([ln for ln in err.splitlines() if "src_addr" in ln]))
 
-out, err = run(["--verbose"], [flows, resent, resent, resent])
+out, err = run(["--templates"], [flows, resent, resent, resent])
 check("every refresh is noted, not only the first",
       err.count("resent template 400, unchanged") == 3,
       repr([ln for ln in err.splitlines() if "template 400" in ln]))
 
-out, err = run(["--verbose"], [flows, changed])
+out, err = run(["--templates"], [flows, changed])
 check("a template that changed is spelled out again",
       err.count("sent template 400:") == 2,
       repr([ln for ln in err.splitlines() if "template 400" in ln]))
@@ -275,19 +312,77 @@ check("the second block carries the field that was added",
       repr([ln for ln in err.splitlines() if "tcp_flags" in ln]))
 
 out, err = run([], [flows, resent])
-check("nothing is spelled out without --verbose",
+check("nothing is spelled out without --templates",
       "sent template" not in err, repr(err[:400]))
 check("and nothing is noted either", "resent template" not in err,
       repr(err[:400]))
 
-out, err = run(["--verbose"], [v5()])
+out, err = run(["--templates"], [v5()])
 check("v5 carries no templates and prints none",
       "sent template" not in err and "resent template" not in err,
       repr(err[:400]))
 
+# The split, in both directions. Verbosity is the field lines under a flow
+# and templates are the shapes those fields are read through, and the volumes
+# are nothing alike: one line per flow for ever against a burst at startup.
+# Riding on one flag meant a reader who wanted the second took the first.
+#
+# The datagram carries a field the row has no column for, so that the line
+# --verbose writes under a flow has something to say. Every field used above
+# is one the row itself carries, and those are left out of that line rather
+# than repeated under it.
+extra = ipfix([data_template(401, FLOW_FIELDS + [(10, 4)]),
+               data_set(401, flow_payload() + struct.pack("!I", 7))])
+
+out, err = run(["--verbose"], [extra])
+check("--verbose alone spells out no template",
+      "sent template" not in err and "resent template" not in err,
+      repr(err[:400]))
+check("and still writes the field line under the flow",
+      "in_if=7" in out, repr(out[:400]))
+
+out, err = run(["--templates"], [extra])
+check("--templates alone writes no field line under a flow",
+      "in_if=7" not in out, repr(out[:400]))
+check("and still spells the template out",
+      "sent template 401" in err, repr(err[:400]))
+
+# The t key on a run that started without the flag, which is the path the
+# store is installed on rather than swapped in before the first byte. It fails
+# quietly when it is wrong: templates go on being learned by the store the
+# decoder came with, which remembers none of them, so the key reports nothing
+# for the rest of the run and nothing anywhere says why.
+# The first datagram after the key is spelled out in full rather than called a
+# resend, and that is right: the store installed then has seen nothing, so the
+# template really is news to the reader, who was shown nothing about it when it
+# first arrived.
+out, err = run([], [flows, resent, resent], script=[None, "t", None])
+check("the t key installs the store mid-run",
+      err.count("sent template 400:") == 1, repr(err[:700]))
+check("and every resend after it is noted",
+      err.count("resent template 400, unchanged") == 1, repr(err[:700]))
+
+# The key turned off again, which is where the store used to grow without any
+# bound: it stayed installed, nothing drained it, and every resend for however
+# long the key was off was counted out to whoever turned it back on. What is
+# held now is the shape and not the drumbeat. Reading the run below: the key
+# goes on, off with the wider layout arriving while it is off, a resend of that
+# passes unwatched, and the key goes on again.
+out, err = run([], [flows, resent, changed, changed, changed],
+               script=[None, "t", None, "t", None, None, "t", None])
+check("a template changed while the key was off is spelled out on return",
+      err.count("sent template 400:") == 2,
+      repr([ln for ln in err.splitlines() if "template 400" in ln]))
+check("and spelled out as it now stands",
+      err.count("tcp_flags:uint/1") == 1,
+      repr([ln for ln in err.splitlines() if "tcp_flags" in ln]))
+check("a resend nobody was watching is not counted out afterwards",
+      err.count("resent template 400, unchanged") == 1,
+      repr([ln for ln in err.splitlines() if "template 400" in ln]))
+
 sampled = ipfix([options_template(300, [(145, 4)], [(34, 4)]),
                  data_set(300, struct.pack("!II", 999, 1000))])
-out, err = run(["--verbose"], [sampled])
+out, err = run(["--templates"], [sampled])
 check("an options template reaches the reader labelled",
       "sent options template 300" in err, repr(err[:600]))
 check("its scope and option fields are both listed",

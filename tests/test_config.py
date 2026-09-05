@@ -60,6 +60,7 @@ SAMPLES = {
     "named_hosts": "true",
     "show_macs": "true",
     "verbose": "true",
+    "templates": "true",
     "json": "true",
     "colour": "never",
     "no_color": "true",
