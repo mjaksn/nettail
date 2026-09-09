@@ -110,10 +110,10 @@ one_sided = rows(flow(src_mac="a4:83:e7:1c:9d:02"), show_macs=True)
 check("one mac is enough to draw the line", len(one_sided) == 2)
 check("and the end without one is marked rather than left blank",
       one_sided[1].rstrip().endswith("-"), repr(one_sided[1]))
-check("the post-nat elements are used when the plain ones are absent",
+check("the egress elements are used when the ingress ones are absent",
       flow_macs({"post_src_mac": "aa:bb", "post_dst_mac": "cc:dd"})
       == ("aa:bb", "cc:dd"))
-check("the plain elements win when both arrived",
+check("the ingress elements win when both arrived",
       flow_macs({"src_mac": "11:22", "post_src_mac": "aa:bb"})[0] == "11:22")
 
 # --- n: a name in place of an address ---------------------------------------
