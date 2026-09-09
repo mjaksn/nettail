@@ -55,6 +55,19 @@ check("and it is this one",
       heading and heading.group(1) == main.__version__,
       f"changelog {heading and heading.group(1)}, package {main.__version__}")
 
+# Every heading is a reference style link whose definition sits at the foot of
+# the file, which is why release.yml lifts a section out without its heading:
+# on its own it would render as bare brackets. A version whose definition was
+# never added renders that way in the changelog itself, and nothing else here
+# would notice. The section is found, the release notes are right, and only
+# the file a reader browses reads wrong. 0.14.0 was written without one and
+# caught by hand on the way to the release, which is why this is here.
+changelog = read(CHANGELOG)
+headings = set(re.findall(r"(?m)^## \[([^\]]+)\]", changelog))
+defined = set(re.findall(r"(?m)^\[([^\]]+)\]:", changelog))
+check("every changelog heading has a link definition at the foot",
+      headings <= defined, str(sorted(headings - defined)))
+
 # --- it is offered where a reader would look --------------------------------
 usage = subprocess.run([sys.executable, *SCRIPT, "--help"],
                        capture_output=True, text=True, cwd=ROOT).stdout

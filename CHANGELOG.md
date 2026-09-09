@@ -950,6 +950,7 @@ console: the part that decides what a flow should look like on a terminal.
   reminder line under the startup banner can be a pointer rather than a
   two-hundred-character list that wrapped and then scrolled away.
 
+[0.14.0]: https://github.com/mjaksn/nettail/releases/tag/v0.14.0
 [0.13.1]: https://github.com/mjaksn/nettail/releases/tag/v0.13.1
 [0.13.0]: https://github.com/mjaksn/nettail/releases/tag/v0.13.0
 [0.12.0]: https://github.com/mjaksn/nettail/releases/tag/v0.12.0
