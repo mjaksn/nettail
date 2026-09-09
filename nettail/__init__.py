@@ -59,7 +59,7 @@ caller wanting either asks ``detail`` for it. The tables that other things are
 held against do come up, since they are what a suite compares to netflume.
 """
 
-__version__ = "0.14.0"
+__version__ = "0.15.0"
 
 from .cli import (
     DETAIL_RING,

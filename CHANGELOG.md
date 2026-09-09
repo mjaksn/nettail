@@ -11,6 +11,40 @@ but it is a program rather than a library, and the names inside it may move
 without that being a breaking change. `--json` output is the part meant to be
 parsed, and it is treated as public.
 
+## [0.15.0] - 2026-09-09
+
+### Added
+
+- **`--json` takes a destination.** `--json flows.jsonl` appends one object
+  per flow to that file and leaves everything else exactly as it was: the
+  table is drawn, the keys are live, the status bar is up and the browser
+  view behaves as it does on a run with no flag at all. The flag on its own
+  still means stdout and still means all of what that implied, and `--json -`
+  says so out loud.
+
+  What it replaces is a shell redirect, which could only ever have the
+  records or the display and not both, since they went to one stream. A
+  collector under systemd can now keep a machine readable stream on disk
+  while a person watches the same flows in a browser, which took two runs
+  before.
+
+  The file is appended to rather than truncated, because the arrangement this
+  is written for is a service that gets restarted and a restart that threw
+  away the morning's records would be a poor price for starting empty. It is
+  line buffered, so `tail -f` shows a flow when the flow arrives. The space
+  key does not hold it back, for the reason it never held stdout back: a sink
+  something else is parsing is not a thing that can be paused.
+
+### Changed
+
+- **A settings file can no longer say `json = true`.** The option takes a
+  value now, so the words a file spells a switch with would have been read as
+  a request for a file of that name. That is the quietest way there is to
+  lose somebody's records, so those words are refused instead, in a complaint
+  naming the file, the key and the two spellings that work: `-` for stdout,
+  or a path. A file that already says `json = true` is a line to change
+  rather than a file to rewrite.
+
 ## [0.14.0] - 2026-09-09
 
 ### Changed
@@ -952,6 +986,7 @@ console: the part that decides what a flow should look like on a terminal.
   reminder line under the startup banner can be a pointer rather than a
   two-hundred-character list that wrapped and then scrolled away.
 
+[0.15.0]: https://github.com/mjaksn/nettail/releases/tag/v0.15.0
 [0.14.0]: https://github.com/mjaksn/nettail/releases/tag/v0.14.0
 [0.13.1]: https://github.com/mjaksn/nettail/releases/tag/v0.13.1
 [0.13.0]: https://github.com/mjaksn/nettail/releases/tag/v0.13.0

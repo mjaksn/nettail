@@ -3,7 +3,6 @@
 
 import argparse
 import io
-import json
 import os
 import queue
 import signal
@@ -26,7 +25,7 @@ from netflume import (
     flow_timestamp,
 )
 
-from . import __version__, config, country, detail, services
+from . import __version__, config, country, detail, jsonout, services
 from .colour import (
     C,
     PlainStream,
@@ -1304,8 +1303,14 @@ def build_parser():
                          "sends it, and note each time one is sent again. v9 "
                          "and IPFIX only; v5 carries no templates. The t key "
                          "turns it off and on while running")
-    ap.add_argument("--json", action="store_true",
-                    help="emit one JSON object per flow instead of a table")
+    ap.add_argument("--json", nargs="?", const=jsonout.STDOUT,
+                    type=jsonout.dest_arg, metavar="FILE",
+                    help="emit one JSON object per flow. On its own, or given "
+                         "-, the objects go to stdout in place of the table, "
+                         "as they always have. Given a path they are appended "
+                         "to that file instead and the table, the keys and "
+                         "the browser view carry on as if the flag were not "
+                         "there")
     ap.add_argument("--colour", "--color", choices=("auto", "always", "never"),
                     default="auto", metavar="WHEN",
                     help="when to use ANSI colour on this terminal: auto (a "
@@ -1498,6 +1503,14 @@ def main():
     for dest, value in config.overruled(ap, args, settings, baseline).items():
         setattr(args, dest, value)
 
+    # Whether stdout is the thing carrying the records, which is what every
+    # guard below is asking and is not the same question as whether records
+    # are being written at all. Settled once, here, because the arguments are
+    # final at this line and every reader of it wants the same answer. The
+    # keys ask `jsonout.to_stdout` of `args` for themselves, holding nothing
+    # else to ask it of.
+    json_stdout = jsonout.to_stdout(args)
+
     # The token, when the flag did not carry it. This is how the installed
     # service gets one: systemd reads `EnvironmentFile` and compose reads
     # `env_file`, so by the time this runs the value is already here, and
@@ -1600,10 +1613,12 @@ def main():
         # already been dealt with.
         if not behind(sys.stderr, PlainStream):
             sys.stderr = PlainStream(sys.stderr)
-        if not args.json and not behind(sys.stdout, PlainStream):
-            # Under --json stdout carries json.dumps output, which has never
-            # had a colour code in it, so there is nothing to take out and no
-            # reason to put a substitution in front of every flow.
+        if not json_stdout and not behind(sys.stdout, PlainStream):
+            # With the records on stdout it carries json.dumps output, which
+            # has never had a colour code in it, so there is nothing to take
+            # out and no reason to put a substitution in front of every flow.
+            # A run writing them to a file has the table on stdout as usual
+            # and is wrapped as usual.
             sys.stdout = PlainStream(sys.stdout)
 
     # Which file the settings came from, said out loud every time. A config
@@ -1666,9 +1681,12 @@ def main():
         if not country.terminal_flags(args.country_style, sys.stdout):
             if not behind(sys.stderr, country.CodeStream):
                 sys.stderr = country.CodeStream(sys.stderr)
-            if not args.json and not behind(sys.stdout, country.CodeStream):
-                # Under --json stdout carries the two letter code in a field of
-                # its own and never a flag, so there is nothing to spell out.
+            if not json_stdout and not behind(sys.stdout,
+                                              country.CodeStream):
+                # With the records on stdout it carries the two letter code in
+                # a field of its own and never a flag, so there is nothing to
+                # spell out. A run writing them to a file is drawing the table
+                # here and wants the flags spelled exactly as any other does.
                 sys.stdout = country.CodeStream(sys.stdout)
         note = country.load(args.country_db)
         if country.missing():
@@ -1723,6 +1741,23 @@ def main():
         timeout=args.resolve_timeout,
     )
 
+    # Where the records go, opened before the port is taken so that a path
+    # that cannot be written fails on its own account rather than after a bind
+    # error has had first say. A file is announced, for the reason the settings
+    # file is: a run quietly appending somebody's flows to a path that came out
+    # of a config file found in the working directory should say where they are
+    # going. stdout announces nothing, because the records themselves are the
+    # announcement and a line about them would be the one thing on the stream
+    # that is not a record.
+    records = None
+    if args.json is not None:
+        try:
+            records = jsonout.Records(args.json)
+        except OSError as exc:
+            ap.error("cannot write JSON records to %s: %s" % (args.json, exc))
+        if not records.is_stdout:
+            print("appending JSON records to %s" % args.json, file=sys.stderr)
+
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
@@ -1762,7 +1797,7 @@ def main():
     # one: without it a button pressed in a browser would sit unanswered for a
     # second at a time on a network with nothing on it.
     keyboard = Keyboard()
-    keys_on = not args.json and keyboard.start()
+    keys_on = not json_stdout and keyboard.start()
     sock.settimeout(0.25 if (keys_on or args.web) else 1.0)
 
     # Everything about reading the wire belongs to the decoder: templates,
@@ -1866,7 +1901,7 @@ def main():
     # footer until the interval elapses.
     last_status = 0.0
 
-    if not args.json:
+    if not json_stdout:
         # Whether there is going to be a bar has to be settled before the
         # header starts, since the header writes the one scroll region the two
         # of them share and has to know how many rows are left for it.
@@ -2014,10 +2049,10 @@ def main():
         # has one.
         controls.qr = show_qr
 
-    # Printed even under --json, where it goes to stderr on its own and the
-    # flows have stdout to themselves. It is worth printing there too: the URL
-    # is on it, and a run with the web interface up and no way to find out
-    # where it is would be a poor joke.
+    # Printed even with the records on stdout, where it goes to stderr on its
+    # own and the flows have stdout to themselves. It is worth printing there
+    # too: the URL is on it, and a run with the web interface up and no way to
+    # find out where it is would be a poor joke.
     banner = io.StringIO()
     write_banner(banner, qr_key=qr_on)
     sys.stderr.write(banner.getvalue())
@@ -2063,7 +2098,7 @@ def main():
                             for key, _doc in web_keys()),
         "modes": dict(MODE_DESC),
         "readonly": bool(args.web_readonly),
-        "json": bool(args.json),
+        "json": json_stdout,
         # How often the details dialog re-asks, in seconds, with 0 meaning
         # never. In the greeting because this is where a browser learns how
         # the collector was started, beside readonly and json, and because it
@@ -2079,7 +2114,7 @@ def main():
     if web is not None:
         web.serve()
 
-    if not args.json:
+    if not json_stdout:
         print("", file=sys.stderr)
         if not sticky_on:
             print(C.BOLD + HEADER_LINE + C.RESET)
@@ -2201,8 +2236,16 @@ def main():
             "ends": list(flow_endpoints(rec)),
         }
 
-    def show(rec, hdr):
-        """Put one flow on screen, with the header cadence around it."""
+    def show(rec, hdr, record=None):
+        """Put one flow on screen, with the header cadence around it.
+
+        `record` is the JSON object for this flow where one has already been
+        built, which is the case on a run writing them to a file, and None on
+        a run that was asked for none. It is handed to `web_flow` for the
+        reason that function takes it at all: a browser watching a run that is
+        also writing a file should not have a second copy of the record made
+        for it.
+        """
         if (not sticky.active and args.header_every and controls.lines
                 and controls.lines % args.header_every == 0):
             print(C.BOLD + HEADER_LINE + C.RESET)
@@ -2213,7 +2256,7 @@ def main():
         # flows to a browser while the terminal was still holding them, which
         # is the opposite of what the space key is for.
         if bus.active:
-            bus.flow(web_flow(rec, hdr))
+            bus.flow(web_flow(rec, hdr, record=record))
         controls.lines += 1
         # While the bar is up it does the re-measuring for both of them, on a
         # clock rather than a line count. Two pollers with two ideas of how
@@ -2276,10 +2319,10 @@ def main():
                 break
             if not controls.paused and controls.held:
                 for held_rec, held_hdr in controls.drain():
-                    if args.json:
-                        # Under --json nothing was held back from stdout, only
-                        # from the browser, so resuming owes the browser the
-                        # flows and stdout nothing.
+                    if json_stdout:
+                        # With the records on stdout nothing was held back
+                        # from it, only from the browser, so resuming owes the
+                        # browser the flows and stdout nothing.
                         if bus.active:
                             bus.flow(web_flow(held_rec, held_hdr))
                     else:
@@ -2292,11 +2335,12 @@ def main():
             # it was worth redrawing, which was fine while it was the only
             # thing wanting a snapshot. It is not any more, and it is absent in
             # exactly the arrangement the web interface is most useful in:
-            # --json never starts it, the b key takes it away, and redirected
-            # output leaves no room for it. Hanging the browser's status on the
-            # bar's decision would leave the footer dead in all three, so the
-            # loop keeps the clock and each of them takes a snapshot or
-            # declines one without being able to starve the other.
+            # records on stdout never start it, the b key takes it away, and
+            # redirected output leaves no room for it. Hanging the
+            # browser's status on the bar's decision would leave the footer
+            # dead in all three, so the loop keeps the clock and each of them
+            # takes a snapshot or declines one without being able to starve
+            # the other.
             now = time.time()
             snap = None
             if bar.active or bus.active:
@@ -2385,15 +2429,24 @@ def main():
                 # hidden needs this to have gone on rising in its absence.
                 shown_flows[0] += 1
 
-                if args.json:
+                # The record goes wherever it is going before the display
+                # is asked for anything, and it goes there whatever the space
+                # key says. A sink something else is parsing is not pausable
+                # and should not become so, and that is as true of a file
+                # being tailed as it was of stdout: putting holds and drops
+                # into it would break the very consumers it exists for. Built
+                # once and handed on, so that a browser watching the same run
+                # does not have an identical second one made underneath it.
+                out = None
+                if records is not None:
                     out = flow_record(rec, hdr, resolver)
-                    print(json.dumps(out, default=str), flush=True)
-                    # stdout is not pausable and should not become so. It is
-                    # the part of this interface documented as parseable, and
-                    # putting holds and drops into it would break the very
-                    # consumers it exists for. The browser is the human view in
-                    # this configuration, so it is the one the space key acts
-                    # on, through the same buffer the terminal path uses.
+                    records.write(out)
+
+                if json_stdout:
+                    # stdout is carrying the records, so there is no table
+                    # under them and the browser is the human view. The space
+                    # key acts on it alone, through the same buffer the
+                    # terminal path uses.
                     if bus.active:
                         if controls.paused:
                             controls.hold(rec, hdr)
@@ -2402,7 +2455,7 @@ def main():
                 elif controls.paused:
                     controls.hold(rec, hdr)
                 else:
-                    show(rec, hdr)
+                    show(rec, hdr, record=out)
 
     except KeyboardInterrupt:
         pass
@@ -2416,6 +2469,8 @@ def main():
         bar.stop()
         sticky.stop()
         sock.close()
+        if records is not None:
+            records.close()
         resolver.shutdown()
         # Teed like the summary the s key prints, and for a better reason: a
         # browser that watched the whole session should not be missing the one
