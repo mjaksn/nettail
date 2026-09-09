@@ -21,8 +21,12 @@
 # The rolling tags are rebuilt every few days, so whatever digest they point
 # at is always a few days old, and nothing that young may be used here. A
 # patch tag stops moving once the next one ships, so it can be both specific
-# and old enough. Check the age before bumping it: this one was 23 days when
-# it was pinned.
+# and old enough. Check the age before taking a bump: dependabot offers one
+# the day the tag ships, which is younger than anything here may be, so the
+# check belongs on that pull request and nowhere else. No age is written on
+# this line, because it would describe whichever digest was pinned when
+# somebody wrote it and the next bump would move the digest out from under
+# it, which is what happened to the last one.
 FROM python:3.14.7-slim@sha256:656d12e70054d5fda18a045e2494c96701e9792dd1445f95b3d038df954f57e9 AS builder
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
