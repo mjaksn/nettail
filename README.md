@@ -102,6 +102,9 @@ nettail --templates
 
 # Machine readable, one object per line
 nettail --json > flows.jsonl
+
+# Or to a file of its own, with the table still on the screen
+nettail --json flows.jsonl
 ```
 
 Press `Ctrl-C` to stop. A summary prints on exit with datagram counts, template
@@ -225,10 +228,10 @@ different reason.
 ```
 usage: nettail [-h] [--version] [--config FILE | --save-config [FILE]]
                [--bind BIND] [--port PORT] [--external-only] [--names]
-               [--macs] [--verbose] [--templates] [--json] [--colour WHEN]
-               [--no-color] [--header-every HEADER_EVERY] [--sticky-header]
-               [--hide-status] [--no-supplemental-services] [--web]
-               [--web-port PORT] [--web-bind ADDR] [--web-host NAME]
+               [--macs] [--verbose] [--templates] [--json [FILE]]
+               [--colour WHEN] [--no-color] [--header-every HEADER_EVERY]
+               [--sticky-header] [--hide-status] [--no-supplemental-services]
+               [--web] [--web-port PORT] [--web-bind ADDR] [--web-host NAME]
                [--web-token TOKEN] [--web-colour WHEN] [--web-readonly]
                [--web-detail-refresh SECONDS] [--size-scale-max BYTES |
                --size-scale-dynamic] [--size-scale-window FLOWS] [--country]
@@ -253,7 +256,7 @@ usage: nettail [-h] [--version] [--config FILE | --save-config [FILE]]
 | `--macs` | off | Show hardware addresses on a line under each flow, on the exporters that send them. The `p` key turns it off and on while running |
 | `--verbose` | off | Print every decoded field on an indented line under each flow, and report datagrams that could not be decoded. The `v` key moves the same setting mid-run |
 | `--templates` | off | Spell out each template the first time an exporter sends it, and note in one line each time a template is sent again. v9 and IPFIX only; v5 carries no templates. The `t` key moves the same setting mid-run |
-| `--json` | off | Emit one JSON object per flow on stdout instead of the table |
+| `--json [FILE]` | off | Emit one JSON object per flow. On its own, or given `-`, the objects go to stdout in place of the table. Given a path they are appended to that file instead, and the table, the keys and the browser view carry on as if the flag were not there |
 | `--colour WHEN` | `auto` | When to use ANSI colour **on this terminal**: `auto`, `always` or `never`. Under `auto` a terminal gets colour and a redirected stream does not, and `NO_COLOR` in the environment turns it off. The browser view has its own switch, `--web-colour`, and is not decided by this one. `--color` is accepted too |
 | `--no-color` | off | The same as `--colour never`, and like it, about this terminal |
 | `--header-every N` | `40` | Reprint the column header every N lines. `0` disables repeats |
@@ -288,8 +291,8 @@ Two things to know before turning it on:
 - **You lose scrollback.** Most terminals discard lines that scroll out of a
   margin region instead of pushing them into the scrollback buffer, so you can
   only see what is currently on screen. If you want to scroll back through past
-  flows, leave the flag off and stay with `--header-every`, or use `--json` and
-  write to a file.
+  flows, leave the flag off and stay with `--header-every`, or keep the
+  display and write the flows to a file with `--json flows.jsonl`.
 - **It needs a real terminal.** On Windows the script enables virtual terminal
   processing automatically, which covers Windows Terminal and modern conhost.
   If stdout is redirected to a file or a pipe, or the window is too short, the
@@ -662,9 +665,11 @@ leaving the bar and `--header-every` to carry on.
 
 ### When it does not appear
 
-Under `--json`, redirected to a file or a pipe, on a terminal that will not
-take a scroll region, or in a window shorter than six rows, the bar never
-starts and nothing is said about it. Unlike `--sticky-header`, which prints a
+With the records on stdout, redirected to a file or a pipe, on a terminal
+that will not take a scroll region, or in a window shorter than six rows, the
+bar never starts and nothing is said about it. `--json` naming a file is not
+one of those: stdout has the table on it and the bar draws under the table as
+usual. Unlike `--sticky-header`, which prints a
 notice when it cannot do what you asked for, the bar was never asked for, so
 its absence is not news.
 
@@ -673,8 +678,8 @@ its absence is not news.
 ## Keyboard controls
 
 While the collector is running it also takes single keypresses. Nothing has to
-be enabled: if stdin is a terminal and `--json` is off, the keys are live and
-one line under the startup banner says so:
+be enabled: if stdin is a terminal and the records are not going to stdout,
+the keys are live and one line under the startup banner says so:
 
 ```
 keys: the collector takes single keypresses; press ? to list them
@@ -857,8 +862,8 @@ worker threads idling; they are daemon threads and end with the program.
 
 ### When the keys are off
 
-Keys need a terminal on stdin. Under `--json`, redirected into a file, or run
-from systemd, key handling never starts and the collector behaves exactly as it
+Keys need a terminal on stdin. With the records on stdout, redirected into a
+file, or run from systemd, key handling never starts and the collector behaves exactly as it
 did before, with no reminder line and no terminal mode changes. The terminal is put
 into cbreak mode, not raw, so `Ctrl-C` still interrupts, and it is restored on
 exit alongside the scroll region the status bar and the sticky header share.
@@ -1213,10 +1218,20 @@ nettail --json --web > flows.jsonl
 stdout stays machine-readable while a browser gets the human view. Two things
 follow from that.
 
-`--json` turns the local keyboard off, so the browser becomes the only place
-keys can be pressed. And `pause` holds the browser view only: stdout is the
-part of the interface meant to be parsed, so it keeps flowing rather than
-gaining holds and drops that a consumer would have to cope with.
+Records on stdout turn the local keyboard off, so the browser becomes the
+only place keys can be pressed. And `pause` holds the browser view only:
+stdout is the part of the interface meant to be parsed, so it keeps flowing
+rather than gaining holds and drops that a consumer would have to cope with.
+
+Naming a file instead is the other way round, and wants no redirect at all:
+
+```bash
+nettail --json flows.jsonl --web
+```
+
+The terminal keeps its table and its keys, the browser keeps everything it
+had, and the records go to the file. `pause` there holds both views and
+leaves the file flowing, for the same reason it left stdout flowing.
 
 Colour needs no flag there. `--colour` is about this terminal, and a
 redirected stdout still turns it off, but the browser has its own switch and
@@ -2112,13 +2127,28 @@ The `g` key turns the marking off and on while the collector runs.
 
 ## JSON output
 
-`--json` writes one object per line to stdout, flushed immediately, suitable for
-piping into another process.
+`--json` writes one object per line, flushed immediately, suitable for piping
+into another process.
 
 ```bash
 nettail --json | ./ioc_match.py
 nettail --json | jq -c 'select(.dst_port == 443)'
 ```
+
+On its own, or given `-`, it writes to stdout in place of the table, which is
+what makes those pipes work. Given a path it appends to that file instead and
+leaves the display alone, so a run can be watched and recorded at once:
+
+```bash
+nettail --json flows.jsonl          # table on screen, records in the file
+tail -f flows.jsonl | ./ioc_match.py
+```
+
+The file is appended to rather than emptied, so a restarted collector keeps
+what it wrote before, and it is line buffered, so `tail -f` shows a flow when
+the flow arrives. A settings file names a destination the same way, `json =
+flows.jsonl` or `json = -`; the words a switch is spelled with are refused,
+since a file called `true` is not what anybody meant.
 
 Field names follow the normalised names in the `IE` table, so v5, v9, and IPFIX all
 produce the same keys where the underlying data is equivalent. Metadata keys are
@@ -2697,6 +2727,7 @@ another suite's result.
 | `test_summary_key` | the traffic summary printed on demand, and the clock it is dated by |
 | `test_sticky_with_gradient` | the pinned header and the size ramp sharing one screen |
 | `test_services` | the supplemental port names, the parser behind them, the system database keeping precedence, and the ephemeral floor pinned to where netflume actually puts it |
+| `test_json_dest` | `--json` naming a file: the record in it and the table on the screen at the same time, the bare flag unchanged, appending across runs, and the switch words a settings file used to spell it with refused rather than opened |
 | `test_config` | every option set in a file against the same option typed on the command line, the search order on platforms this machine is not, and a saved file read back |
 | `test_country` | the database reader against files the suite writes itself, at all three record widths, and the flag reaching a flow row, the summary and `--json` while never reaching an address on this network |
 | `test_qr` | the encoder against pinned symbols: the format information and its BCH check, the mask that was chosen, and the padding codewords no reader ever looks at |
@@ -2740,8 +2771,8 @@ too.
   `--web` adds threads, but none of them go near the socket or change any
   collector state: they read a queue and serve it, which is what keeps this
   claim true of the part that matters.
-- **No persistence.** Everything is in memory and lost on exit. Use `--json` and
-  redirect if you want history. The web interface is a live view and keeps no
+- **No persistence.** Everything is in memory and lost on exit. Use `--json`
+  with a file to name if you want history, which costs the display nothing. The web interface is a live view and keeps no
   history of its own: a browser opened late is shown the banner and the current
   figures, not the flows it missed.
 - **The web interface has no TLS and no login.** A token in the URL over plain
@@ -2764,7 +2795,7 @@ too.
 
 ## Extending it
 
-The `--json` mode exists so that matching, enrichment, and alerting can live in a
+`--json` exists so that matching, enrichment, and alerting can live in a
 separate process. Keeping them out of the receive loop is deliberate, not laziness:
 a blocking feed lookup in the hot path drops flows silently.
 

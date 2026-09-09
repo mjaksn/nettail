@@ -17,6 +17,7 @@ from lanname import MODE_DESC, Resolver
 from . import country
 from .colour import C
 from .display import HEADER_LINE
+from .jsonout import to_stdout
 from .sizescale import size_scale_arg
 from .values import human_bytes
 
@@ -452,17 +453,20 @@ class Controls:
         self.held.clear()
         self.dropped = 0
         self.lines = 0
-        json_mode = bool(getattr(self.args, "json", False))
+        json_mode = to_stdout(self.args)
         # The screen being cleared is a thing that happens to a terminal, so it
         # happens only where there is one to clear. There are two ways for
         # there not to be, and both of them arrive from a browser.
         #
-        # Under --json, stdout is a stream something else is parsing. That used
-        # to be unreachable, because --json turns the keyboard off, but the web
-        # interface can press this key with --json running, and one keypress
-        # would put two escape sequences into the middle of somebody's data.
+        # With the records on stdout it is a stream something else is parsing.
+        # That used to be unreachable, because a bare --json turns the keyboard
+        # off, but the web interface can press this key with it running, and
+        # one keypress would put two escape sequences into the middle of
+        # somebody's data. It is asked as a question about stdout rather than
+        # about the flag: --json naming a file leaves the table on the screen,
+        # and a screen with a table on it is a screen to clear.
         #
-        # Redirected without --json, stdout is a file or a pipe, and the escape
+        # Redirected with the records elsewhere, stdout is a file or a pipe,
         # would land in it along with the header reprinted after it. A terminal
         # keyboard could always do that, needing a tty on stdin alone, but a
         # collector run as a service has no terminal at either end and is the
@@ -546,15 +550,16 @@ class Controls:
         where it started, so the key did nothing anywhere, and a reader
         pressing it in a browser watched their own footer stay put.
 
-        The bar itself keeps every guard it had. It draws on stdout, so under
-        --json one press would put a scroll region and two rows of status bar
-        into the middle of somebody's data and then repaint them twice a
-        second, and where output is redirected there is no window to hold a
-        region at all. Those runs move the setting and leave the bar alone,
-        which is the same bargain the x key strikes.
+        The bar itself keeps every guard it had. It draws on stdout, so on
+        a run with the records there one press would put a scroll region and
+        two rows of status bar into the middle of somebody's data and then
+        repaint them twice a second, and where output is redirected there is
+        no window to hold a region at all. Those runs move the setting and
+        leave the bar alone, which is the same bargain the x key strikes. A
+        --json naming a file is not one of them: stdout has the table on it
+        and the bar belongs under the table.
         """
-        drawable = self.bar is not None and not getattr(self.args, "json",
-                                                        False)
+        drawable = self.bar is not None and not to_stdout(self.args)
         wanted = not getattr(self.args, "hide_status", False)
         if not drawable:
             self.args.hide_status = wanted

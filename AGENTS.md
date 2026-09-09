@@ -619,8 +619,20 @@ draw on: the `x` key writes its clear escapes only when there is one, and so
 does the `b` key, which otherwise puts a scroll region and two rows of status
 bar into the middle of somebody's data and then repaints them twice a second.
 Pause is the other way round, holding the browser view while stdout keeps
-flowing, because `--json` is the part of the interface documented as parseable.
+flowing, because that is the part of the interface documented as parseable.
 `test_web_keys` pins all three.
+
+**The question all three are asking is `jsonout.to_stdout`, and it is not the
+same question as whether `--json` was given.** Since 0.15.0 the flag takes a
+destination: named a file it appends the records there and leaves the display,
+the keys, the bar and the browser exactly as a run with no flag at all. A path
+is a true value, so a guard left as `args.json` would go on suppressing a
+console nobody asked it to suppress, and nothing would raise. That is why the
+predicate is a function in `jsonout.py`, low enough for `keys.py` to import,
+rather than a comparison written out at each of the ten sites that ask it. The
+sink is not pausable either, and for the reason stdout never was.
+`test_json_dest` holds the table and the file together, since either one alone
+still looks right.
 
 The `b` key is the one of those where the setting and the drawing had to come
 apart, and answering them as one was a defect rather than a simplification. It

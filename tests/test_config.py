@@ -61,7 +61,7 @@ SAMPLES = {
     "show_macs": "true",
     "verbose": "true",
     "templates": "true",
-    "json": "true",
+    "json": "/var/log/nettail/flows.jsonl",
     "colour": "never",
     "no_color": "true",
     "header_every": "12",
