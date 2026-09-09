@@ -467,11 +467,12 @@ class Controls:
         # and a screen with a table on it is a screen to clear.
         #
         # Redirected with the records elsewhere, stdout is a file or a pipe,
-        # would land in it along with the header reprinted after it. A terminal
-        # keyboard could always do that, needing a tty on stdin alone, but a
-        # collector run as a service has no terminal at either end and is the
-        # arrangement --web is most worth having. So the question is asked of
-        # the stream rather than of where the keypress came from.
+        # and the escape would land in it along with the header reprinted
+        # after it. A terminal keyboard could always do that, needing a tty on
+        # stdin alone, but a collector run as a service has no terminal at
+        # either end and is the arrangement --web is most worth having. So the
+        # question is asked of the stream rather than of where the keypress
+        # came from.
         screen = not json_mode and sys.stdout.isatty()
         if screen:
             print("\033[2J\033[H", end="", flush=True)
