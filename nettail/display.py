@@ -235,10 +235,11 @@ def flow_macs(rec):
     it in, so on a routed flow the destination is the exporter's own inbound
     interface and never the far machine: a gateway shows one such address per
     port it exports from, however many hosts are behind it. The egress pair is
-    written on the way out and its destination is the next hop, which on the
-    LAN side is the machine itself. An exporter sending only the ingress pair
-    cannot answer the question the destination column appears to be asking,
-    and the README says so where the p key is described.
+    written on the way out and its destination is the next hop, which is the
+    far machine only where the far machine is on the segment the frame left
+    by. An exporter sending only the ingress pair cannot answer the question
+    the destination column appears to be asking, and the README says so where
+    the p key is described.
     """
     src = rec.get("src_mac") or rec.get("post_src_mac")
     dst = rec.get("dst_mac") or rec.get("post_dst_mac")

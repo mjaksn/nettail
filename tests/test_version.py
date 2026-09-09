@@ -55,17 +55,25 @@ check("and it is this one",
       heading and heading.group(1) == main.__version__,
       f"changelog {heading and heading.group(1)}, package {main.__version__}")
 
-# Every heading is a reference style link whose definition sits at the foot of
-# the file, which is why release.yml lifts a section out without its heading:
-# on its own it would render as bare brackets. A version whose definition was
-# never added renders that way in the changelog itself, and nothing else here
-# would notice. The section is found, the release notes are right, and only
-# the file a reader browses reads wrong. 0.14.0 was written without one and
-# caught by hand on the way to the release, which is why this is here.
+# A heading written as a reference style link wants its definition at the foot
+# of the file, which is why release.yml lifts a section out without its
+# heading: on its own it would render as bare brackets. A version whose
+# definition was never added renders that way in the changelog itself, and
+# nothing else here would notice. The section is found, the release notes are
+# right, and only the file a reader browses reads wrong. 0.14.0 was written
+# without one and caught by hand on the way to the release, which is why this
+# is here.
+#
+# Written as a link is the whole of the rule, because not every heading is.
+# 0.10.0 never got a tag of its own, so it has nothing to link at and is
+# written plainly, which its own section explains. The pattern sees only the
+# bracketed headings, so one deliberately left plain is exempt rather than
+# forgotten, and a check phrased as "every heading" would be claiming more
+# than it holds.
 changelog = read(CHANGELOG)
 headings = set(re.findall(r"(?m)^## \[([^\]]+)\]", changelog))
 defined = set(re.findall(r"(?m)^\[([^\]]+)\]:", changelog))
-check("every changelog heading has a link definition at the foot",
+check("every changelog heading written as a link has its definition",
       headings <= defined, str(sorted(headings - defined)))
 
 # --- it is offered where a reader would look --------------------------------

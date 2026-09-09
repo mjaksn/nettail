@@ -749,11 +749,18 @@ machine's. A MAC address is hop by hop and the exporter is the hop: every
 frame a router receives is addressed at layer 2 to the router, so the
 destination MAC on a routed flow is whichever of the router's own interfaces
 took the packet in. A gateway exporting from several ports shows one such
-address per port and no more, however many hosts sit behind them, while the
-source side goes on naming real machines. The element that would carry the far
-machine's address is `postDestinationMacAddress`, written on the way out
-rather than the way in, and an exporter sending the ingress pair need not send
-it.
+address per port and no more, however many hosts sit behind them.
+
+The source side is better, though only where the sending machine is on the
+same segment as the port that took the frame in. There it names that machine,
+an address each. Put an internal router in between and it names the router,
+one address for every host behind it, collapsing the way the destination side
+does, and on the port facing the internet it names your ISP's router, one
+address standing in front of every remote host there is. The element written
+on the way out rather than the way in is `postDestinationMacAddress`, and what
+it names is the next hop, which is the far machine only where the far machine
+is on the segment the frame left by. An exporter sending the ingress pair need
+not send it at all.
 
 `g` is the country marking, and it is the one key whose answer depends on
 something outside the program: with no database loaded there is nothing to turn

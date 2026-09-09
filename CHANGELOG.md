@@ -41,9 +41,11 @@ parsed, and it is treated as public.
   out of four kilobytes, and every column here measures its contents with
   `len`, so that name was a display this program could not draw.
 
-  `--resolve all` on a host with no route to `224.0.0.251`, which is to say
-  one with no default route, named nothing at all: a failed multicast send
-  raised out of the worker before NetBIOS was ever tried.
+  `--resolve all` on a host with no route to `224.0.0.251` quietly behaved as
+  `--resolve dns` does. A failed multicast send raised out of the mDNS lookup
+  and carried past NetBIOS, which was never reached. The worker caught it and
+  went on, and reverse DNS and `--hosts` named what they always had, so what
+  was lost was both probes rather than the names.
 
   The `h` key cycling round to `off` now stops the work already queued.
   Up to 4,096 addresses waiting in the queue used to go on getting a reverse
