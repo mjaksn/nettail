@@ -226,9 +226,19 @@ def way(src, dst):
 def flow_macs(rec):
     """The two hardware addresses on a flow, either of which may be missing.
 
-    An exporter that reports MACs at all may report them under the plain
-    elements or the post-NAT ones, and a UniFi gateway is as likely to send
-    one pair as the other. Whichever arrived is the one worth showing.
+    An exporter that reports MACs at all may report them under the ingress
+    elements or the egress ones, and a UniFi gateway is as likely to send one
+    pair as the other. Whichever arrived is the one worth showing.
+
+    Which pair arrived decides what the second one means, and it is not what a
+    reader expects. The ingress pair describes the frame as the exporter took
+    it in, so on a routed flow the destination is the exporter's own inbound
+    interface and never the far machine: a gateway shows one such address per
+    port it exports from, however many hosts are behind it. The egress pair is
+    written on the way out and its destination is the next hop, which on the
+    LAN side is the machine itself. An exporter sending only the ingress pair
+    cannot answer the question the destination column appears to be asking,
+    and the README says so where the p key is described.
     """
     src = rec.get("src_mac") or rec.get("post_src_mac")
     dst = rec.get("dst_mac") or rec.get("post_dst_mac")

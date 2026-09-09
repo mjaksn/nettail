@@ -737,12 +737,23 @@ behind a blank would hide exactly the ones worth noticing. It only affects rows
 printed from then on, the same bargain `h` and `f` strike, and it says so if
 nothing is being looked up at all.
 
-`p` puts the two hardware addresses on a second line, sitting directly under
-the addresses they belong to. Only exporters that send the MAC elements have
-anything to show: NetFlow v5 has no field for them, and plenty of v9 exporters
-leave them out. Where a flow carries none the line is not printed at all rather
-than printed empty, so turning `p` on costs nothing on an exporter that cannot
+`p` puts the two hardware addresses on a second line, under the columns the
+addresses sit in. Only exporters that send the MAC elements have anything to
+show: NetFlow v5 has no field for them, and plenty of v9 exporters leave them
+out. Where a flow carries none the line is not printed at all rather than
+printed empty, so turning `p` on costs nothing on an exporter that cannot
 answer. Where only one end is known the other reads `-`.
+
+Expect the destination to repeat itself, and do not read it as the far
+machine's. A MAC address is hop by hop and the exporter is the hop: every
+frame a router receives is addressed at layer 2 to the router, so the
+destination MAC on a routed flow is whichever of the router's own interfaces
+took the packet in. A gateway exporting from several ports shows one such
+address per port and no more, however many hosts sit behind them, while the
+source side goes on naming real machines. The element that would carry the far
+machine's address is `postDestinationMacAddress`, written on the way out
+rather than the way in, and an exporter sending the ingress pair need not send
+it.
 
 `g` is the country marking, and it is the one key whose answer depends on
 something outside the program: with no database loaded there is nothing to turn
