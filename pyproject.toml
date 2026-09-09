@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nettail"
-version = "0.13.1"
+version = "0.14.0"
 description = "A NetFlow v5, NetFlow v9 and IPFIX collector that prints flows to a console, with hostnames, colour, a live status bar and an optional browser view"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -39,8 +39,9 @@ classifiers = [
 # a package that has to be uninstalled before anything else can move. The
 # ceilings are not decoration: lanname 0.2.0 changed what a bare `Resolver()`
 # does, from looking nothing up to querying reverse DNS, with nothing raised
-# and nothing warned. While both are on 0.x a minor bump is where that kind of
-# change is allowed to live, so that is where the ceiling goes.
+# and nothing warned, and 0.4.0 changed `timeout` from a budget each probe got
+# to one the two of them share. While both are on 0.x a minor bump is where
+# that kind of change is allowed to live, so that is where the ceiling goes.
 #
 # netflume's ceiling is also a floor decision. 0.4.0 is the last release that
 # supports Python 3.9, which this program still supports and still gates CI
@@ -48,7 +49,7 @@ classifiers = [
 # is a question about what nettail runs on before it is a question about the
 # decoder, and the answer belongs beside the classifiers rather than here.
 dependencies = [
-    "lanname>=0.2.0,<0.3",
+    "lanname>=0.5.0,<0.6",
     "netflume>=0.4.0,<0.5",
 ]
 

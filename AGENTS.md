@@ -1024,6 +1024,13 @@ feature means reading both, and their suites.
   bare `Resolver()` from looking nothing up to querying reverse DNS, with
   nothing raised and nothing warned. Explicit modes are why that release was a
   non-event here. Keep it true.
+- **`--resolve-timeout` is one budget for both probes, not one each.** lanname
+  0.4.0 gave the mDNS and NetBIOS pair a single deadline, mDNS taking at most
+  half and NetBIOS the rest. The help text and the README table both said
+  "per-probe", which was true under the 0.2.0 pin and stopped being true the
+  moment it moved, so the bump to 0.5.0 had to carry both. They are two copies
+  of one fact and they move together, and so does the default if it ever
+  changes.
 - **`WatchedTemplates` rests on `put` returning True, and that is the only
   thing it rests on.** The store's return value is where the fact lives, and
   `--templates` stands a subclass in the decoder's way to hear about it rather

@@ -98,7 +98,7 @@ jobs:
         # meant the suite was green against a decoder the wheel would refuse to
         # be installed beside. Move both together, or teach this step to read
         # the one in pyproject.toml.
-        run: pip install "lanname>=0.2.0,<0.3" "netflume>=0.4.0,<0.5"
+        run: pip install "lanname>=0.5.0,<0.6" "netflume>=0.4.0,<0.5"
       - name: run the suite
         # Some suites reach the network, and only over loopback: they start
         # a real collector on 127.0.0.1 and send it NetFlow v5 datagrams,
