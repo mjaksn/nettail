@@ -98,17 +98,32 @@ class Records:
 
     @property
     def is_stdout(self):
-        return self.handle is None
+        """Whether the records are going to stdout.
+
+        Answered from the destination and not from the handle, though the
+        handle is None for exactly this case while the sink is open. `close`
+        puts it back to None, so a property reading it would call a closed
+        file stdout: the wrong answer to a question about how the run was
+        started, arrived at from a piece of state that means something else.
+        Nothing asks this late in the sink's life today. What it would cost if
+        something did is written on `write` below.
+        """
+        return self.dest == STDOUT
 
     def write(self, record):
         """One record, on a line of its own."""
         line = json.dumps(record, default=str)
-        if self.handle is None:
+        if self.is_stdout:
             # Flushed for the reason it always was: something is parsing this
             # and a block of records held back is a consumer told nothing for
             # as long as the link is quiet.
             print(line, flush=True)
         else:
+            # A write after `close` raises here rather than going to stdout,
+            # which is where asking the handle would have sent it. A run
+            # writing to a file has a table on stdout and a reader in front of
+            # it, and records appearing in the middle of that is the one
+            # outcome worse than the write failing.
             self.handle.write(line + "\n")
 
     def close(self):

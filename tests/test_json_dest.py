@@ -207,6 +207,19 @@ for word in ("true", "yes", "on", "off", "0"):
     check("and the refusal names both spellings that work",
           "'-'" in said and "path" in said, said)
 
+
+# --- and the sink knows which kind it is for its whole life ----------------
+# `is_stdout` answers a question about how the run was started, so it is asked
+# of the destination. Reading it off the handle would have been right until
+# `close` put that back to None, at which point a file would have called
+# itself stdout and a write would have gone to the stream the table is on.
+closed = jsonout.Records(os.path.join(work, "closed.jsonl"))
+check("a file sink is not the stdout one", not closed.is_stdout)
+closed.close()
+check("and is still not the stdout one once it is closed", not closed.is_stdout)
+check("while the stdout sink says so from the start",
+      jsonout.Records(jsonout.STDOUT).is_stdout)
+
 check("a hyphen is a destination", jsonout.dest_arg("-") == jsonout.STDOUT)
 check("and so is a path", jsonout.dest_arg(" flows.jsonl ") == "flows.jsonl")
 try:
