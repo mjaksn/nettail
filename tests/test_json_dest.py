@@ -87,6 +87,10 @@ def lines_of(path):
         return [line for line in handle.read().splitlines() if line.strip()]
 
 
+# Spelled rather than escaped, the way the config suite spells it: this file
+# is written and rewritten by tooling that has been known to eat a backslash.
+NEWLINE = chr(10)
+
 work = tempfile.mkdtemp(prefix="nettail-json-")
 
 # --- the whole point: a file, and a table on the screen as well --------------
@@ -229,6 +233,19 @@ settings, complaints = config.parse(parser, "json = /tmp/f.jsonl\n",
 check("while a file naming a path is simply read",
       settings.get("json") == "/tmp/f.jsonl" and not complaints,
       str((settings, complaints)))
+
+# And the sentinel itself, both ways round. A leading hyphen is the shape a
+# spelling function is most likely to quote or refuse, and a file that could
+# not say the thing the changelog tells people to write would make the claim
+# this option rests on false: what the command line takes, a file takes.
+settings, complaints = config.parse(parser, "json = -" + NEWLINE,
+                                    source="a file")
+check("a file can ask for stdout the way the command line does",
+      settings.get("json") == jsonout.STDOUT and not complaints,
+      str((settings, complaints)))
+check("and --save-config writes it back as it was",
+      config.assign("json", jsonout.STDOUT) == "json = -" + NEWLINE,
+      repr(config.assign("json", jsonout.STDOUT)))
 
 # --- and the predicate every guard in the program is asking -----------------
 check("to_stdout is true of the bare flag",

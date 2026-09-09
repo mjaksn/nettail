@@ -629,7 +629,7 @@ the keys, the bar and the browser exactly as a run with no flag at all. A path
 is a true value, so a guard left as `args.json` would go on suppressing a
 console nobody asked it to suppress, and nothing would raise. That is why the
 predicate is a function in `jsonout.py`, low enough for `keys.py` to import,
-rather than a comparison written out at each of the ten sites that ask it. The
+rather than a comparison written out at each site that asks it. The
 sink is not pausable either, and for the reason stdout never was.
 `test_json_dest` holds the table and the file together, since either one alone
 still looks right.
