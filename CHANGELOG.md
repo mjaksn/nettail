@@ -11,6 +11,57 @@ but it is a program rather than a library, and the names inside it may move
 without that being a breaking change. `--json` output is the part meant to be
 parsed, and it is treated as public.
 
+## [0.14.0] - 2026-09-09
+
+### Changed
+
+- **`--resolve-timeout` is now one budget for the mDNS and NetBIOS probes
+  together rather than one each.** lanname 0.4.0 gave the pair a single
+  deadline: mDNS takes at most half of it and NetBIOS whatever is left, which
+  is the other half when mDNS spends its own and more when the multicast send
+  fails outright. At the unchanged default of `1.0` an address that answers
+  nothing costs a worker a second rather than two, and a device that was going
+  to answer answers in tens of milliseconds either way. The default is left
+  where it is, as lanname left its own; a run that wants a full second
+  reaching each probe should ask for `--resolve-timeout 2.0`. The help text
+  and the README both said "per-probe", which was true under the old pin and
+  is not now, so both were corrected with it.
+
+- **lanname is now pinned to `>=0.5.0,<0.6`**, up from `>=0.2.0,<0.3`. Three
+  releases are crossed and most of what they carry needed nothing here.
+
+  Both link-local probes now take only the reply to the query they sent. An
+  mDNS lookup ignored the source of a datagram and the transaction id in it,
+  so any host that guessed the ephemeral port could name somebody else's
+  device, and a NetBIOS lookup read one datagram from anywhere and cached the
+  miss when a stray ended it.
+
+  Names off the link are bounded and checked before they reach a row. A reply
+  that looped its compression pointers could assemble a 65,000 character name
+  out of four kilobytes, and every column here measures its contents with
+  `len`, so that name was a display this program could not draw.
+
+  `--resolve all` on a host with no route to `224.0.0.251`, which is to say
+  one with no default route, named nothing at all: a failed multicast send
+  raised out of the worker before NetBIOS was ever tried.
+
+  The `h` key cycling round to `off` now stops the work already queued.
+  Up to 4,096 addresses waiting in the queue used to go on getting a reverse
+  DNS query after the mode said not to.
+
+  Fewer addresses count as private to lanname, which decides what it will
+  look up. The documentation and benchmarking ranges (192.0.2.0/24,
+  198.51.100.0/24, 203.0.113.0/24, 2001:db8::/32, 198.18.0.0/15) are public
+  to it now, while the internal and external split shown here comes from
+  netflume and still calls them private. An address in one of those ranges
+  is counted internal in the summary as before and is no longer looked up
+  without `--resolve-public`.
+
+  lanname 0.5.0 itself is the quiet one: it logs what a resolver does at
+  DEBUG, and since nothing here configures logging and the package installs a
+  `NullHandler`, those records go nowhere unless somebody attaches a handler
+  of their own.
+
 ## [0.13.1] - 2026-09-04
 
 ### Added

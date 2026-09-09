@@ -333,7 +333,7 @@ what is marked.
 | `--resolve-public` | off | Also reverse-resolve public addresses via PTR |
 | `--fqdn` | off | Show `nas.lan` instead of `nas` |
 | `--resolve-workers N` | `4` | Background lookup threads |
-| `--resolve-timeout SEC` | `1.0` | Per-probe timeout for mDNS and NetBIOS queries |
+| `--resolve-timeout SEC` | `1.0` | Budget for the mDNS and NetBIOS probes together, mDNS taking at most half |
 
 ---
 
@@ -1737,6 +1737,12 @@ are the exception, since they need no network round trip and appear immediately.
 The mDNS query sets the QU (unicast response) bit so the collector does not have to
 join the multicast group. The NetBIOS parser picks the unique workstation name
 (suffix `0x00` with the group bit clear) rather than the workgroup name.
+
+`--resolve-timeout` is one budget for both probes rather than one each. mDNS takes
+at most half of it and NetBIOS whatever is left, which is the other half when mDNS
+spends its own and more when the multicast send fails outright. So an address that
+answers nothing costs a worker the timeout rather than twice it, and a device that
+was going to answer answers in tens of milliseconds either way.
 
 ### Choosing a mode
 

@@ -1448,8 +1448,8 @@ def build_parser():
     grp.add_argument("--resolve-workers", type=int, default=4,
                      help="background lookup threads (default 4)")
     grp.add_argument("--resolve-timeout", type=float, default=1.0,
-                     help="per-probe timeout in seconds for mDNS and NetBIOS "
-                          "(default 1.0)")
+                     help="seconds for the mDNS and NetBIOS probes together, "
+                          "mDNS taking at most half (default 1.0)")
     return ap
 
 
