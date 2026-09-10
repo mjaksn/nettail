@@ -99,6 +99,12 @@ check("unpinning with no bar resets the margins", "\033[r" in written,
       repr(written))
 check("and parks the cursor at the foot rather than at the top",
       "\033[24;1H" in written, repr(written))
+# The foot is where the next flow is going and the row there is already
+# blank, so a newline would scroll the window on with nothing to put on the
+# row it frees, leaving that blank row as a gap in the history. `stop` ends
+# on one because a run ending wants the summary below the flows.
+check("and scrolls nothing, so no blank row is left among the flows",
+      "\n" not in written, repr(written))
 
 # --- pinning again mid-run draws the header without clearing the screen -----
 stream = FakeTerminal()

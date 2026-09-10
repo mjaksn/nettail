@@ -174,8 +174,18 @@ class StickyHeader:
         written here at all, because one pair of margins has one writer and
         this is the moment which of the two it is changes. With nothing else
         left the flows should have the whole window, so the region is reset
-        here, exactly as `StatusBar.stop` resets it when the header is not
-        there to take it over.
+        here, as `StatusBar.stop` resets it when the header is not there to
+        take it over.
+
+        The newline both of those `stop` methods end on is the one thing not
+        borrowed, and leaving it out is what makes the promise above hold.
+        They are ending a run, and want the summary and the shell prompt
+        after it below the flows rather than on top of them. Here the flows
+        are still arriving, into the row at the foot that is already blank
+        and waiting for the next one, so a newline sent there scrolls the
+        window on with nothing to put on the row it frees. That blank row
+        stays where it is put, and the reader is left looking at a gap
+        between the last flow before the keypress and the first one after it.
         """
         if not self.active:
             return
@@ -183,7 +193,7 @@ class StickyHeader:
         self.bottom_reserved = 0
         self.stream.write("\033[1;1H\033[2K")          # the header off row 1
         if not handing_over:
-            self.stream.write(f"\033[r\033[{self.rows};1H\n")
+            self.stream.write(f"\033[r\033[{self.rows};1H")
         self.stream.flush()
 
     def check_resize(self):
