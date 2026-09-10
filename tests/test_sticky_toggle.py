@@ -8,11 +8,11 @@ keypress now, in both directions, and that is what this suite is about.
 
 What makes it worth pinning rather than trusting is that every way of getting
 it wrong looks fine for a moment. Reset the margins while the bar is up and
-the flows scroll over the bar, which the bar repaints out of twice a second,
-so it reads as flicker rather than as a bug. Write the region without the
-bar's two rows and the flows use a window two rows short of the one they have.
-Neither raises anything and neither is visible in a redirected run, which is
-the only kind a suite can watch.
+the flows scroll over the bar, which the bar repaints twice a second, so it
+reads as flicker rather than as a bug. Write the region without the bar's two
+rows and the flows use a window two rows short of the one they have. Neither
+raises anything and neither is visible in a redirected run, which is the only
+kind a suite can watch.
 
 The escape codes are read back off a fake stream here rather than looked at,
 which is the same bargain `test_sticky_header` and `test_status_bar` strike:
