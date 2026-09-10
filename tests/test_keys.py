@@ -364,6 +364,40 @@ check("b brings it back", c.handle("b") == "status bar shown")
 check("and the setting came back too", c.args.hide_status is False)
 c.resolver.shutdown()
 
+# Redirected is that same run as it really arrives, and it is where the above
+# was passing while the key was broken. A run always has a bar object, built
+# before anything knows whether it can be drawn, so the case to answer is a
+# bar in hand and no terminal under it rather than no bar at all. The key used
+# to take the drawing path here and be refused by the only guard left, the one
+# about room, which told the reader their window was too small for a bar they
+# had not asked to see and left the setting where it was.
+redirected = io.StringIO()                     # a file or a pipe, no tty
+c, _out = build(hide_status=False)
+c.bar = main.StatusBar(redirected)
+check("b moves the setting on a run with the output redirected",
+      c.handle("b") == "status bar hidden")
+check("and the setting followed it", c.args.hide_status is True)
+check("and nothing was drawn where there is nothing to draw on",
+      redirected.getvalue() == "", repr(redirected.getvalue()))
+check("b brings it back the same way", c.handle("b") == "status bar shown")
+check("and the setting came back with it", c.args.hide_status is False)
+c.resolver.shutdown()
+
+# A window that really is too short still hears about it. The message is only
+# ever wrong when the terminal was the trouble, so the terminal question is
+# the one that got its own answer, and this is the half that keeps the words.
+shutil.get_terminal_size = lambda fallback=(80, 24): shutil.os.terminal_size(
+    (120, 4))
+c, _out = build(hide_status=True)
+c.bar = main.StatusBar(FakeTTY())
+check("b in a window with no room for a bar says so",
+      c.handle("b") == "no room for the status bar in a window this size")
+check("and leaves the setting alone, since nothing changed",
+      c.args.hide_status is True)
+c.resolver.shutdown()
+shutil.get_terminal_size = lambda fallback=(80, 24): shutil.os.terminal_size(
+    (120, 30))
+
 # --- reading a line ---------------------------------------------------------
 echo = io.StringIO()
 line = ScriptedKeyboard(list("100K") + ["\r"]).read_line("top: ", out=echo)

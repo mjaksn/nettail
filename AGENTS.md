@@ -667,11 +667,26 @@ the footer in the browser. `hide_status` is what both read, so the key moves it
 whatever is watching, and a run with no terminal used to leave it exactly where
 it started, which is why the key did nothing anywhere and a reader pressing it
 in a browser watched their own footer stay put. What the guards still decide is
-whether the bar on stdout draws, never what the setting says. The browser's
-footer keeps the country credit when it hides the figures, because the flags
-are still up in the rows above and CC BY 4.0 asks for the attribution to be
-wherever the material is: a reader who wanted fewer figures did not waive
-DB-IP's credit.
+whether the bar on stdout draws, never what the setting says.
+
+**That was true of the key and not yet true of the guard**, from 0.13.0 until
+0.16.0, because the guard asked whether there was a bar object rather than
+whether it had anywhere to draw. Every run has one, built before anything knows what
+stdout is, so a redirected run went down the drawing path and met the only
+refusal left on it, the check for room. The reader was told there was no room
+in a window this size, which was never the trouble, and the setting stayed
+where it was while they were told it. `StatusBar.drawable` is the terminal
+question on its own and is what the key asks now, which leaves `usable`
+meaning what it always did and leaves the words about room for a window that
+really is too short. `StickyHeader.drawable` is the same split for the same
+reason, and the two are spelled alike on purpose: one window, one keyboard,
+and a reader who presses `b` and `k` in the same minute should not be told two
+different stories about the same terminal.
+
+The browser's footer keeps the country credit when it hides the figures,
+because the flags are still up in the rows above and CC BY 4.0 asks for the
+attribution to be wherever the material is: a reader who wanted fewer figures
+did not waive DB-IP's credit.
 
 Whether a key may be pressed and whether it deserves a button are two
 questions, so `keys.py` keeps two tables. `WEB_EXCLUDED` is what a browser may

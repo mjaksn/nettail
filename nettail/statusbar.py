@@ -479,13 +479,29 @@ class StatusBar:
         """
         self._claim()
 
+    def drawable(self):
+        """Whether this terminal takes a status bar at all.
+
+        The terminal half of `usable` below and deliberately not the room
+        half, because the b key needs the two apart. A refusal it cannot tell
+        from a small window is one it reports as a small window, so a run with
+        the output redirected was answered with "no room for the status bar in
+        a window this size", which blames the window for something the window
+        never did, and left the setting where it was while saying it. What
+        that key decides is whether the bar draws and never what the setting
+        says, and this is the question that decides it. `StickyHeader` splits
+        the same question the same way and spells it the same, since the two
+        features share a window and one keyboard.
+        """
+        return self.stream.isatty() and enable_windows_vt()
+
     def usable(self):
-        """Whether a bar could be drawn here.
+        """Whether a bar could be drawn here, in a window with room for it.
 
         Asked before the header starts, because the header has to know how many
         rows are left for it, and it cannot find out by trying.
         """
-        if not self.stream.isatty() or not enable_windows_vt():
+        if not self.drawable():
             return False
         size = shutil.get_terminal_size(fallback=(0, 0))
         return size.lines >= MIN_STATUS_ROWS and size.columns >= 1
