@@ -210,6 +210,7 @@ shutil.get_terminal_size = fake_size(120, 30)
 pipe = FakePipe()
 piped = StatusBar(pipe)
 check("usable() is False on a pipe", piped.usable() is False)
+check("drawable() is False on a pipe too", piped.drawable() is False)
 check("start() returns False on a pipe", piped.start() is False)
 check("nothing written to a pipe", pipe.getvalue() == "")
 
@@ -218,6 +219,12 @@ short = FakeTTY()
 cramped = StatusBar(short)
 check("start() returns False in a 4-row window", cramped.start() is False)
 check("nothing written when it cannot start", short.getvalue() == "")
+# The two halves of that answer are asked separately, because the b key has
+# to tell them apart: a window with no room in it is worth saying so about,
+# and a terminal that could never have taken a bar is not the window's fault.
+check("usable() is False in a 4-row window", cramped.usable() is False)
+check("but drawable() is True, since the terminal was never the trouble",
+      cramped.drawable() is True)
 check("update() on a bar that never started does nothing",
       cramped.update(snap_of, now=1.0) is False and short.getvalue() == "")
 

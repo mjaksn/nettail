@@ -36,6 +36,21 @@ parsed, and it is treated as public.
   its own that is always there, so the key would move something no browser can
   see, which is why the QR key is kept back as well.
 
+### Fixed
+
+- **The `b` key moves the status bar setting on a run with the output
+  redirected**, which is what 0.13.0 said it would do and what the browser's
+  footer has been waiting for since. The key was answered by the check for
+  room instead, so a reader watching in a browser was told there was no room
+  for the status bar in a window this size, when the window was never the
+  trouble: the run had no terminal at all. The setting stayed where it was
+  while they were told it, and their footer stayed with it.
+
+  Every run builds a bar whether or not there is a terminal under it, so
+  asking whether there was one to draw on was the question that went missing.
+  It is asked now, and the words about room are left for a window that really
+  is too short to hold a bar.
+
 ## [0.15.0] - 2026-09-09
 
 ### Added

@@ -597,7 +597,15 @@ class Controls:
         --json naming a file is not one of them: stdout has the table on it
         and the bar belongs under the table.
         """
-        drawable = self.bar is not None and not to_stdout(self.args)
+        # The bar is asked rather than assumed, and asked the terminal
+        # question alone. Every run has a bar object whether or not it has a
+        # terminal to put one on, so a guard that stopped at "is there a bar"
+        # sent a redirected run down the drawing path, where the only thing
+        # left to refuse it was the check for room. It was told there was no
+        # room in a window this size, which was never the trouble, and the
+        # setting stayed where it was while the reader was told why.
+        drawable = (self.bar is not None and not to_stdout(self.args)
+                    and self.bar.drawable())
         wanted = not getattr(self.args, "hide_status", False)
         if not drawable:
             self.args.hide_status = wanted
