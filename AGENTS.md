@@ -81,6 +81,9 @@ python tests/run.py tally keys   # only suites whose name contains either
 python tests/run.py -v           # print every check, not only failures
 python tests/test_tally.py       # one suite directly
 
+python tests/tools/send_flows.py --port 2057     # traffic to look at
+python tests/tools/send_flows.py --port 2057 --exporter ipfix
+
 ruff check .                     # CI gates on this
 python -m build                  # wheel and sdist
 ```
@@ -102,6 +105,29 @@ package. Two consequences worth knowing:
 - A test that needs a file on disk uses `tempfile`, not a committed fixture.
 
 There are no test dependencies and there is not meant to be one.
+
+## Traffic for the manual checks
+
+Several things here are pinned only by a person looking at them, and each of
+the sections below says so where it comes up: the QR code, a country flag, the
+details dialog, the frame queue, and the sticky header and status bar sharing
+one scroll region. All of them need flows arriving while somebody watches.
+`tests/tools/send_flows.py` is what sends them, and it is a tool rather than a
+suite, so `run.py` never picks it up: that glob is `test_*.py` and nothing
+else.
+
+**Which exporter it is asked for decides what can be seen, and getting that
+wrong looks like a bug in this program.** NetFlow v5 has a fixed record with
+no field for a hardware address and carries no templates, so under `--exporter
+v5` the `p` key and `--templates` have nothing to show and correctly show
+nothing: the line under a flow is not drawn at all rather than drawn empty,
+which is what makes turning `p` on free on an exporter that cannot answer. On
+a screen that is indistinguishable from a key that has stopped working, and it
+was reported as exactly that during the 0.15.0 acceptance run. `--exporter
+ipfix` sends the ingress MAC pair, elements 56 and 80, and resends its
+template, so it is the one to use for `p`, `t` and `v`. The key's own reply
+says the same thing in six words, and that parenthesis is there for this
+reason: "on the exporters that send them (v5 never does)".
 
 ## Things with a single source of truth
 

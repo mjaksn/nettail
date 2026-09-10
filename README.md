@@ -2679,9 +2679,32 @@ python tests/run.py tally keys    # only suites whose name contains either
 python tests/run.py -v            # print every check, not only failures
 ```
 
-2216 checks across 39 suites, in about a minute. No test dependencies and
+2329 checks across 40 suites, in about a minute. No test dependencies and
 no test runner to learn: the suites need only netflume and lanname, the same as
 the collector.
+
+### Traffic for the checks a suite cannot make
+
+Nothing in the suite draws on a terminal or opens a browser, so the sticky
+header and the status bar sharing a scroll region, the QR code, a country
+flag, the details dialog and whether the columns still line up are all pinned
+by somebody looking at them. That needs flows arriving while you watch, and
+`tests/tools/send_flows.py` sends them. It is a tool rather than a suite:
+`run.py` collects `test_*.py` and nothing else, so it never runs on its own.
+
+```bash
+python tests/tools/send_flows.py --port 2057
+python tests/tools/send_flows.py --port 2057 --exporter ipfix
+```
+
+Which exporter to ask for is the one thing worth knowing. NetFlow v5 has a
+fixed record with no field for a hardware address and no templates at all, so
+a v5 run can never make the `p` key or `--templates` show anything, however
+long it is left running. That is the documented behaviour and it looks exactly
+like a key that has stopped working, since the line under a flow is not drawn
+at all rather than drawn empty. Ask for `--exporter ipfix` when what you are
+looking at is `p`, `t` or `v`: it sends the ingress MAC pair and resends its
+template the way a real exporter does.
 
 They cover this program and not its decoder. How a gap is spotted, how a
 template is stored and how a sampling rate is read are netflume's questions and
