@@ -59,7 +59,7 @@ TIME         EXPORTER        PROTO  SOURCE                                     D
 
 ## Requirements
 
-- Python 3.9 or newer
+- Python 3.11 or newer
 - [netflume](https://pypi.org/project/netflume/), the wire decoder
 - [lanname](https://pypi.org/project/lanname/), the hostname lookups
 

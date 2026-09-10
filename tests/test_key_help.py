@@ -55,7 +55,7 @@ check("it prints one row a key, and no more",
       len(rows) == len(main.KEYS), f"{len(rows)} rows for {len(main.KEYS)} keys")
 check("each row is its key and then its description, in table order",
       all(row.split(maxsplit=1) == [key, doc]
-          for row, (key, doc) in zip(rows, main.KEYS)),
+          for row, (key, doc) in zip(rows, main.KEYS, strict=True)),
       repr(rows[:2]))
 check("the keys are right aligned into a column of their own",
       len({len(row) - len(row.split(maxsplit=1)[1]) for row in rows}) == 1,

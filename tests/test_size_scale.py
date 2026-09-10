@@ -33,7 +33,8 @@ mid = s.fraction(int((64 * 100 * 1024) ** 0.5))     # geometric mean of the ends
 check("the geometric midpoint lands mid-ramp", abs(mid - 0.5) < 0.01, "%.3f" % mid)
 
 fracs = [s.fraction(n) for n in (100, 1000, 10_000, 100_000)]
-check("fraction rises with size", all(a < b for a, b in zip(fracs, fracs[1:])),
+check("fraction rises with size",
+      all(a < b for a, b in zip(fracs, fracs[1:], strict=False)),
       str(fracs))
 check("a decade is a constant step on the ramp",
       abs((fracs[1] - fracs[0]) - (fracs[2] - fracs[1])) < 1e-9)

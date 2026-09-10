@@ -223,10 +223,22 @@ for text, version, rows in VECTORS:
     if produced == rows:
         check("%s: every module matches the pinned symbol" % label, True)
     else:
-        wrong = [i for i, (a, b) in enumerate(zip(produced, rows)) if a != b]
-        check("%s: every module matches the pinned symbol" % label, False,
-              "rows %s differ; row %d is\n  %s\nand should be\n  %s"
-              % (wrong[:6], wrong[0], produced[wrong[0]], rows[wrong[0]]))
+        pairs = enumerate(zip(produced, rows, strict=False))
+        wrong = [i for i, (a, b) in pairs if a != b]
+        if wrong:
+            why = ("rows %s differ; row %d is\n  %s\nand should be\n  %s"
+                   % (wrong[:6], wrong[0],
+                      produced[wrong[0]], rows[wrong[0]]))
+        else:
+            # Every row the two have in common agrees, so what differs is
+            # how many there are. The zip above stops at the shorter of
+            # them and leaves nothing to point at, and asking for the
+            # first wrong row would raise out of the report rather than
+            # print it.
+            why = ("%d rows produced against %d pinned"
+                   % (len(produced), len(rows)))
+        check("%s: every module matches the pinned symbol" % label,
+              False, why)
 
 
 # --- the function patterns are where the standard puts them -----------------

@@ -712,7 +712,7 @@ def write_summary(stats, tally, resolver, sequences, sampling, args,
     def columns(name, *headings, widths=(9, 7, 9), name_width=16):
         """A dim header row, so the numbers under it need no unit beside them."""
         cells = "  ".join(f"{text:>{width}}"
-                          for text, width in zip(headings, widths))
+                          for text, width in zip(headings, widths, strict=True))
         print(f"  {C.GREY}{name:<{name_width}}{cells}{C.RESET}", file=out)
 
     # The widest size human_bytes writes is seven characters, and the left
@@ -749,7 +749,7 @@ def write_summary(stats, tally, resolver, sequences, sampling, args,
         # more than the column, which is the space a row puts after it.
         columns("", "bytes", f"{'in':>{SIZE_WIDTH}}/out", widths=(10, 0),
                 name_width=width + 1)
-        for (_ip, nbytes, inbound, outbound), cell in zip(rows, cells):
+        for (_ip, nbytes, inbound, outbound), cell in zip(rows, cells, strict=True):
             print(f"  {_column(cell, width)} "
                   f"{ramp.paint(f'{human_bytes(nbytes):>10}', nbytes)}  "
                   f"{in_out(inbound, outbound)}", file=out)
@@ -799,7 +799,8 @@ def write_summary(stats, tally, resolver, sequences, sampling, args,
     def pair_halves(pairs):
         """Both ends of every row, built once so they can be measured once."""
         return list(zip(with_names([(pair[0], None) for pair, _figure in pairs]),
-                        with_names([(pair[1], None) for pair, _figure in pairs])))
+                        with_names([(pair[1], None) for pair, _figure in pairs]),
+                        strict=True))
 
     def halves_width(halves, arrow, default, overhead):
         """The endpoint column of a two-ended table, sized to its rows.
@@ -823,7 +824,7 @@ def write_summary(stats, tally, resolver, sequences, sampling, args,
         halves = pair_halves(pairs_by_bytes)
         width = halves_width(halves, arrow, 58, overhead=2 + 1 + 9)
         column = _arrow_column(halves, arrow, width)
-        for (left, right), (_pair, octets) in zip(halves, pairs_by_bytes):
+        for (left, right), (_pair, octets) in zip(halves, pairs_by_bytes, strict=True):
             cell = _endpoints(left, arrow, right, column)
             print(f"  {_column(cell, width)} "
                   f"{ramp.paint(f'{human_bytes(octets):>9}', octets)}", file=out)
@@ -832,7 +833,8 @@ def write_summary(stats, tally, resolver, sequences, sampling, args,
         halves = pair_halves(pairs_by_packets)
         width = halves_width(halves, arrow, 58, overhead=2 + 1 + 9)
         column = _arrow_column(halves, arrow, width)
-        for (left, right), (_pair, packets) in zip(halves, pairs_by_packets):
+        for (left, right), (_pair, packets) in zip(halves, pairs_by_packets,
+                                                   strict=True):
             cell = _endpoints(left, arrow, right, column)
             print(f"  {_column(cell, width)} "
                   f"{C.CYAN}{human_count(packets):>9}{C.RESET}", file=out)
@@ -841,10 +843,11 @@ def write_summary(stats, tally, resolver, sequences, sampling, args,
         arrow = (FLOW_ARROW, C.MAGENTA)
         heading(f"Longest {tally.top} flows")
         halves = list(zip(with_names([(d[0], d[1]) for _duration, d in longest]),
-                          with_names([(d[2], d[3]) for _duration, d in longest])))
+                          with_names([(d[2], d[3]) for _duration, d in longest]),
+                          strict=True))
         width = halves_width(halves, arrow, 56, overhead=2 + 7 + 2 + 6 + 1 + 1 + 9)
         column = _arrow_column(halves, arrow, width)
-        for (left, right), (duration, details) in zip(halves, longest):
+        for (left, right), (duration, details) in zip(halves, longest, strict=True):
             proto_name, octets = details[4], details[5]
             cell = _endpoints(left, arrow, right, column)
             print(f"  {C.CYAN}{human_duration(duration):>7}{C.RESET}  "

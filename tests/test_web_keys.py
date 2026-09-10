@@ -370,7 +370,7 @@ check("and the banner, so a late arrival still gets one",
 check("the greeting carries every column and no others",
       len(greeting["columns"]) == len(COLUMNS),
       "%d != %d" % (len(greeting["columns"]), len(COLUMNS)))
-for sent, (name, width, align, _gap) in zip(greeting["columns"], COLUMNS):
+for sent, (name, width, align, _gap) in zip(greeting["columns"], COLUMNS, strict=True):
     # FLAGS is the one column COLUMNS gives no width, having nothing padded
     # against it on a terminal, and FLAGS_WIDTH is what the table sizes it
     # by instead. Written the same way here as in cli.py deliberately: if

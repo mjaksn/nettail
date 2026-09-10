@@ -66,22 +66,12 @@ jobs:
         # vacuously below 3.14. Topping out at 3.13 meant the suite written for
         # that behaviour proved nothing anywhere. 3.15 is still at release
         # candidate and is left until it is not.
-        python: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
-        exclude:
-          # 3.9 is no longer in the windows runner image's tool cache, so
-          # setup-python spends the better part of a minute fetching an
-          # interpreter to run a suite that takes seconds, and `gate` waits
-          # for the slowest job, so that sits on the critical path of every
-          # merge.
-          #
-          # Dropped rather than the whole of 3.9, because the two axes catch
-          # different things. 3.9 catches syntax and stdlib incompatibility,
-          # which is the same on either OS and is still covered on ubuntu.
-          # Windows catches the terminal handling, which is where this program
-          # differs most per platform, and which is still covered on five
-          # versions. Only the intersection goes untested.
-          - os: windows-latest
-            python: "3.9"
+        #
+        # The floor is 3.11 from 0.16.0, and both axes run every version with
+        # nothing excluded: the one cell that used to be left out was 3.9 on
+        # windows, whose interpreter the runner image no longer caches, and
+        # 3.9 is not built here any more.
+        python: ["3.11", "3.12", "3.13", "3.14"]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -98,7 +88,7 @@ jobs:
         # meant the suite was green against a decoder the wheel would refuse to
         # be installed beside. Move both together, or teach this step to read
         # the one in pyproject.toml.
-        run: pip install "lanname>=0.5.0,<0.6" "netflume>=0.4.0,<0.5"
+        run: pip install "lanname>=0.5.0,<0.6" "netflume>=0.5.2,<0.6"
       - name: run the suite
         # Some suites reach the network, and only over loopback: they start
         # a real collector on 127.0.0.1 and send it NetFlow v5 datagrams,

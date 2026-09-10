@@ -298,7 +298,8 @@ def _penalty(matrix, size):
     behind for it.
     """
     score = 0
-    lines = [bytes(row) for row in matrix] + [bytes(col) for col in zip(*matrix)]
+    lines = ([bytes(row) for row in matrix]
+             + [bytes(col) for col in zip(*matrix, strict=True)])
     for line in lines:
         run, previous = 1, line[0]
         for value in line[1:]:
@@ -410,7 +411,7 @@ def render(matrix, border=QUIET_ZONE):
             + [[0] * width for _ in range(border)])
     if len(rows) % 2:
         rows.append([0] * width)
-    return ["".join(BLOCKS[pair] for pair in zip(rows[i], rows[i + 1]))
+    return ["".join(BLOCKS[pair] for pair in zip(rows[i], rows[i + 1], strict=True))
             for i in range(0, len(rows), 2)]
 
 

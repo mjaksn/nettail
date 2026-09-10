@@ -288,7 +288,7 @@ def row_cells(rec, hdr, args, resolver, scale, endpoint_width=None):
     bytes_plain = f"{human_bytes(octets):>{BYTES_WIDTH}}"
     bytes_cell = scale.paint(bytes_plain, octets)
 
-    dur = flow_duration(rec, hdr)
+    dur = flow_duration(rec)
     dur_str = f"{dur:.2f}s" if dur is not None else "-"
 
     flags = tcp_flags_str(rec.get("tcp_flags")) if proto == 6 else ""
@@ -386,7 +386,7 @@ def render(rec, hdr, args, resolver, scale):
     # Every cell arrives padded to its own column, so the row is the painted
     # halves with the gaps from the table between them and nothing else.
     print("".join(" " * column[3] + painted
-                  for column, (_plain, painted) in zip(COLUMNS, cells)))
+                  for column, (_plain, painted) in zip(COLUMNS, cells, strict=True)))
 
     for line in extra_lines(rec, args):
         print(line)
