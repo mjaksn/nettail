@@ -829,8 +829,10 @@ What it would have cost is not what a dependency costs elsewhere. This program
 installs three pure Python packages and nothing else, the suite has no
 dependencies and is not meant to grow one, and the image pins every byte by
 hash. The obvious library also carries `importlib-metadata`, and `zipp` behind
-it, on the 3.9 that CI gates on, which would have made three statements about
-what this installs false at once.
+it, on the 3.9 CI gated on when this was decided, which would have made three
+statements about what this installs false at once. The floor has moved since
+and that particular dependency may no longer follow, but nothing about the
+other two reasons moved with it.
 
 What it costs instead is about 250 lines against a standard fixed in 2015,
 which is write-once code. It is small enough to be worth it only because the
@@ -1080,11 +1082,26 @@ the flows keep the rows they should and that nothing is drawn over.
 
 ## Constraints that bite
 
-- **Python 3.9 is supported.** No PEP 701 f-strings, so no newline inside an
-  f-string expression; no `X | None`; no builtin generics. CI runs 3.9 on
-  ubuntu, and it is easy to break this on a newer interpreter without
-  noticing.
+- **Python 3.11 is the floor**, and 3.9 was it until 0.16.0, when netflume's
+  own floor moved to 3.11 and the pin here had to follow or stay on a decoder
+  that was no longer being released. What still bites is PEP 701, which is
+  3.12 rather than 3.11: no newline inside an f-string expression. `X | None`
+  and builtin generics are allowed by every interpreter this now runs on, and
+  the package is still written in the older spelling throughout, with ruff's
+  pyupgrade rules still off. Match the file around you rather than mixing the
+  two: rewriting the annotations is a change worth making on its own. CI runs
+  3.11 through 3.14, on ubuntu and windows both, and it is easy to break this
+  on a newer interpreter without noticing.
 - **ruff line length is 88.** CI fails on 89.
+- **Every `zip()` says `strict=`.** B905 is in the `B` rules and asks for
+  it from 3.10 up, so the 3.11 floor turned it on across the package. It is
+  a question worth answering rather than a formality: the sequences here are
+  almost all built from one source and a silent truncation is the
+  `COLUMNS`-against-`row_cells` kind of drift that fails nothing, so those
+  take `strict=True`. `strict=False` is for the few that are deliberately
+  ragged, a sliding pair over a list and its own tail, or a comparison in a
+  failure branch whose job is to report a difference rather than raise on
+  one. Pick per site; do not copy whichever the line above happens to use.
 - **Flow rows go to stdout; everything else goes to stderr**: the banner, the
   `?` listing, the host list, the summary, and every warning. That is what
   keeps `--json` and shell redirection usable. There is now a third
@@ -1157,8 +1174,9 @@ the flows keep the rows they should and that nothing is drawn over.
   changed and something thinner kept for the resends, which is a rewrite of
   this block rather than a swap, and it has not been done.
 
-  One thing did move on its own, though, and it is why the pin is 0.4.0 rather
-  than 0.1.0. Data and options templates are allocated from one pool of IDs,
+  One thing did move on its own, though, and it is why the floor was 0.4.0
+  rather than 0.1.0, and why it can never go back under it whatever else
+  raises it. Data and options templates are allocated from one pool of IDs,
   so an exporter may reuse an ID for the other kind without touching a field
   specification. netflume before 0.4.0 compared layouts alone, took the new
   kind and returned False, so this block called a redefinition a resend and

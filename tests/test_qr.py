@@ -223,7 +223,8 @@ for text, version, rows in VECTORS:
     if produced == rows:
         check("%s: every module matches the pinned symbol" % label, True)
     else:
-        wrong = [i for i, (a, b) in enumerate(zip(produced, rows)) if a != b]
+        pairs = enumerate(zip(produced, rows, strict=False))
+        wrong = [i for i, (a, b) in pairs if a != b]
         check("%s: every module matches the pinned symbol" % label, False,
               "rows %s differ; row %d is\n  %s\nand should be\n  %s"
               % (wrong[:6], wrong[0], produced[wrong[0]], rows[wrong[0]]))

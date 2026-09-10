@@ -92,6 +92,7 @@ FIELD_LABELS = {
     "dst_tos": "Destination type of service",
     "egress_vrf": "Egress VRF",
     "enterprise_id": "Enterprise ID",
+    "ethertype": "Ethertype",
     "exported_flows": "Flows this exporter has exported",
     "exported_octets": "Bytes this exporter has exported",
     "exported_packets": "Packets this exporter has exported",
@@ -124,8 +125,11 @@ FIELD_LABELS = {
     "min_ttl": "Smallest TTL seen",
     "mpls_label_1": "MPLS label 1",
     "next_hop": "Next hop",
+    "observation_domain_id": "Observation domain ID",
+    "observation_domain_name": "Observation domain name",
     "observation_point_id": "Observation point ID",
     "observation_time_ms": "Observation time (ms since the epoch)",
+    "observed_flows": "Flows this exporter has observed",
     "octets": "Bytes",
     "octets_total": "Bytes, as a running total for the flow",
     "out_if": "Egress interface",
@@ -159,7 +163,9 @@ FIELD_LABELS = {
     "src_mask": "Source prefix length",
     "src_port": "Source port",
     "srh_flags": "Segment routing header flags",
+    "system_init_time_ms": "Exporter start time (ms since the epoch)",
     "tcp_flags": "TCP flags",
+    "tcp_options": "TCP options",
     "template_id": "Template ID",
     "tos": "Type of service",
     "vlan": "VLAN",
@@ -439,7 +445,7 @@ def flow_section(rec, hdr, resolver):
     facts.append(["Protocol", _paint(*proto_pieces)])
 
     start = flow_timestamp(rec, hdr)
-    duration = flow_duration(rec, hdr)
+    duration = flow_duration(rec)
     facts.append(["Started", at(start)])
     if duration is not None:
         facts.append(["Ended", at(start + duration)])

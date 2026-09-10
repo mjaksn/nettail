@@ -186,7 +186,7 @@ class Tally:
         self._prune((self.talkers,), (self.talkers_in, self.talkers_out))
         self._prune((self.internal,), (self.internal_in, self.internal_out))
 
-        duration = flow_duration(rec, hdr)
+        duration = flow_duration(rec)
         if not duration:
             # A flow with no duration says nothing about how long anything took
             # or how fast it went, so it stays out of both of those answers.

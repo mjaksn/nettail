@@ -7,7 +7,7 @@ name = "nettail"
 version = "0.16.0"
 description = "A NetFlow v5, NetFlow v9 and IPFIX collector that prints flows to a console, with hostnames, colour, a live status bar and an optional browser view"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "mjaksn" }]
@@ -21,8 +21,6 @@ classifiers = [
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -43,14 +41,20 @@ classifiers = [
 # to one the two of them share. While both are on 0.x a minor bump is where
 # that kind of change is allowed to live, so that is where the ceiling goes.
 #
-# netflume's ceiling is also a floor decision. 0.4.0 is the last release that
-# supports Python 3.9, which this program still supports and still gates CI
-# on, so `<0.5` holds it there deliberately rather than by neglect. Raising it
-# is a question about what nettail runs on before it is a question about the
-# decoder, and the answer belongs beside the classifiers rather than here.
+# netflume's ceiling was a floor decision for a while: 0.4.0 was the last
+# release that supported Python 3.9, so `<0.5` held the decoder back to keep
+# this program on an interpreter it no longer had a reason to be on. That
+# question was answered the other way in 0.16.0, which is why the classifiers
+# above start at 3.11, and the ceiling here is an ordinary one again.
+#
+# The floor is 0.5.2 rather than 0.5.0 because two things arrived inside that
+# series that this program reads directly: 0.5.1 named six more information
+# elements, which the dialog carries labels for and a test holds it to, and
+# 0.5.2 dropped the ignored second argument to `flow_duration`, which is the
+# spelling every call site here now uses.
 dependencies = [
     "lanname>=0.5.0,<0.6",
-    "netflume>=0.4.0,<0.5",
+    "netflume>=0.5.2,<0.6",
 ]
 
 [project.scripts]
@@ -88,10 +92,12 @@ nettail = ["supplemental-services", "web.html", "flags.woff2", "flags-licence"]
 
 [tool.ruff]
 line-length = 88
-target-version = "py39"
+target-version = "py311"
 
 [tool.ruff.lint]
 # Correctness and tidiness, not modernisation. The pyupgrade rules would ask
-# for `X | None` and builtin generics, which read better but which this
-# program cannot use in anger while it supports 3.9.
+# for `X | None` and builtin generics, which the 3.11 floor now allows and
+# which read better. Rewriting every annotation in the package is a change of
+# spelling across every module, and it is worth making on its own rather than
+# riding along with whatever moved the floor.
 select = ["E", "F", "W", "I", "B"]

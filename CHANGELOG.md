@@ -36,6 +36,43 @@ parsed, and it is treated as public.
   its own that is always there, so the key would move something no browser can
   see, which is why the QR key is kept back as well.
 
+### Changed
+
+- **Python 3.11 is the floor**, up from 3.9, and the test matrix becomes 3.11
+  through 3.14 on both Ubuntu and Windows with nothing excluded, the one cell
+  that used to be missing having been 3.9 on Windows. Nobody on 3.9 or 3.10
+  loses what they already have: `requires-python` is what makes pip on those
+  versions resolve to 0.15.0, the last release that supports them, rather
+  than fail.
+
+  The decision was not this program's alone to make. netflume 0.5.0 moved its
+  own floor to 3.11, and the pin here carried a `<0.5` ceiling that said as
+  much out loud: it was holding the decoder back to keep this program on an
+  interpreter it had no other reason to be on. Either the ceiling moved or the
+  decoder stopped being one releases could be taken from. 3.9 reached end of
+  life in October 2025 and 3.10 reaches it in October 2026.
+
+  It is a change of what runs this and not of how it is written. Every
+  annotation is still spelled the way 3.9 wanted, ruff's pyupgrade rules are
+  still off, and no option, key, column, record field or line of output moved.
+
+- **netflume is now pinned to `>=0.5.2,<0.6`**, up from `>=0.4.0,<0.5`, and
+  two things inside that series reach this program directly.
+
+  `flow_duration` takes one argument as of 0.5.2, the second having been
+  accepted and ignored, so the three call sites here drop it. What they get
+  back is unchanged.
+
+  And 0.5.1 named six more information elements: the observation domain's ID
+  and its name, the exporter's start time, the flows it has observed, the TCP
+  options and the ethertype. All six are sent by `ipt_NETFLOW`, which is what
+  a UDM Pro exports through, so they were reaching the details dialog under
+  keys of the decoder's own making, `ie149` and friends. IE 300 was the one
+  that was actually unreadable: it is a string, and an unrecognised field over
+  eight bytes falls back to hex, so an exporter naming itself arrived as a
+  blob of digits. The dialog spells all six out now, which is what
+  `test_detail` holds it to in both directions.
+
 ### Fixed
 
 - **The `b` key moves the status bar setting on a run with the output
