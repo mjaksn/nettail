@@ -2154,7 +2154,7 @@ def main():
             # Sent on the status rather than in the greeting because every one
             # of them moves, and a status frame follows any key within a
             # repaint interval.
-            "toggles": controls.toggles(),
+            "toggles": controls.web_toggles(),
             # The credit the database in hand asks for, as the words and the
             # address rather than as anything the page could mistake for
             # markup, or null where none is owed. DB-IP's licence asks a page

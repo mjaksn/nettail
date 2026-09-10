@@ -11,6 +11,31 @@ but it is a program rather than a library, and the names inside it may move
 without that being a breaking change. `--json` output is the part meant to be
 parsed, and it is treated as public.
 
+## [0.16.0] - 2026-09-10
+
+### Added
+
+- **The `k` key pins the column header to the top row, or lets it scroll
+  away.** `--sticky-header` could only be decided before the run started, so
+  changing your mind meant restarting the collector. It is the same setting
+  the flag holds, moved the way the `b` key moves the status bar.
+
+  Letting the header go leaves the flows exactly where they are, and pinning
+  it again scrolls a single row rather than clearing the screen, so an hour of
+  history is not the price of pressing a key. The two features share one pair
+  of scroll margins and only one of them may write it, so standing down hands
+  the margins to the status bar when there is one and resets them when there
+  is not.
+
+  A window too short to hold a header says so and changes nothing, as the `b`
+  key does. A run with the records on stdout, or with output redirected, moves
+  the setting and draws nothing, for the reason the `b` key does that too: the
+  reader has said what they want even where there is nothing to show them.
+
+  It is the one key a browser cannot press. A browser's table has a head of
+  its own that is always there, so the key would move something no browser can
+  see, which is why the QR key is kept back as well.
+
 ## [0.15.0] - 2026-09-09
 
 ### Added
@@ -986,6 +1011,7 @@ console: the part that decides what a flow should look like on a terminal.
   reminder line under the startup banner can be a pointer rather than a
   two-hundred-character list that wrapped and then scrolled away.
 
+[0.16.0]: https://github.com/mjaksn/nettail/releases/tag/v0.16.0
 [0.15.0]: https://github.com/mjaksn/nettail/releases/tag/v0.15.0
 [0.14.0]: https://github.com/mjaksn/nettail/releases/tag/v0.14.0
 [0.13.1]: https://github.com/mjaksn/nettail/releases/tag/v0.13.1

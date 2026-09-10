@@ -1020,6 +1020,49 @@ two settings, so exactly one of them writes the region and the other asks.
 `scroll_region()` is the only place that arithmetic lives. Changing either
 feature means reading both, and their suites.
 
+**Which of the two is the writer can change on a keypress now, and that is the
+whole of the k key.** Before it, the header claimed the margins at startup and
+kept them until the run ended or a window shrank too far to hold both. The key
+moves it in either direction mid-run, so the handover had to become something
+either side can perform rather than something the resize path did once.
+
+- **Standing down is `unpin`, not `stop`.** `stop` resets the margins outright
+  and parks the cursor below them, which is what the summary and the shell
+  prompt after it want and is wrong while flows are still arriving. `unpin`
+  takes `handing_over`: with the bar up it writes no region at all and the bar
+  takes it with `claim`, because one pair of margins has one writer and this
+  is the moment which one it is changes. With no bar it resets the region
+  itself, exactly as `StatusBar.stop` does when the header is not there to
+  take over. Reset the margins while the bar is up and the flows scroll over
+  the bar, which the bar repaints twice a second, so it reads as flicker
+  rather than as a bug.
+- **Pinning again is `resume`, not `start`.** `start` clears the screen, which
+  is right at startup and throws away an hour of flows on a keypress. `resume`
+  scrolls one row for the header and clears nothing, which is the bargain
+  `StatusBar.resume` already struck for its two rows. What the foot has
+  reserved is passed in rather than worked out, so `STATUS_ROWS` stays a
+  number `statusbar.py` alone knows: that is what `StatusBar.reserved` is for.
+- **It is the one setting a browser may not press.** A browser's table has a
+  head of its own that is always there, so pressing this would move something
+  no browser can see, which is the QR key's problem with a button attached.
+  It is in `WEB_EXCLUDED`, and `Controls.web_toggles` exists because of it:
+  `toggles` answers what the run is doing, which is the same answer whoever
+  asks, and what is published has to be only what a browser can press, since
+  the page looks each one up against a button it was given. `test_web_keys`
+  holds that direction and `test_key_help` holds the other.
+- **The drawing and the setting come apart, as they do for `b`.** Redirected
+  or with the records on stdout there is no window to hold a region in, and
+  the setting still moves, because a reader has said what they want and a
+  settings file can hold it. That was got wrong first time round and found by
+  driving the key through the real receive loop rather than by a test: the key
+  took the pinning path anyway and answered "no room for the column header in
+  a window this size", when the size was never the problem.
+
+Nothing in the suite draws on a terminal, so what a terminal does with the
+handover is a manual check, as the QR code and the flags are. Press `k` a few
+times on a run with the bar up and again with `--hide-status`, and watch that
+the flows keep the rows they should and that nothing is drawn over.
+
 ## Constraints that bite
 
 - **Python 3.9 is supported.** No PEP 701 f-strings, so no newline inside an

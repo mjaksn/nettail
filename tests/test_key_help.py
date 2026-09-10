@@ -184,6 +184,7 @@ ACTIONS = {
 # them the same setting rather than two that happen to agree.
 SETTINGS = {
     "b": "hide_status",
+    "k": "sticky_header",
     "d": "size_scale_dynamic",
     # The one whose state is not kept on `args`. `country` holds it on the
     # module, because `display`, `cli` and `statusbar` all ask and share no

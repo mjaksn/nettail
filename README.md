@@ -260,7 +260,7 @@ usage: nettail [-h] [--version] [--config FILE | --save-config [FILE]]
 | `--colour WHEN` | `auto` | When to use ANSI colour **on this terminal**: `auto`, `always` or `never`. Under `auto` a terminal gets colour and a redirected stream does not, and `NO_COLOR` in the environment turns it off. The browser view has its own switch, `--web-colour`, and is not decided by this one. `--color` is accepted too |
 | `--no-color` | off | The same as `--colour never`, and like it, about this terminal |
 | `--header-every N` | `40` | Reprint the column header every N lines. `0` disables repeats |
-| `--sticky-header` | off | Pin the column header to the top row of the window. See below |
+| `--sticky-header` | off | Pin the column header to the top row of the window. The `k` key moves the same setting mid-run. See below |
 | `--hide-status` | off | Turn off the two-line status bar at the foot of the window, which is shown by default whenever output is going to a terminal. The `b` key toggles it while the collector runs. See [The status bar](#the-status-bar) |
 | `--no-supplemental-services` | off | Name ports from the system services database alone. Without it, a short list shipped with this program fills in the ports the system does not know. See [Service names](#service-names) |
 
@@ -285,6 +285,14 @@ All off unless `--web` is given. See [The web interface](#the-web-interface).
 underneath it, so you never lose track of which column is which. It works by
 setting a VT100 scroll region (DECSTBM) covering every row but the first, then
 letting output scroll inside that region as usual.
+
+The `k` key moves the same setting while the collector runs, in both
+directions, which is worth having for the first item below: pin the header
+while you read the columns, let it go when you want the scrollback back.
+Letting it go leaves the flows where they are, and pinning it again scrolls
+one row rather than clearing the screen, so an hour of history is not the
+price of pressing a key. In a window too short to hold a header the key says
+so and changes nothing, as the `b` key does for the bar.
 
 Two things to know before turning it on:
 
@@ -802,6 +810,7 @@ Keyboard controls
       l  list the local addresses seen, and their names
       c  clear the statistics and restart the runtime clock
       b  hide the status bar at the foot of the window, or bring it back
+      k  keep the column header pinned to the top row, or let it scroll away
       d  re-range the size colour scale as flows arrive, or pin it
       m  ask for a new fixed top for the size colour scale
       h  cycle host name resolution: off, dns, all
