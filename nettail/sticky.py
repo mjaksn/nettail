@@ -66,9 +66,22 @@ class StickyHeader:
         # folded into the one scroll region both features share.
         self.bottom_reserved = 0
 
+    def drawable(self):
+        """Whether this terminal takes a pinned header at all.
+
+        Deliberately not a question about room. `start` and `resume` ask that
+        for themselves, and keeping the two apart is what lets a refusal from
+        either of them mean the one thing it says. They were one question
+        until the k key had to tell them apart, and it had to because a
+        console that will not take the escapes is not a window with no room
+        in it, and answering the reader as though it were blames the window
+        for something the window never did.
+        """
+        return self.stream.isatty() and enable_windows_vt()
+
     def start(self):
         """Try to claim the top row. Returns True if the header is now pinned."""
-        if not self.stream.isatty() or not enable_windows_vt():
+        if not self.drawable():
             return False
         size = shutil.get_terminal_size(fallback=(0, 0))
         if size.lines - self.bottom_reserved < MIN_STICKY_ROWS or size.columns < 1:
@@ -127,7 +140,7 @@ class StickyHeader:
         writer arrangement as it always was: the header owns the margins
         whenever it is active, and the bar asks.
         """
-        if self.active or not self.stream.isatty() or not enable_windows_vt():
+        if self.active or not self.drawable():
             return False
         size = shutil.get_terminal_size(fallback=(0, 0))
         if size.lines - bottom_reserved < MIN_STICKY_ROWS or size.columns < 1:

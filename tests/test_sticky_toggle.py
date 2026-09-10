@@ -20,7 +20,6 @@ what a terminal does with them is a manual check and always was.
 """
 import io
 import shutil
-import sys
 
 from harness import check, finish
 
@@ -145,45 +144,40 @@ def controls(args, sticky=None, bar=None):
                     out=io.StringIO())
 
 
-real_stdout = sys.stdout
-sys.stdout = FakeTerminal()
-try:
-    # Pinned, with a bar up: standing down has to give the bar its margins.
-    header, _stream = pinned(bottom=STATUS_ROWS)
-    bar = FakeBar(active=True)
-    args = Args(sticky_header=True)
-    said = controls(args, header, bar).handle(STICKY_KEY)
-    check("the key unpins a header that is up", not header.active, said)
-    check("and the setting follows it", args.sticky_header is False)
-    check("and the bar is asked to take the margins back", bar.claimed == 1,
-          str(bar.claimed))
-    check("and the reader is told which way it went",
-          said and "unpinned" in said, repr(said))
+# Pinned, with a bar up: standing down has to give the bar its margins.
+header, _stream = pinned(bottom=STATUS_ROWS)
+bar = FakeBar(active=True)
+args = Args(sticky_header=True)
+said = controls(args, header, bar).handle(STICKY_KEY)
+check("the key unpins a header that is up", not header.active, said)
+check("and the setting follows it", args.sticky_header is False)
+check("and the bar is asked to take the margins back", bar.claimed == 1,
+      str(bar.claimed))
+check("and the reader is told which way it went",
+      said and "unpinned" in said, repr(said))
 
-    # Down, with a bar up: pinning again has to reserve the bar's rows.
-    stream = FakeTerminal()
-    header = StickyHeader(stream)
-    header.rows, header.cols = 24, 100
-    bar = FakeBar(active=True)
-    args = Args(sticky_header=False)
-    said = controls(args, header, bar).handle(STICKY_KEY)
-    check("the key pins a header that is down", header.active, said)
-    check("and the setting follows it", args.sticky_header is True)
-    check("and it took the bar's rows off the region",
-          header.bottom_reserved == STATUS_ROWS)
-    check("and the bar is not asked to write anything, since it is not the "
-          "writer now", bar.claimed == 0, str(bar.claimed))
+# Down, with a bar up: pinning again has to reserve the bar's rows.
+stream = FakeTerminal()
+header = StickyHeader(stream)
+header.rows, header.cols = 24, 100
+bar = FakeBar(active=True)
+args = Args(sticky_header=False)
+said = controls(args, header, bar).handle(STICKY_KEY)
+check("the key pins a header that is down", header.active, said)
+check("and the setting follows it", args.sticky_header is True)
+check("and it took the bar's rows off the region",
+      header.bottom_reserved == STATUS_ROWS)
+check("and the bar is not asked to write anything, since it is not the "
+      "writer now", bar.claimed == 0, str(bar.claimed))
 
-    # No bar at all is the ordinary case and must not reach for one.
-    stream = FakeTerminal()
-    header = StickyHeader(stream)
-    header.rows, header.cols = 24, 100
-    args = Args(sticky_header=False)
-    said = controls(args, header, None).handle(STICKY_KEY)
-    check("the key works with no bar in the run", header.active, said)
-    check("and reserves nothing at the foot", header.bottom_reserved == 0)
-finally:
-    sys.stdout = real_stdout
+# No bar at all is the ordinary case and must not reach for one.
+stream = FakeTerminal()
+header = StickyHeader(stream)
+header.rows, header.cols = 24, 100
+args = Args(sticky_header=False)
+said = controls(args, header, None).handle(STICKY_KEY)
+check("the key works with no bar in the run", header.active, said)
+check("and reserves nothing at the foot", header.bottom_reserved == 0)
 
 # --- the setting moves even where nothing can be drawn ----------------------
 # The b key's bargain, and this key strikes the same one: a run with the
@@ -203,18 +197,39 @@ check("and a run with no header object at all is not a traceback",
       args.sticky_header is True, repr(said))
 
 # Redirected into a file or a pipe is the other half of that, and it is the
-# one a real run found: stdout is not a terminal, so there is no window to
-# hold a region in, and the key used to take the pinning path anyway and
+# one a real run found: the stream is not a terminal, so there is no window
+# to hold a region in, and the key used to take the pinning path anyway and
 # answer "no room for the column header in a window this size" without moving
 # anything. The size was never the problem and the setting has to move.
-header, _stream = pinned()
-header.active = False
+stream = io.StringIO()                 # a file or a pipe, which is no tty
+header = StickyHeader(stream)
 args = Args(sticky_header=False)
 said = controls(args, header, None).handle(STICKY_KEY)
 check("redirected, the setting moves rather than blaming the window size",
       args.sticky_header is True, repr(said))
 check("and it is not told there is no room, which was never true",
       said == "column header pinned", repr(said))
-check("and nothing was drawn for a header nobody can see", not header.active)
+check("and nothing was drawn for a header nobody can see",
+      not header.active and stream.getvalue() == "",
+      repr(stream.getvalue()))
+
+# A console that will not take the escapes is the third way to have nowhere
+# to draw, and the one that is a terminal all the same. This is a Windows
+# console without VT processing, where isatty answers yes and every escape
+# would arrive as characters, so the header may not be drawn and the reader
+# may not be told the window is too small: it never was.
+nettail.sticky.enable_windows_vt = lambda: False
+stream = FakeTerminal()
+header = StickyHeader(stream)
+args = Args(sticky_header=False)
+said = controls(args, header, None).handle(STICKY_KEY)
+check("a console that cannot take the escapes still moves the setting",
+      args.sticky_header is True, repr(said))
+check("and is not told there is no room either", said == "column header pinned",
+      repr(said))
+check("and has nothing drawn at it",
+      not header.active and stream.getvalue() == "",
+      repr(stream.getvalue()))
+nettail.sticky.enable_windows_vt = lambda: True
 
 finish("sticky header toggle")

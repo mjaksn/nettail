@@ -636,8 +636,14 @@ class Controls:
         # reader has still said what they want and a settings file can still
         # hold it, so what a guard decides here is whether anything is drawn
         # and never what the setting says.
+        #
+        # The header is asked rather than stdout, because the header is what
+        # writes and it answers for the console as well as for the stream. A
+        # window that will not take the escapes at all is not a window with
+        # no room in it, and keeping the two questions apart is what leaves
+        # the refusal further down free to mean the one thing it says.
         drawable = (self.sticky is not None and not to_stdout(self.args)
-                    and sys.stdout.isatty())
+                    and self.sticky.drawable())
         wanted = not getattr(self.args, "sticky_header", False)
         if not drawable:
             self.args.sticky_header = wanted
