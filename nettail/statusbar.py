@@ -459,6 +459,26 @@ class StatusBar:
         # clears the screen without waiting for the next set of figures.
         self._last = None
 
+    @property
+    def reserved(self):
+        """Rows this bar is holding at the foot, which is none when it is off.
+
+        What the header asks when it pins itself part way through a run and
+        has to write a region covering both of them. Asked of the bar rather
+        than worked out by the caller, so that `STATUS_ROWS` goes on being a
+        number this module alone has to know.
+        """
+        return STATUS_ROWS if self.active else 0
+
+    def claim(self):
+        """Write the margins for the bar, when nothing else is writing them.
+
+        The public name for what the resize path has always done privately.
+        The header standing down mid-run is the other caller: it hands the
+        region over rather than resetting it, and this is the taking of it.
+        """
+        self._claim()
+
     def usable(self):
         """Whether a bar could be drawn here.
 

@@ -66,9 +66,22 @@ class StickyHeader:
         # folded into the one scroll region both features share.
         self.bottom_reserved = 0
 
+    def drawable(self):
+        """Whether this terminal takes a pinned header at all.
+
+        Deliberately not a question about room. `start` and `resume` ask that
+        for themselves, and keeping the two apart is what lets a refusal from
+        either of them mean the one thing it says. They were one question
+        until the k key had to tell them apart, and it had to because a
+        console that will not take the escapes is not a window with no room
+        in it, and answering the reader as though it were blames the window
+        for something the window never did.
+        """
+        return self.stream.isatty() and enable_windows_vt()
+
     def start(self):
         """Try to claim the top row. Returns True if the header is now pinned."""
-        if not self.stream.isatty() or not enable_windows_vt():
+        if not self.drawable():
             return False
         size = shutil.get_terminal_size(fallback=(0, 0))
         if size.lines - self.bottom_reserved < MIN_STICKY_ROWS or size.columns < 1:
@@ -110,6 +123,77 @@ class StickyHeader:
         self.stream.write(
             scroll_region(self.rows, HEADER_ROWS, self.bottom_reserved)
             + f"\033[{self.rows - self.bottom_reserved};1H")
+        self.stream.flush()
+
+    def resume(self, bottom_reserved=0):
+        """Pin the header again part way through a run. True if it is up.
+
+        Not `start()`, for the reason `StatusBar.resume` is not `start()`
+        either: that one clears the screen, which is right when the collector
+        is starting and quite wrong when it has been running for an hour. The
+        header needs a row nothing else is using, so one row is scrolled up,
+        and the flows that were on screen stay where they are a line higher.
+
+        What the foot has reserved is passed in rather than read off anything
+        here, because the bar is what knows whether it is up, and when it is
+        the region written here covers both reservations. That is the single
+        writer arrangement as it always was: the header owns the margins
+        whenever it is active, and the bar asks.
+        """
+        if self.active or not self.drawable():
+            return False
+        size = shutil.get_terminal_size(fallback=(0, 0))
+        if size.lines - bottom_reserved < MIN_STICKY_ROWS or size.columns < 1:
+            return False
+        self.rows, self.cols = size.lines, size.columns
+        self.bottom_reserved = bottom_reserved
+        self.active = True
+        head = HEADER_LINE[:self.cols]
+        self.stream.write(
+            # To the foot of whatever region is in force now, so that the
+            # newline scrolls that region rather than overwriting a row in the
+            # middle of it. Then the region covering both reservations, the
+            # header on the row which has just come free, and back to the foot
+            # for the flows to go on arriving at.
+            f"\033[{self.rows - bottom_reserved};1H\n"
+            + scroll_region(self.rows, HEADER_ROWS, self.bottom_reserved)
+            + f"\033[1;1H{C.BOLD}{head}{C.RESET}"
+            + f"\033[{self.rows - self.bottom_reserved};1H")
+        self.stream.flush()
+        return True
+
+    def unpin(self, handing_over=False):
+        """Give the top row back part way through a run, leaving the flows.
+
+        `stop()` is the end of a run: it resets the margins outright and parks
+        the cursor below them, which is what the summary and the shell prompt
+        after it want, and is wrong while flows are still arriving.
+
+        `handing_over` says whether anything else is going to write the
+        margins. The status bar does when it is up, and then nothing is
+        written here at all, because one pair of margins has one writer and
+        this is the moment which of the two it is changes. With nothing else
+        left the flows should have the whole window, so the region is reset
+        here, as `StatusBar.stop` resets it when the header is not there to
+        take it over.
+
+        The newline both of those `stop` methods end on is the one thing not
+        borrowed, and leaving it out is what makes the promise above hold.
+        They are ending a run, and want the summary and the shell prompt
+        after it below the flows rather than on top of them. Here the flows
+        are still arriving, into the row at the foot that is already blank
+        and waiting for the next one, so a newline sent there scrolls the
+        window on with nothing to put on the row it frees. That blank row
+        stays where it is put, and the reader is left looking at a gap
+        between the last flow before the keypress and the first one after it.
+        """
+        if not self.active:
+            return
+        self.active = False
+        self.bottom_reserved = 0
+        self.stream.write("\033[1;1H\033[2K")          # the header off row 1
+        if not handing_over:
+            self.stream.write(f"\033[r\033[{self.rows};1H")
         self.stream.flush()
 
     def check_resize(self):

@@ -35,6 +35,15 @@ HELP_KEY = "?"
 # WEB_EXCLUDED, and in the line under the banner that points a reader at it.
 QR_KEY = "q"
 
+# The key that pins the column header to the top row, or lets it scroll away.
+# Named once for the same reason again, and its places are the table below, the
+# dispatch, `toggles`, and `WEB_EXCLUDED`. The letter is arbitrary and there is
+# no better one to be had: s, h, p and b are the words this feature is made of
+# and every one of them is already a key, and `handle` lowercases what it is
+# given, so a capital is not a separate key to reach for. What k has going for
+# it is "keep", which is what the help line says.
+STICKY_KEY = "k"
+
 # Every key and what it does, in the order the listing shows them.
 #
 # The only place a key is written down. The dispatch in Controls.actions is
@@ -49,6 +58,8 @@ KEYS = (
     ("l", "list the local addresses seen, and their names"),
     ("c", "clear the statistics and restart the runtime clock"),
     ("b", "hide the status bar at the foot of the window, or bring it back"),
+    (STICKY_KEY, "keep the column header pinned to the top row, or let it "
+                 "scroll away"),
     ("d", "re-range the size colour scale as flows arrive, or pin it"),
     ("m", "ask for a new fixed top for the size colour scale"),
     ("h", "cycle host name resolution: off, dns, all"),
@@ -81,7 +92,16 @@ KEYS = (
 # appears to work and visibly does nothing, which is worse than not having it,
 # and publishing the symbol instead would put forty columns of block
 # characters through a table that has no reason to expect them.
-WEB_EXCLUDED = ("esc", QR_KEY)
+#
+# The sticky header key is here for that same duller reason. It pins a column
+# header to the top row of a terminal, and a browser's table has a head of its
+# own that is always there and cannot be sent away. So a browser pressing it
+# would move something no browser can see, which is the QR key's problem
+# exactly, and worse for having a button that would light up while the view
+# under it stayed as it was. It is the one setting that is kept back, which is
+# why `web_toggles` exists: what is published has to be what a browser can
+# press, or the page would look a key up against a button it was never given.
+WEB_EXCLUDED = ("esc", QR_KEY, STICKY_KEY)
 
 # The keys a browser may press but is given no button for.
 #
@@ -367,6 +387,7 @@ class Controls:
             "l": self._hosts,
             "c": self._clear_stats,
             "b": self._status_bar,
+            STICKY_KEY: self._sticky_header,
             "n": self._named_hosts,
             "p": self._show_macs,
             "v": self._verbose,
@@ -408,6 +429,7 @@ class Controls:
         return {
             " ": bool(self.paused),
             "b": bool(getattr(self.args, "hide_status", False)),
+            STICKY_KEY: bool(getattr(self.args, "sticky_header", False)),
             "d": bool(self.scale.dynamic),
             "e": bool(getattr(self.args, "external_only", False)),
             "f": bool(self.resolver.fqdn),
@@ -418,6 +440,21 @@ class Controls:
             "t": bool(getattr(self.args, "templates", False)),
             "v": bool(getattr(self.args, "verbose", False)),
         }
+
+    def web_toggles(self):
+        """`toggles`, less the keys a browser is not allowed to press.
+
+        The page looks each one up against a button it was given, so a key it
+        cannot press has nothing to report to and reporting it anyway would be
+        telling a reader about a setting they have no way to move. Filtered
+        here rather than left out of `toggles`, because `toggles` answers what
+        this run is doing and that is the same question whoever is asking: the
+        terminal has a sticky header whether or not a browser could ask for
+        one.
+        """
+        allowed = {KEY_CHARS.get(key, key) for key, _doc in web_keys()}
+        return {key: value for key, value in self.toggles().items()
+                if key in allowed}
 
     def handle(self, key, ask=None):
         """Act on one key. `ask` is what to call when a key needs an answer."""
@@ -573,6 +610,57 @@ class Controls:
             return "no room for the status bar in a window this size"
         self.args.hide_status = False
         return "status bar shown"
+
+    def _sticky_header(self):
+        """Pin the column header to the top row, or let it scroll away.
+
+        The b key's bargain, struck again for the other half of the window,
+        and the setting and the drawing come apart here for the same reason:
+        `sticky_header` says what the reader asked for and a run with no
+        terminal to draw on still has to remember being asked. What the guard
+        decides is whether anything is drawn, never what the setting says.
+
+        The handover is the part worth reading twice. One pair of margins has
+        one writer, and which of the two it is changes here: while the header
+        is up it writes the region for both of them, and the moment it stands
+        down the bar has to take it back, or the flows would go on scrolling
+        in a region two rows short of the window and the bar would be drawn
+        over. Going the other way the header is handed what the bar is
+        holding, so the region it writes covers the pair.
+        """
+        # Asked of the stream and not of where the keypress came from, which
+        # is the question the x key asks and for the same reason: a collector
+        # running as a service has a terminal at neither end, and the browser
+        # is exactly the arrangement it is most useful in. Redirected, there
+        # is no window to hold a region in and no header to pin, but the
+        # reader has still said what they want and a settings file can still
+        # hold it, so what a guard decides here is whether anything is drawn
+        # and never what the setting says.
+        #
+        # The header is asked rather than stdout, because the header is what
+        # writes and it answers for the console as well as for the stream. A
+        # window that will not take the escapes at all is not a window with
+        # no room in it, and keeping the two questions apart is what leaves
+        # the refusal further down free to mean the one thing it says.
+        drawable = (self.sticky is not None and not to_stdout(self.args)
+                    and self.sticky.drawable())
+        wanted = not getattr(self.args, "sticky_header", False)
+        if not drawable:
+            self.args.sticky_header = wanted
+            return ("column header pinned" if wanted
+                    else "column header unpinned")
+        if self.sticky.active:
+            self.sticky.unpin(handing_over=self.bar is not None
+                              and self.bar.active)
+            if self.bar is not None and self.bar.active:
+                self.bar.claim()
+            self.args.sticky_header = False
+            return "column header unpinned, it scrolls with the flows"
+        reserved = self.bar.reserved if self.bar is not None else 0
+        if not self.sticky.resume(reserved):
+            return "no room for the column header in a window this size"
+        self.args.sticky_header = True
+        return "column header pinned to the top row"
 
     def _named_hosts(self):
         """Show a host by its name in place of its address, where one is known.
