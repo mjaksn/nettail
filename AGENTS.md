@@ -68,9 +68,9 @@ opens. That is not a mirror of anything, since there is nowhere on a console
 to put it, but the rule above still holds inside it: every value in that
 dialog is worked out and written out by the collector and the page names no
 field, no flag and no protocol. See "Asking about a flow". The other is the
-filter box, which decides which new flows the page shows and nothing else,
-and the same rule holds there too: the collector says what a flow can be
-matched on. See "Filtering new flows".
+filter box, which decides which new flows one tab is sent and nothing else,
+and the same rule holds there too: the collector does the matching and the
+page draws what arrives. See "Filtering new flows".
 
 ## Commands
 
@@ -545,7 +545,11 @@ changes what the collector is doing, and everything that reads what it has
 counted, happens on the receive thread, which drains both queues between
 datagrams: a key goes to the same `Controls.handle` the terminal uses, and a
 question about a flow goes to `detail.report`, which is written for being
-called there. See "Asking about a flow" below.
+called there. See "Asking about a flow" below. The one addition is a tab's own
+subscription: subscribing, leaving and setting that subscription's filter all
+happen on the request thread, under the feed's lock, because they change what
+one browser is sent rather than what the collector is doing. See "Filtering
+new flows".
 
 Nine things about it are easy to break and quiet when broken.
 
@@ -741,18 +745,28 @@ The reasoning that is not in the code:
   table calls the same bytes inbound. That is two questions about one set of
   bytes rather than a disagreement, and it is the one semantic trap in the
   feature. It is written on the module, in the report, and in the README.
-- **The ring and its bound.** `cli.main` keeps `DETAIL_RING` flows by serial,
-  filled inside `web_flow`, so a run with nobody watching keeps none of it.
-  The figure matches the page's own `MAX_ROWS`: keeping more would be keeping
-  records for rows nothing can click, and keeping fewer would leave rows on
-  the page this could no longer describe. A filter in the page breaks that
-  match and there is nothing the ring can do about it: the filter is the
-  tab's own, so every published flow takes a place whether any tab showed it,
-  and a narrow filter leaves rows on the page whose flows have been pushed
-  out. Holding records per tab would need the collector to know what each tab
-  is hiding, which is the thing the filter was built not to tell it, so the
-  dialog says so instead. A serial the ring has dropped is the ordinary case
-  rather than an error, and `detail.report` answers it with the
+- **The ring and its bound.** `cli.main` keeps flows by serial in a
+  `detail.Ring`, filled in `publish_flow`, so a run with nobody watching keeps
+  none of it. The bound is `DETAIL_RING` per watcher, which matches the page's
+  own `MAX_ROWS`: keeping more would be keeping records for rows nothing can
+  click, and keeping fewer would leave rows on the page this could no longer
+  describe. Per watcher is the part that matters, and a filter is why. Each
+  watcher has a window of the last `DETAIL_RING` flows it was actually sent,
+  a flow nobody was sent is not kept at all, and a record stays while any
+  window holds it, so the flows a narrow filter hid cannot push out its rows,
+  not even with an unfiltered tab open beside it. One more window, of the last
+  `DETAIL_RING` flows sent to anybody, covers a tab back from the background:
+  that is a new subscription with an empty window, and its rows were sent to
+  the one before, whose window went when it did. That reaches exactly as far
+  as the single ring used to, and no further, which is why a filtered tab that
+  has been away can find its older rows gone. The worst case is five windows'
+  worth of records at `MAX_CLIENTS` of four, each a record and a reference to
+  a header. Windows of watchers that have left are let go on the receive
+  thread when the next flow is kept, from `Feed.ids`, rather than by the
+  request thread that saw the tab close, because the ring is the receive
+  thread's. `test_detail` walks the windows with a bound of three and
+  `test_web_keys` checks a hidden flow cannot be asked about. A serial the
+  ring has dropped is the ordinary case rather than an error, and `detail.report` answers it with the
   endpoint and pair panels, built from the addresses the ask carried. That is
   what the ends are on the ask for.
 - **The serial is never reset, not even by the c key.** A page holding rows
@@ -829,30 +843,56 @@ their own, press Refresh, close it three ways, and type `x` inside it.
 
 ### Filtering new flows
 
-The box beside the Keys button takes one term, and a flow arriving after it is
-applied is shown only when the term is exactly one of that flow's `terms`,
-with case folded. It is the second thing on the page's side of the line, after
-Follow: nothing about it reaches the collector, so it is in neither `KEYS` nor
-the greeting, has no flag, and works under `--web-readonly`.
+The box beside the Keys button takes one term, and after it is applied a tab
+is sent only the flows the term is exactly one of the addresses, ports,
+service names or hostnames of, with case folded. The term belongs to one
+tab's subscription: two tabs filter independently, the terminal is untouched,
+it is in neither `KEYS` nor the greeting's key table, has no flag, and works
+under `--web-readonly`, since it changes what one browser is sent and nothing
+the collector is doing.
 
-Four things about it are easy to break.
+**The collector does the matching, and the details dialog is why.** It was
+written in the page first, which is where a filter over a table naturally
+goes, and it broke the ring: every flow published took a place in
+`DETAIL_RING` whether a tab showed it or not, so a narrow filter on a busy link
+let four thousand hidden flows push out the records of rows still near the
+bottom of the page. The collector cannot keep records by what a tab shows
+unless it knows what a tab shows, so the filter moved to where the flows are
+sent from. See "The ring and its bound" above for what the ring does with that.
 
-- **What a flow can be matched on is `filter_terms` in `display.py`**, sent as
-  `terms` on every flow `web_flow` publishes. It asks the questions `endpoint`
-  asks, the same way: both ends from `flow_endpoints`, a port only where the
-  row prints one, `service_name` for each port and `resolver.lookup` for each
-  address. Matching against the cells instead would be the page working a cell
-  out for itself, and against `record` it would be the page naming fields and
-  still not knowing a service name. `test_web_server` greps `passes` for both.
-- **Case is folded in the page, on both sides, and not in Python.** Folding
-  one side with `str.lower` and the other with `toLowerCase` is two opinions
-  about what a capital is, and a hostname from mDNS can be any script.
-- **It is forward only, and the note is what makes that readable.** Nothing
-  already on the page is touched, and applying or clearing writes a row
-  through the queue like any other note, which marks where the filtering
-  starts. The check is the first thing `addFlow` does, so the lines the p and v
-  keys put under a flow go with a flow that is held back rather than arriving
-  under nothing; `test_web_server` holds that order.
+Six things about it are easy to break.
+
+- **What a flow can be matched on is `filter_terms` in `display.py`.** It asks
+  the questions `endpoint` asks, the same way: both ends from
+  `flow_endpoints`, a port only where the row prints one, `service_name` for
+  each port and `resolver.lookup` for each address. `publish_flow` works them
+  out only while `Feed.filtering` says some tab has a filter, and they never go
+  in the payload: the page is sent what it asked for and has nothing to look
+  through. `test_web_server` greps the page for `terms` to keep it that way.
+- **Case is folded once, in Python, with `casefold`**, on the term in
+  `Client.set_term` and on a flow's terms in `Feed.flow`. One fold on each side
+  in the same language is the only way the two agree about what a capital is,
+  and a hostname from mDNS can be in any script.
+- **A request thread sets the filter itself, under the feed's lock.** That is
+  the one thing a request thread does beyond putting a key or a question on a
+  queue, and it is allowed for the reason subscribing is: it changes what one
+  browser is sent, not what the collector is doing. The lock is also what makes
+  it exact. The `filter` event goes on that client's queue in the same breath
+  the filter changes, and every publish takes the same lock, so the event sits
+  exactly between the last flow sent under the old filter and the first under
+  the new. The page writes its note when that event arrives rather than when
+  it posts, which is what puts the note on the right line.
+- **A flow published without terms is let through.** `terms` is None when the
+  publisher asked `filtering` a moment before a filter was set. A row too many
+  under a filter just applied is a smaller wrong than a row lost from a view
+  that asked for everything, and `test_web_feed` pins which way round it is.
+- **A tab back from the background asks for its filter in the stream's query.**
+  Giving the stream up makes a new subscription, and setting the filter on it
+  with a second request would let everything published in between through.
+  The page puts the term the collector last confirmed in the query rather than
+  whatever is in the box, so a reconnect cannot be refused over a term the
+  collector would have refused, and it sends anything newer once the greeting
+  has named the subscription.
 - **A term applies on Enter or blur, and an empty box applies at once.** The
   match is exact, so applying as each character is typed would throw away
   every flow that arrived while `443` went through `4` and `44`. Clearing can
@@ -863,7 +903,9 @@ Four things about it are easy to break.
 
 Nothing in the suite runs the page, so the filter is a manual check too. Send
 traffic, filter on a port and on a service name, watch rows stop arriving and
-the rows above stay, and clear it.
+the rows above stay, click a row shown under the filter once a few thousand
+hidden flows have gone by, switch away from the tab for longer than the grace
+and back, and clear it.
 
 ## There is a QR encoder in here
 

@@ -823,19 +823,28 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
 
   // ---- the filter ------------------------------------------------------
   //
-  // One term, typed into the box beside the Keys button, and a flow that
-  // arrives after it is applied is shown only when the term is exactly one of
-  // the flow's `terms`, with case folded on both sides. What those are is the
-  // collector's answer, for the reason the cells are: a service name is what
-  // that machine's services database says, and nothing here could read one
-  // back out of a painted, trimmed cell without being a second opinion.
+  // One term, typed into the box beside the Keys button. The collector does
+  // the matching and this page draws what it is sent: after the term is
+  // applied, a flow reaches this tab only when the term is exactly one of its
+  // addresses, ports, service names or hostnames, case aside. Nothing here
+  // looks at a flow to decide, for the reason nothing here works a cell out:
+  // a service name is what that machine's services database says.
   //
-  // It is this tab's business and nobody else's, like Follow: nothing about
-  // it reaches the collector, two tabs on one run filter independently, and
-  // it works under --web-readonly for that reason. It is also forward only.
-  // Rows already on the page stay as they are, which is why applying or
-  // clearing it writes a note: the note is the line in the history above
-  // which the rows were not filtered and below which they were.
+  // It lives in the collector because of the details dialog. The collector
+  // keeps a record for each row a tab could click, and a filter the collector
+  // could not see would let the flows it hid push those records out while
+  // their rows were still on the page. Known there, the bound is the flows
+  // each tab was actually sent.
+  //
+  // It is still this tab's own. Two tabs on one run filter independently,
+  // the terminal is untouched, and it works under --web-readonly, since it
+  // changes what one browser is sent and nothing the collector is doing. It
+  // is forward only as well: rows already on the page stay, and the note it
+  // writes is the line above which rows were not filtered and below which
+  // they were. The note is written when the collector's `filter` event
+  // arrives rather than when the term is sent, because that event sits in the
+  // stream exactly between the last flow sent under the old filter and the
+  // first under the new one.
   //
   // Applied on Enter, or when the box loses focus, rather than as each
   // character is typed. The match is exact, so a term half typed matches
@@ -848,35 +857,64 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
   // answers Enter in a search box with its own `search` event is not obliged
   // to fire `change` too, and a box documented as applying on Enter that
   // waited for a click elsewhere would let every flow through meanwhile.
-  // Both can arrive for one press, which costs nothing: applying the term
-  // already applied returns before it writes a note.
+  // Both can arrive for one press, which costs nothing: a term already asked
+  // for is not asked for twice.
   //
-  // In the page from the start rather than shown by the greeting. It needs
-  // nothing the collector sends, so there is nothing to wait for, and a page
-  // that never gets a greeting, refused as a fifth tab or opened while the
-  // collector is still starting, is no reason for the box to be missing.
+  // In the page from the start rather than shown by the greeting, so that a
+  // page whose greeting has not come, or never will, still has the box. A term
+  // typed then waits for the greeting and is sent the moment there is a
+  // subscription to set it on.
   var filterBox = document.getElementById("filter");
-  var filterTerm = "";
+  // The term as the reader last applied it, trimmed. What is sent.
+  var filterWanted = "";
+  // The term the collector last said this tab's flows are under. What the
+  // note and the box's border follow, and what a reconnect asks for in its
+  // query: a term the collector has already taken once, so a reconnect cannot
+  // be refused over a term it would have refused.
+  var filterTaken = "";
+  // This tab's subscription, from the greeting, or null while there is none.
+  var clientId = null;
 
   function applyFilter() {
-    var shown = filterBox.value.trim();
-    var term = shown.toLowerCase();
-    if (term === filterTerm) { return; }
-    filterTerm = term;
-    filterBox.setAttribute("data-on", term ? "1" : "0");
-    note("filter", term
-      ? "Filtering: new flows are shown only when an address, port, service " +
-        "or hostname is exactly \"" + shown + "\". Rows above are as they were."
-      : "Filter cleared: every new flow is shown again.");
+    var term = filterBox.value.trim();
+    if (term === filterWanted) { return; }
+    filterWanted = term;
+    sendFilter();
   }
 
-  function passes(payload) {
-    if (!filterTerm) { return true; }
-    var terms = payload.terms || [];
-    for (var i = 0; i < terms.length; i++) {
-      if (String(terms[i]).toLowerCase() === filterTerm) { return true; }
-    }
-    return false;
+  function sendFilter() {
+    // A tab with no subscription has nothing to set. The greeting of the next
+    // one compares what it was given with what is wanted and sends then.
+    if (!stream || !clientId) { return; }
+    var term = filterWanted;
+    fetch(BASE + "/filter", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ client: clientId, term: term })
+    }).then(function (response) {
+      // A 404 is a subscription that has just gone, and the next greeting
+      // sends the term again, so it is not worth a line in the table.
+      if (!response.ok && response.status !== 404) {
+        filterWanted = filterTaken;
+        note("gap", "the collector refused that filter (" + response.status + ")");
+      }
+    }).catch(function () {
+      filterWanted = filterTaken;
+      note("gap", "could not reach the collector to set that filter");
+    });
+  }
+
+  // What the collector says this tab is now under, from a `filter` event or a
+  // greeting. The note is written only when that is a change, so a tab coming
+  // back from the background under the filter it left with says nothing.
+  function filterTook(term) {
+    filterBox.setAttribute("data-on", term ? "1" : "0");
+    if (term === filterTaken) { return; }
+    filterTaken = term;
+    note("filter", term
+      ? "Filtering: new flows are shown only when an address, port, service " +
+        "or hostname is exactly \"" + term + "\". Rows above are as they were."
+      : "Filter cleared: every new flow is shown again.");
   }
 
   filterBox.addEventListener("change", applyFilter);
@@ -888,9 +926,6 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
   });
 
   function addFlow(payload) {
-    // Before anything is built, so the lines the p and v keys put under a
-    // flow go with the flow rather than arriving under nothing.
-    if (!passes(payload)) { return; }
     var cells = payload.cells || [];
     var tr = document.createElement("tr");
     tr.className = "flow";
@@ -1666,8 +1701,10 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
     // close whichever stream is current, and every handler works from its own
     // `es` so that one left over from a previous connection cannot answer for
     // the one that replaced it.
-    var es = new EventSource(BASE + "/events");
+    var es = new EventSource(BASE + "/events" + (filterTaken
+      ? "?filter=" + encodeURIComponent(filterTaken) : ""));
     stream = es;
+    clientId = null;
 
     es.addEventListener("hello", function (event) {
       var hello = JSON.parse(event.data);
@@ -1700,6 +1737,18 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
         note("notice", "reconnected to the collector");
       }
       if (status) { showStatus(status); }
+      // Every greeting, not only the first: each connection is a subscription
+      // of its own, with an id of its own, and the filter it arrived under.
+      clientId = hello.client || null;
+      if (typeof hello.filter_max === "number") {
+        filterBox.maxLength = hello.filter_max;
+      }
+      filterTook(hello.filter || "");
+      if (filterWanted !== filterTaken) { sendFilter(); }
+    });
+
+    es.addEventListener("filter", function (event) {
+      filterTook(JSON.parse(event.data).term || "");
     });
 
     es.addEventListener("flow", function (event) {

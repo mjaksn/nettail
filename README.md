@@ -1028,18 +1028,18 @@ holds them still until Refresh is pressed. `Esc`, the backdrop and **Close**
 all shut the dialog. Keys are not forwarded while it is open, so typing `x` in
 it does not clear the table underneath.
 
-The collector keeps the last four thousand flows it published, which is as many
-rows as the page itself keeps. Clicking a row older than that says so, and still
-shows the two endpoint panels and the pair, since those are kept for as long as
-the run. A row left over from before a restart says the same thing, and it is
-worth knowing that it does: a bookmarked tab reconnects with the previous run's
-rows still on the page, and none of them can be looked up in the run that
+The collector keeps the last four thousand flows each tab was sent, which is as
+many rows as the page itself keeps. Clicking a row older than that says so, and
+still shows the two endpoint panels and the pair, since those are kept for as
+long as the run. A row left over from before a restart says the same thing, and
+it is worth knowing that it does: a bookmarked tab reconnects with the previous
+run's rows still on the page, and none of them can be looked up in the run that
 replaced it.
 
-A [filter](#filtering-new-flows) is the one way a row near the bottom of the
-page can say it too. The collector counts the flows it published, not the ones
-a tab chose to show, so a narrow filter on a busy link can leave rows on the
-page whose flows four thousand hidden ones have since pushed out.
+A tab that went to the background and came back is a new watcher as far as the
+collector is concerned. Its older rows stay clickable for as long as they are
+among the last four thousand flows sent to anybody, which on a busy link under a
+narrow filter may not be long.
 
 It works under `--web-readonly`. Asking what a flow was changes nothing, and a
 view served for watching is still a view worth reading properly.
@@ -1195,15 +1195,17 @@ where the narrowing starts. Emptying the box shows every new flow again
 straight away, without waiting for Enter, and that includes emptying it with
 the clear button or the Escape key where a browser gives the box either.
 
-The filter belongs to the tab. Nothing about it reaches the collector, the
-terminal is unaffected, two tabs on one run can filter differently, and it
-works under `--web-readonly`. It is not remembered across a reload.
+The filter belongs to the tab. The terminal is unaffected, two tabs on one run
+can filter differently, and it works under `--web-readonly`, since it changes
+what one browser is sent and nothing the collector is doing. It survives the
+tab going to the background and coming back, and is not remembered across a
+reload.
 
-Because the collector does not know what a tab is hiding, the flows a filter
-hides still take their place among the four thousand it keeps for the
-[details dialog](#clicking-a-flow). Under a narrow filter a row can outlive
-its flow there while it is still on the page, and clicking it then shows the
-two endpoint panels and the pair without the flow itself.
+The collector does the matching rather than the page, so a filtered tab is
+never sent the flows it would have thrown away. That is what keeps the
+[details dialog](#clicking-a-flow) working under a filter: the collector keeps
+the last four thousand flows each tab was sent, not the last four thousand it
+published, so flows a filter hid cannot push out the ones still on the page.
 
 ### What it is safe to do with
 
@@ -1293,10 +1295,9 @@ of stdout. `--web-colour off` is how a run says otherwise.
   told how many, rather than being shown a gap that looks like continuity.
 - The page keeps the last few thousand rows and trims the rest, saying so when
   it does. A tab left open on a busy link would otherwise become unusable.
-- The collector keeps the last four thousand flows a browser can ask about,
-  matching what the page itself keeps. An older row is still clickable and
-  says the flow itself has gone. Under a filter the page holds rows older than
-  that, because the flows it hid still count towards the four thousand.
+- The collector keeps the last four thousand flows each browser was sent, to be
+  asked about, matching what the page itself keeps. An older row is still clickable and
+  says the flow itself has gone.
 - IPv4 only, matching the collector socket.
 - The page fetches one thing besides itself, `flags.woff2`, and only when
   there are country flags on it to draw, and asks one route a question, which

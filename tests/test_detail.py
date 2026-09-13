@@ -478,5 +478,37 @@ check("and stripping leaves a serial a number rather than a string",
       plain(detail.report((1, 7, ("192.168.1.10", "8.8.8.8")), ring, t,
                           Named(), now=NOW))["n"] == 7)
 
+# -- the ring is bounded per watcher -----------------------------------------
+#
+# A single ring of the last N flows published let a narrow filter push out the
+# records of its own rows: the flows it hid went on taking places. Each
+# watcher keeps a window of what it was sent instead, and there is one window
+# more of everything sent to anybody, for a tab that comes back from the
+# background under a new subscription. A bound of three makes all of it
+# visible in a handful of flows.
+
+kept = detail.Ring(bound=3)
+both = {"wide", "narrow"}
+kept.keep(1, ("one", "hdr"), ["wide", "narrow"], both)
+for serial in (2, 3, 4, 5):
+    kept.keep(serial, (serial, "hdr"), ["wide"], both)
+check("a flow the narrow watcher was sent outlives the hidden ones after it",
+      1 in kept and kept[1] == ("one", "hdr"), str(len(kept)))
+check("while one only the wide watcher had goes with its window",
+      2 not in kept and all(serial in kept for serial in (3, 4, 5)))
+check("so the ring holds the windows' union and no more", len(kept) == 4,
+      str(len(kept)))
+kept.keep(6, (6, "hdr"), [], both)
+check("a flow nobody was sent is not kept at all", 6 not in kept)
+kept.keep(7, (7, "hdr"), ["wide"], {"wide"})
+check("and a watcher that has gone lets its window go",
+      1 not in kept and len(kept) == 3, str(len(kept)))
+check("a report names the bound in its words, not how many happen to be held",
+      "most recent 3 " in facts_of(plain(detail.report(
+          (1, 1, ("192.168.1.10", "8.8.8.8")), kept, t, resolver,
+          now=NOW))["sections"][0])["This flow"])
+check("and the default bound is the page's own row count", detail.DETAIL_RING
+      == main.DETAIL_RING == 4000)
+
 resolver.shutdown()
 finish("detail")

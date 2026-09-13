@@ -28,6 +28,7 @@ an address and a port exactly as they do for a terminal row.
 
 import heapq
 import time
+from collections import deque
 from datetime import datetime
 
 from netflume import (
@@ -52,6 +53,88 @@ from .values import human_bytes, human_count, human_duration
 # capped in `traffic.py` at a figure meant to keep the memory honest rather
 # than to be read, and two thousand rows is not a table anybody reads.
 DETAIL_ROWS = 20
+
+# How many flows each watcher can still ask about. Matched to the page's own
+# MAX_ROWS, which is the number of rows a browser holds before it starts
+# dropping the oldest: keeping fewer would leave rows on the page whose flow
+# this could no longer describe, and keeping more would be keeping records for
+# rows nothing can click. It is a record and a reference to the header its
+# datagram already owns, so four thousand of them is a few megabytes, and
+# `Ring` holds at most this many per watcher and this many again besides.
+DETAIL_RING = 4000
+
+
+class Ring:
+    """The flows a browser can still click on, by the serial each was sent with.
+
+    The bound is per watcher rather than one for the whole run, and that is the
+    point of this being a class rather than a dict. A tab's filter decides
+    which flows it is sent, so a single ring of the last four thousand flows
+    published would be pushed along by flows a narrow filter hid, and a row
+    still near the bottom of that tab would click through to a flow already
+    let go. So each watcher has a window of the last `bound` flows it was
+    actually sent, and a record stays while any window holds it.
+
+    There is one more window beside those, of the last `bound` flows sent to
+    anybody, and it is what keeps a tab that comes back from the background
+    working. Giving the stream up and taking it back makes a new subscription
+    with a window of its own, empty, and the rows already on the page were
+    sent to the one before it, whose window went with it. Those rows are
+    covered by this one as far as it reaches, which is exactly as far as a
+    single ring reached before filters existed.
+
+    Owned by the receive thread like everything `report` reads. The windows
+    of watchers that have gone are let go when the next flow is kept, from
+    the ids the feed says are still attached, rather than on the request
+    thread that noticed the tab close.
+    """
+
+    def __init__(self, bound=DETAIL_RING):
+        self.bound = bound
+        self._records = {}
+        # How many windows hold each serial. A record goes when this does.
+        self._held = {}
+        self._latest = deque()
+        self._windows = {}
+
+    def __contains__(self, serial):
+        return serial in self._records
+
+    def __getitem__(self, serial):
+        return self._records[serial]
+
+    def __len__(self):
+        return len(self._records)
+
+    def keep(self, serial, record, takers, attached):
+        """Remember a flow the watchers in `takers` were sent.
+
+        `attached` is every watcher still subscribed. A flow nobody was sent
+        is not kept at all, since there is no row anywhere to click.
+        """
+        for gone in [key for key in self._windows if key not in attached]:
+            for held in self._windows.pop(gone):
+                self._release(held)
+        if not takers:
+            return
+        self._records[serial] = record
+        self._hold(self._latest, serial)
+        for taker in takers:
+            self._hold(self._windows.setdefault(taker, deque()), serial)
+
+    def _hold(self, window, serial):
+        window.append(serial)
+        self._held[serial] = self._held.get(serial, 0) + 1
+        if len(window) > self.bound:
+            self._release(window.popleft())
+
+    def _release(self, serial):
+        left = self._held[serial] - 1
+        if left:
+            self._held[serial] = left
+        else:
+            del self._held[serial]
+            del self._records[serial]
 
 # The name of each TCP flag, keyed by the letter netflume writes it as. Keyed
 # that way on purpose: `test_detail` holds this table and `TCP_FLAG_BITS` to
@@ -780,7 +863,7 @@ def report(ask, ring, tally, resolver, now=None):
         ends = flow_endpoints(rec)
         sections = [flow_section(rec, hdr, resolver), datagram_section(hdr)]
     else:
-        sections = [_gone(serial, len(ring))]
+        sections = [_gone(serial, getattr(ring, "bound", DETAIL_RING))]
     src = ends[0] if ends else None
     dst = ends[1] if len(ends) > 1 else None
     return {
@@ -810,12 +893,10 @@ def _gone(serial, kept):
     Two ways to arrive and they are worth telling apart. A serial the ring
     does not answer for is the ordinary one, and it covers three cases that
     read the same to a reader: a row that has scrolled far enough up that the
-    ring has dropped its flow, a row still near the bottom of a tab whose
-    filter hid the newer flows that pushed it out, and a row left over from
-    before a restart, whose serial this run has either not reached or has
-    given to something else. The filter is the one the ring cannot be sized
-    for: it lives in the page, so every flow published takes a place here
-    whether any tab showed it or not. A
+    ring has dropped its flow, a row sent to a subscription the tab has since
+    given up and taken back, which `Ring` covers only as far as its window of
+    everything sent reaches, and a row left over from before a restart, whose
+    serial this run has either not reached or has given to something else. A
     row carrying no serial at all is one published by a collector that was not
     stamping them.
 
@@ -832,9 +913,9 @@ def _gone(serial, kept):
     return {"title": "Flow",
             "facts": [["This flow",
                        "the collector is not holding this flow. It keeps the "
-                       "most recent %s it published, and this row is not "
-                       "among them: it has scrolled that far up, a filter in "
-                       "this tab has hidden that many newer flows since, or "
+                       "most recent %s flows each tab was sent, and this row "
+                       "is not among them: it has scrolled that far up, this "
+                       "tab has been in the background since it arrived, or "
                        "it is left over from before a restart. "
                        "The figures below are for its two addresses, which "
                        "are kept for as long as the run."

@@ -26,16 +26,22 @@ parsed, and it is treated as public.
   view started being narrowed is there to see. Emptying the box shows every
   new flow again at once.
 
-  It belongs to the tab. Nothing reaches the collector, two tabs on one run
-  filter independently, the terminal is unaffected, and it works under
-  `--web-readonly`. What a flow can be matched on is still the collector's to
-  say, so each flow the feed publishes now carries a `terms` list beside its
-  cells; `--json` output is unchanged.
+  It belongs to the tab. Two tabs on one run filter independently, the
+  terminal is unaffected, it works under `--web-readonly`, and it survives the
+  tab going to the background and back. The collector does the matching, so a
+  filtered tab is never sent the flows it would have thrown away; `--json`
+  output is unchanged.
 
-  The flows a filter hides still count towards the four thousand the collector
-  keeps for the details dialog, since it does not know what a tab is hiding.
-  Under a narrow filter a row can outlive its flow while it is still on the
-  page, and the dialog now names that as one of the reasons a flow has gone.
+### Changed
+
+- **The collector keeps the last four thousand flows each browser was sent
+  for the details dialog, rather than the last four thousand it published.**
+  Under a narrow filter the old bound let the flows the filter hid push out
+  the records of rows still near the bottom of the page, and clicking one said
+  the flow had gone. A flow no browser was sent is no longer kept at all. A
+  tab back from the background is a new watcher, and its older rows are kept
+  for as long as they are among the last four thousand flows sent to anybody,
+  which is as far as the old bound ever reached.
 
 ## [0.16.0] - 2026-09-10
 

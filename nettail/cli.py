@@ -92,17 +92,6 @@ from .web import (
     web_token_arg,
 )
 
-# How many flows are kept where a browser can ask about one. Filled inside
-# `web_flow`, so a run with nobody watching keeps none of it and pays nothing.
-#
-# Matched to the page's own MAX_ROWS, which is the number of rows a browser
-# holds before it starts dropping the oldest: keeping more here would be
-# keeping records for rows nothing can click, and keeping fewer would leave
-# rows on the page whose flow this could no longer describe. It is a record
-# and a reference to the header its datagram already owns, so four thousand
-# of them is a few megabytes while a tab is open and nothing when none is.
-DETAIL_RING = 4000
-
 
 def should_show(rec, args):
     if not args.external_only:
@@ -1784,12 +1773,10 @@ def main():
     # Bounded for the same reason and more tightly, since answering one is
     # real work rather than a dispatch; `web.ASK_QUEUE_MAX` says how much.
     ask_queue = queue.Queue(maxsize=ASK_QUEUE_MAX)
-    # The flows a browser may still ask about, newest last, keyed by the
-    # serial `web_flow` stamped on each. A dict rather than a deque because
-    # what arrives is a serial and what is wanted is the record under it, and
-    # a dict has kept its insertion order since 3.7, which is what makes
-    # dropping the oldest one line.
-    detail_ring = {}
+    # The flows a browser may still ask about, keyed by the serial `web_flow`
+    # stamped on each and bounded per watcher; `detail.Ring` says why per
+    # watcher is the bound that matters.
+    detail_ring = detail.Ring()
     # What the next flow published to a browser will be called. Never reset,
     # not even by the c key: a page holding rows from before a clear must not
     # find them answered by flows from after it.
@@ -2215,15 +2202,10 @@ def main():
         endpoint and pair statistics are keyed by address and outlive any one
         flow.
 
-        The ring is filled here rather than at the tally, which is the other
-        place every flow passes, because that one runs whether or not anybody
-        is watching and this must cost nothing when nobody is.
+        Only builds. `publish_flow` below sends it and keeps the record.
         """
         flow_serial[0] += 1
         serial = flow_serial[0]
-        detail_ring[serial] = (rec, hdr)
-        while len(detail_ring) > DETAIL_RING:
-            del detail_ring[next(iter(detail_ring))]
         return {
             "cells": [for_web(unpad(painted)) for _plain, painted
                       in row_cells(rec, hdr, args, resolver, scale,
@@ -2238,18 +2220,33 @@ def main():
                        else flow_record(rec, hdr, resolver)),
             "n": serial,
             "ends": list(flow_endpoints(rec)),
-            # What the page's filter box compares against. Plain rather than
-            # painted, and never drawn: it is there to be matched, and the
-            # cells above are what the reader sees.
-            "terms": filter_terms(rec, resolver),
         }
+
+    def publish_flow(rec, hdr, record=None):
+        """Send one flow to the browsers whose filter it passes, and keep it.
+
+        The terms a filter matches on are worked out only while some tab has
+        a filter, since otherwise nothing would read them, and they stay here
+        rather than riding in the payload: the collector does the matching, so
+        a page is sent the flows it asked for and nothing it would throw away.
+
+        The ring is filled here rather than at the tally, which is the other
+        place every flow passes, because that one runs whether or not anybody
+        is watching and this must cost nothing when nobody is. It is filled
+        from what the feed says it delivered and to whom, which is what lets a
+        record stay for as long as some tab could still be showing its row.
+        """
+        payload = web_flow(rec, hdr, record=record)
+        terms = filter_terms(rec, resolver) if bus.filtering else None
+        takers = bus.flow(payload, terms)
+        detail_ring.keep(payload["n"], (rec, hdr), takers, bus.ids())
 
     def show(rec, hdr, record=None):
         """Put one flow on screen, with the header cadence around it.
 
         `record` is the JSON object for this flow where one has already been
         built, which is the case on a run writing them to a file, and None on
-        a run that was asked for none. It is handed to `web_flow` for the
+        a run that was asked for none. It is handed to `publish_flow` for the
         reason that function takes it at all: a browser watching a run that is
         also writing a file should not have a second copy of the record made
         for it.
@@ -2264,7 +2261,7 @@ def main():
         # flows to a browser while the terminal was still holding them, which
         # is the opposite of what the space key is for.
         if bus.active:
-            bus.flow(web_flow(rec, hdr, record=record))
+            publish_flow(rec, hdr, record=record)
         controls.lines += 1
         # While the bar is up it does the re-measuring for both of them, on a
         # clock rather than a line count. Two pollers with two ideas of how
@@ -2332,7 +2329,7 @@ def main():
                         # from it, only from the browser, so resuming owes the
                         # browser the flows and stdout nothing.
                         if bus.active:
-                            bus.flow(web_flow(held_rec, held_hdr))
+                            publish_flow(held_rec, held_hdr)
                     else:
                         show(held_rec, held_hdr)
 
@@ -2459,7 +2456,7 @@ def main():
                         if controls.paused:
                             controls.hold(rec, hdr)
                         else:
-                            bus.flow(web_flow(rec, hdr, record=out))
+                            publish_flow(rec, hdr, record=out)
                 elif controls.paused:
                     controls.hold(rec, hdr)
                 else:

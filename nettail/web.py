@@ -72,6 +72,7 @@ import socket
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlsplit
 
 # Echoes the collector's own 2055, which is the whole argument for it: somebody
 # who remembers the port flows arrive on can guess the port they are served on.
@@ -116,6 +117,11 @@ DEFAULT_DETAIL_REFRESH = 5.0
 # How large a request body may be. A control message is a few dozen bytes;
 # anything bigger than this is not a browser pressing a key.
 BODY_MAX = 4096
+
+# The longest filter term a browser may set. A hostname is at most 253
+# characters and everything else a flow can be matched on is far shorter, so a
+# longer term could match nothing, and the term is said back to the page.
+FILTER_MAX = 255
 
 # How long a connection may take to say what it wants before it is dropped.
 #
@@ -622,11 +628,11 @@ def _frame(event, payload):
 
 
 class _Handler(BaseHTTPRequestHandler):
-    """Five routes and nothing else.
+    """Six routes and nothing else.
 
-    The page, the stream, the flags font, one key press and one question about
-    a flow. Matched exactly rather than by prefix, so a path this does not
-    name is a 404 and never a file on disk.
+    The page, the stream, the flags font, one key press, one question about a
+    flow and one tab's filter. Matched exactly rather than by prefix, so a
+    path this does not name is a 404 and never a file on disk.
     """
 
     # Named so that a response says as little about what is running as it can.
@@ -792,7 +798,16 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _stream(self):
         site = self.site
-        client = site.bus.subscribe(limit=MAX_CLIENTS)
+        # A tab that gave its stream up in the background comes back with its
+        # filter in the query, so that it is filtering from the first flow of
+        # the new subscription rather than from whenever a second request
+        # caught up with it. Refused rather than trimmed when it is not a
+        # term, since the page never sends one that is not.
+        term = parse_qs(urlsplit(self.path).query).get("filter", [""])[-1]
+        if len(term) > FILTER_MAX:
+            self._refuse(400, "a filter term is at most %d characters" % FILTER_MAX)
+            return
+        client = site.bus.subscribe(limit=MAX_CLIENTS, term=term)
         if client is None:
             # Either the cap is reached or the collector is going away. Both are
             # temporary from the browser's point of view, so both say so.
@@ -835,7 +850,15 @@ class _Handler(BaseHTTPRequestHandler):
     def _pump(self, client):
         """Move events from one client's queue onto its socket until it ends."""
         bus = self.site.bus
-        self._send(_frame("hello", bus.hello()))
+        # The greeting is everybody's but for two things that are this
+        # subscription's own: the id the page changes its filter by, and the
+        # filter it is under, which a tab coming back from the background
+        # compares with the one it asked for.
+        greeting = bus.hello()
+        greeting["client"] = client.id
+        greeting["filter"] = client.term
+        greeting["filter_max"] = FILTER_MAX
+        self._send(_frame("hello", greeting))
         idle_since = time.time()
         while True:
             events, dropped = bus.drain(client)
@@ -921,7 +944,7 @@ class _Handler(BaseHTTPRequestHandler):
         route = self._checked()
         if route is None:
             return
-        if route not in ("key", "detail"):
+        if route not in ("key", "detail", "filter"):
             self._refuse(404, "not found")
             return
 
@@ -929,7 +952,7 @@ class _Handler(BaseHTTPRequestHandler):
         # the path already means an attacker has nothing to aim with, but a
         # request that says it came from somewhere else is refused on its own
         # account rather than on the strength of the token alone. Shared by
-        # both routes, because the reasoning has nothing to do with what the
+        # every route, because the reasoning has nothing to do with what the
         # request goes on to ask for.
         origin = self.headers.get("Origin")
         if origin and not self._origin_ok(origin):
@@ -938,6 +961,8 @@ class _Handler(BaseHTTPRequestHandler):
 
         if route == "detail":
             self._detail(raw)
+        elif route == "filter":
+            self._filter(raw)
         else:
             self._key(raw)
 
@@ -1034,12 +1059,56 @@ class _Handler(BaseHTTPRequestHandler):
             return
         self._queued()
 
+    def _filter(self, raw):
+        """One tab's filter, set on its own subscription.
+
+        Allowed under --web-readonly for the reason the detail route is: it
+        changes what one browser is sent and nothing about what the collector
+        is doing. Set straight on the feed rather than queued for the receive
+        loop, because the feed's lock is what every publish takes and so is
+        already the thing that makes the change land between two flows, and
+        a queue would only make it land later.
+
+        The term is never put in front of anybody but the tab that set it,
+        which receives it back inside its own `filter` event, so it needs no
+        more checking than being a string of reasonable length. The client id
+        is only ever compared for equality, never with `compare_digest`, so it
+        can be any string at all and an unknown one simply finds nothing.
+        """
+        try:
+            payload = json.loads(raw.decode("utf-8"))
+            if not isinstance(payload, dict):
+                raise TypeError
+            client = payload["client"]
+            term = payload["term"]
+        except (ValueError, KeyError, TypeError, UnicodeDecodeError):
+            self._refuse(400, "expected a client and a term")
+            return
+        if set(payload) - {"client", "term"}:
+            self._refuse(400, "that is not a filter this collector takes")
+            return
+        if not isinstance(client, str) or not isinstance(term, str):
+            self._refuse(400, "a client and a term are strings")
+            return
+        if len(term) > FILTER_MAX:
+            self._refuse(400, "a filter term is at most %d characters" % FILTER_MAX)
+            return
+        if not self.site.bus.set_filter(client, term):
+            # A tab whose stream has just gone, in the background or to a
+            # restart. It asks again with its term in the query when it
+            # reconnects, so a refusal here loses nothing.
+            self._refuse(404, "no such watcher")
+            return
+        self._queued()
+
     def _queued(self):
-        """The one answer both control routes give: it is on the queue.
+        """The one answer the control routes give: it was accepted.
 
         Never the report itself. What was asked for is read on the receive
         thread and published to the stream, so the useful answer arrives
-        there and this only says the question was accepted.
+        there and this only says the question was accepted. A filter is set
+        by the time this is sent, and its answer comes back on the stream as
+        well, as the `filter` event marking where it took effect.
         """
         body = b"{\"queued\":true}"
         self.send_response(200)

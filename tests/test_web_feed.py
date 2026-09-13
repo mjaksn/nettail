@@ -143,4 +143,65 @@ check("what was published before the close is still there",
       len(events) == 1 and events[0][1]["text"] == "the last word")
 check("and nothing new may subscribe", closing.subscribe() is None)
 
+# -- a filter is one client's, and decides what that client is sent ----------
+#
+# The matching happens here rather than in the page because the details ring
+# keeps a record for every flow a tab was sent, and it can only know that if
+# the flows a tab would have thrown away were never sent to it.
+
+sieve = Feed()
+wide = sieve.subscribe()
+narrow = sieve.subscribe()
+check("nobody filters to begin with", sieve.filtering is False)
+check("each client has an id of its own",
+      wide.id != narrow.id and len(wide.id) >= 16, "%r %r" % (wide.id, narrow.id))
+check("and the feed lists who is attached", sieve.ids() == {wide.id, narrow.id})
+check("a filter is set on a client by its id",
+      sieve.set_filter(narrow.id, "  HTTPS ") is True)
+check("which the publisher can ask about without the lock",
+      sieve.filtering is True)
+check("an id nobody holds finds nothing", sieve.set_filter("nobody", "53") is False)
+events, _dropped = sieve.drain(narrow)
+check("the client whose filter changed is told, with the term as typed",
+      events == [("filter", {"term": "HTTPS"})], str(events))
+check("and nobody else is", sieve.drain(wide) == ([], 0))
+check("filter is one of the event kinds",
+      "filter" in [name for name, _doc in EVENTS])
+
+took = sieve.flow({"n": 1}, ["192.0.2.1", "443", "https"])
+check("a flow whose terms hold the filter reaches both",
+      sorted(took) == sorted([wide.id, narrow.id]), str(took))
+took = sieve.flow({"n": 2}, ["192.0.2.1", "53", "domain"])
+check("one whose terms do not reaches only the client asking for everything",
+      took == [wide.id], str(took))
+check("so the narrow client holds the first and not the second",
+      [payload["n"] for _kind, payload in sieve.drain(narrow)[0]] == [1])
+check("while the wide one holds both",
+      [payload["n"] for _kind, payload in sieve.drain(wide)[0]] == [1, 2])
+check("case is folded on both sides, the Python way",
+      narrow.id in sieve.flow({"n": 3}, ["Https"])
+      and narrow.id in sieve.flow({"n": 4}, ["HTTPS"]))
+check("the match is the whole term and not a part of one",
+      narrow.id not in sieve.flow({"n": 5}, ["https-alt"]))
+# Terms left out mean the publisher asked `filtering` before the filter was
+# set. A row too many is the smaller wrong than one lost.
+check("a flow published without terms reaches a filtered client anyway",
+      narrow.id in sieve.flow({"n": 6}))
+sieve.drain(wide)
+sieve.drain(narrow)
+sieve.set_filter(narrow.id, "")
+check("an empty term clears the filter", narrow.filter is None
+      and sieve.filtering is False)
+check("and says so, as an empty term",
+      sieve.drain(narrow)[0] == [("filter", {"term": ""})])
+sieve.set_filter(narrow.id, "53")
+sieve.unsubscribe(narrow)
+check("the last filtering client leaving puts filtering back",
+      sieve.filtering is False)
+returning = sieve.subscribe(term="53")
+check("a client can arrive already filtering, as a tab back from the "
+      "background does", returning.term == "53" and sieve.filtering is True)
+check("and is sent no marker for it, having asked in the query",
+      sieve.drain(returning) == ([], 0))
+
 finish("web feed")

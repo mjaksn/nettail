@@ -70,7 +70,8 @@ check("the terminal listing still shows every key, browser or not",
 
 
 def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
-        keyboard=None, presses=(), window=None, port_notices=(), asks=()):
+        keyboard=None, presses=(), window=None, port_notices=(), asks=(),
+        filters=()):
     """Drive main() with keys arriving as if from a browser.
 
     `web_presses` is a list of (after_n_polls, key, value). The queue is filled
@@ -95,6 +96,9 @@ def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
     Timed against the poll counter like the presses, because an ask is only
     worth answering once some flows have gone by: the serial the page would
     have clicked is the one the collector stamped on a flow it published.
+
+    `filters` are terms set on the watcher's filter, as (after_n_polls, term),
+    straight on the feed the way the filter route sets them.
 
     `port_notices` are ports a request thread would have noted, timed against
     the poll counter the same way `web_presses` are. They stand in for a
@@ -126,6 +130,7 @@ def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
     waited = []
     queued = list(web_presses)
     asked = list(asks)
+    filtering = list(filters)
     noticed = list(port_notices)
     waiting = list(packets)
     seen = {}
@@ -158,6 +163,10 @@ def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
                 if question[0] <= FakeSocket.calls:
                     asked.remove(question)
                     seen["site"].asks.put_nowait(question[1:])
+            for wanted in list(filtering):
+                if wanted[0] <= FakeSocket.calls:
+                    filtering.remove(wanted)
+                    seen["site"].bus.set_filter(seen["client"].id, wanted[1])
             for note in list(noticed):
                 if note[0] <= FakeSocket.calls:
                     noticed.remove(note)
@@ -605,14 +614,38 @@ check("and its two ends, as the decoder spelled them",
       str([f.get("ends") for f in result["flows"]]))
 check("beside the cells and the record, which are unchanged",
       all("cells" in f and "record" in f for f in result["flows"]))
-# And what the page's filter box may match it on, which is the collector's to
-# say for the reason the cells are.
-check("and the terms a filter may match, holding both ends and their ports",
-      result["flows"] and all(
-          {f["ends"][0], f["ends"][1], str(f["record"]["src_port"]), "443"}
-          <= set(f.get("terms", ()))
-          for f in result["flows"]),
-      str([f.get("terms") for f in result["flows"]]))
+# And nothing a filter matches on. The collector does the matching, so a page
+# is sent what it asked for and has nothing to look through.
+check("and nothing for a page to filter with, since the collector does that",
+      all("terms" not in f for f in result["flows"]),
+      str([sorted(f) for f in result["flows"]]))
+
+# -- a filter decides what a tab is sent, and what it can click --------------
+#
+# v5_packet writes two flows a datagram, from 192.168.1.10 and 192.168.1.11,
+# so a filter naming the second lets through every other serial. Set on the
+# first poll, before the first datagram is decoded, the way a request thread
+# would set it on the feed.
+
+result = run([], [v5_packet(0), v5_packet(2)],
+             filters=[(1, "192.168.1.11")],
+             asks=[(4, 1, 1, ("192.168.1.10", "8.8.8.8")),
+                   (4, 2, 2, ("192.168.1.11", "8.8.8.8"))])
+check("a filtered tab is sent only the flows its term names",
+      [f["n"] for f in result["flows"]] == [2, 4]
+      and all(f["ends"][0] == "192.168.1.11" for f in result["flows"]),
+      str([(f["n"], f["ends"]) for f in result["flows"]]))
+kinds = [kind for kind, _payload in result["events"]]
+check("and is told where the filter took effect, ahead of those flows",
+      "filter" in kinds and kinds.index("filter") < kinds.index("flow"), str(kinds))
+answers = {answer["ask"]: answer for answer in result["details"]}
+# The point of doing the matching here. A flow no tab was shown cannot be
+# clicked, so keeping it would only be pushing out the records of rows that
+# can, which is what a narrow filter used to do.
+check("a flow no tab was sent is not kept to be asked about",
+      1 in answers and answers[1]["held"] is False, str(sorted(answers)))
+check("while one the tab was sent is",
+      2 in answers and answers[2]["held"] is True, str(sorted(answers)))
 
 # -- and a browser can ask about one --------------------------------------
 
