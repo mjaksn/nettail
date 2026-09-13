@@ -47,7 +47,7 @@ check("space resumes and says how many are waiting",
       c.handle(" ") == "resumed, 2 held flows to print", str(c.paused))
 check("resuming clears the paused flag", c.paused is False)
 check("draining hands them back oldest first",
-      [r["a"] for r, _h in c.drain()] == [1, 2])
+      [r["a"] for r, _h, _record in c.drain()] == [1, 2])
 check("draining empties the buffer", len(c.held) == 0)
 c.handle(" ")
 c.hold({"a": 1}, {})
