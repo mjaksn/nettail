@@ -1,0 +1,89 @@
+"""Phase 1 durable flow storage: the file, its defaults, and its retention.
+"""
+
+import json
+import os
+import tempfile
+import time
+
+from harness import check, finish
+
+from nettail import store
+
+work = tempfile.mkdtemp(prefix="nettail-store-")
+target = os.path.join(work, "flows.sqlite3")
+
+# --- path choice -------------------------------------------------------------
+unix = store.default_path(platform="linux", env={"XDG_DATA_HOME": "/data"},
+                          home="/home/alice")
+check("the default Unix path lives under XDG data",
+      unix == os.path.join("/data", "nettail", "flows.sqlite3"), unix)
+mac = store.default_path(platform="darwin", env={}, home="/Users/alice")
+check("the default macOS path lives under Application Support",
+      mac == os.path.join("/Users/alice", "Library", "Application Support",
+                          "nettail", "flows.sqlite3"), mac)
+windows = store.default_path(platform="win32",
+                             env={"APPDATA": r"C:\Users\alice\AppData\Roaming"},
+                             home=r"C:\Users\alice")
+check("the default Windows path prefers APPDATA",
+      windows == os.path.join(r"C:\Users\alice\AppData\Roaming", "nettail",
+                              "flows.sqlite3"), windows)
+
+# --- one row goes in and comes back ------------------------------------------
+history = store.FlowStore(target, retention_days=7)
+record = {
+    "_received": time.time(),
+    "_timestamp": time.time() - 1,
+    "_exporter": "10.0.0.1",
+    "_version": 5,
+    "src_addr": "192.168.1.10",
+    "dst_addr": "8.8.8.8",
+    "src_port": 51000,
+    "dst_port": 443,
+    "proto": 6,
+    "octets": 1500,
+    "packets": 12,
+}
+ingest_id = history.write(record)
+latest = history.latest()
+check("the first row is numbered 1", ingest_id == 1, str(ingest_id))
+check("one stored flow is counted", history.count() == 1, str(history.count()))
+check("the stored row keeps its exporter", latest["exporter"] == "10.0.0.1",
+      str(latest))
+check("and keeps the record as JSON",
+      json.loads(latest["record_json"])["dst_port"] == 443, latest["record_json"])
+history.close()
+
+# --- retention drops what is too old ----------------------------------------
+retained = store.FlowStore(os.path.join(work, "retained.sqlite3"), retention_days=1)
+now = time.time()
+retained.write({
+    "_received": now - (3 * 24 * 60 * 60),
+    "_timestamp": now - (3 * 24 * 60 * 60),
+    "_exporter": "10.0.0.2",
+    "_version": 5,
+})
+retained.write({
+    "_received": now,
+    "_timestamp": now,
+    "_exporter": "10.0.0.3",
+    "_version": 5,
+})
+retained.prune(now=now)
+check("retention drops rows older than the bound",
+      retained.count() == 1, str(retained.count()))
+check("and leaves the newest row behind",
+      retained.latest()["exporter"] == "10.0.0.3", str(retained.latest()))
+retained.close()
+
+# --- the config type is strict about days ------------------------------------
+check("retention accepts a whole number", store.retention_arg("14") == 14)
+for bad in ("0", "-1", "three"):
+    try:
+        store.retention_arg(bad)
+        ok = False
+    except ValueError:
+        ok = True
+    check("%r is refused as a retention period" % bad, ok)
+
+finish("flow store")

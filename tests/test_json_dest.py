@@ -25,7 +25,7 @@ import time
 from harness import FakeTTY, check, finish, plain
 
 import nettail as main
-from nettail import config, jsonout
+from nettail import config, jsonout, store
 from nettail.cli import build_parser
 
 V5_HDR = struct.Struct("!HHIIIIBBH")
@@ -107,6 +107,19 @@ check("nothing of the record reaches stdout", "dst_port" not in out,
       repr(plain(out)[:200]))
 check("and the file is named on stderr where it can be read",
       target in plain(err), repr([ln for ln in err.splitlines() if "JSON" in ln]))
+
+# --- flow history writes beside the table too --------------------------------
+history = os.path.join(work, "flows.sqlite3")
+out, err = run(["--flow-store", history], [v5_packet()])
+check("the table still draws with flow history on",
+      "PROTO" in plain(out) and "8.8.8.8" in plain(out), repr(plain(out)[:200]))
+check("and the history file is named on stderr",
+      history in plain(err), repr([ln for ln in err.splitlines() if "flows" in ln]))
+saved = store.FlowStore(history, retention_days=14)
+check("the flow history file got one row", saved.count() == 1, str(saved.count()))
+check("and it stored the flow record",
+      '"dst_port": 443' in saved.latest()["record_json"], saved.latest()["record_json"])
+saved.close()
 
 # --- the bare flag is the run it always was ---------------------------------
 out, err = run(["--json"], [v5_packet()])

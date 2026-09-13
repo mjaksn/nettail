@@ -6,6 +6,7 @@ import io
 import os
 import queue
 import signal
+import sqlite3
 import socket
 import sys
 import textwrap
@@ -25,7 +26,7 @@ from netflume import (
     flow_timestamp,
 )
 
-from . import __version__, config, country, detail, jsonout, services
+from . import __version__, config, country, detail, jsonout, services, store
 from .colour import (
     C,
     PlainStream,
@@ -1304,6 +1305,16 @@ def build_parser():
                          "to that file instead and the table, the keys and "
                          "the browser view carry on as if the flag were not "
                          "there")
+    ap.add_argument("--flow-store", nargs="?", const=store.default_path(),
+                    type=jsonout.dest_arg, metavar="FILE", default=None,
+                    help="append each shown flow to a local SQLite history file. "
+                         "On its own, or in a config file as true, writes to %s; "
+                         "given a path, writes there instead"
+                         % store.default_path())
+    ap.add_argument("--flow-retention-days", type=store.retention_arg,
+                    default=14, metavar="DAYS",
+                    help="how many days of flow history to keep in the SQLite "
+                         "store (default 14)")
     ap.add_argument("--colour", "--color", choices=("auto", "always", "never"),
                     default="auto", metavar="WHEN",
                     help="when to use ANSI colour on this terminal: auto (a "
@@ -1751,6 +1762,14 @@ def main():
         if not records.is_stdout:
             print("appending JSON records to %s" % args.json, file=sys.stderr)
 
+    flow_store = store.DisabledStore()
+    if args.flow_store is not None:
+        try:
+            flow_store = store.FlowStore(args.flow_store, args.flow_retention_days)
+        except (OSError, sqlite3.Error, RuntimeError) as exc:
+            ap.error("cannot write flow history to %s: %s"
+                     % (args.flow_store, exc))
+
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
@@ -2000,6 +2019,9 @@ def main():
                       f"taken from it.{C.RESET}", file=out)
         if keys_on:
             print(f"{C.GREY}{KEY_HELP}{C.RESET}", file=out)
+        if args.flow_store is not None:
+            print(f"{C.GREY}{store.describe(args.flow_store, args.flow_retention_days)}"
+                  f"{C.RESET}", file=out)
         for warning in web_warnings:
             print(warning, file=out)
 
@@ -2446,6 +2468,11 @@ def main():
                 if records is not None:
                     out = flow_record(rec, hdr, resolver)
                     records.write(out)
+                elif args.flow_store is not None:
+                    out = flow_record(rec, hdr, resolver)
+
+                if args.flow_store is not None:
+                    flow_store.write(out)
 
                 if json_stdout:
                     # stdout is carrying the records, so there is no table
@@ -2476,6 +2503,7 @@ def main():
         sock.close()
         if records is not None:
             records.close()
+        flow_store.close()
         resolver.shutdown()
         # Teed like the summary the s key prints, and for a better reason: a
         # browser that watched the whole session should not be missing the one
