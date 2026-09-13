@@ -745,8 +745,14 @@ The reasoning that is not in the code:
   filled inside `web_flow`, so a run with nobody watching keeps none of it.
   The figure matches the page's own `MAX_ROWS`: keeping more would be keeping
   records for rows nothing can click, and keeping fewer would leave rows on
-  the page this could no longer describe. A serial the ring has dropped is the
-  ordinary case rather than an error, and `detail.report` answers it with the
+  the page this could no longer describe. A filter in the page breaks that
+  match and there is nothing the ring can do about it: the filter is the
+  tab's own, so every published flow takes a place whether any tab showed it,
+  and a narrow filter leaves rows on the page whose flows have been pushed
+  out. Holding records per tab would need the collector to know what each tab
+  is hiding, which is the thing the filter was built not to tell it, so the
+  dialog says so instead. A serial the ring has dropped is the ordinary case
+  rather than an error, and `detail.report` answers it with the
   endpoint and pair panels, built from the addresses the ask carried. That is
   what the ends are on the ask for.
 - **The serial is never reset, not even by the c key.** A page holding rows

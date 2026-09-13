@@ -1036,6 +1036,11 @@ worth knowing that it does: a bookmarked tab reconnects with the previous run's
 rows still on the page, and none of them can be looked up in the run that
 replaced it.
 
+A [filter](#filtering-new-flows) is the one way a row near the bottom of the
+page can say it too. The collector counts the flows it published, not the ones
+a tab chose to show, so a narrow filter on a busy link can leave rows on the
+page whose flows four thousand hidden ones have since pushed out.
+
 It works under `--web-readonly`. Asking what a flow was changes nothing, and a
 view served for watching is still a view worth reading properly.
 
@@ -1194,6 +1199,12 @@ The filter belongs to the tab. Nothing about it reaches the collector, the
 terminal is unaffected, two tabs on one run can filter differently, and it
 works under `--web-readonly`. It is not remembered across a reload.
 
+Because the collector does not know what a tab is hiding, the flows a filter
+hides still take their place among the four thousand it keeps for the
+[details dialog](#clicking-a-flow). Under a narrow filter a row can outlive
+its flow there while it is still on the page, and clicking it then shows the
+two endpoint panels and the pair without the flow itself.
+
 ### What it is safe to do with
 
 What this serves is a live map of which machines on your network talked to
@@ -1284,7 +1295,8 @@ of stdout. `--web-colour off` is how a run says otherwise.
   it does. A tab left open on a busy link would otherwise become unusable.
 - The collector keeps the last four thousand flows a browser can ask about,
   matching what the page itself keeps. An older row is still clickable and
-  says the flow itself has gone.
+  says the flow itself has gone. Under a filter the page holds rows older than
+  that, because the flows it hid still count towards the four thousand.
 - IPv4 only, matching the collector socket.
 - The page fetches one thing besides itself, `flags.woff2`, and only when
   there are country flags on it to draw, and asks one route a question, which

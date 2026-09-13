@@ -32,6 +32,11 @@ parsed, and it is treated as public.
   say, so each flow the feed publishes now carries a `terms` list beside its
   cells; `--json` output is unchanged.
 
+  The flows a filter hides still count towards the four thousand the collector
+  keeps for the details dialog, since it does not know what a tab is hiding.
+  Under a narrow filter a row can outlive its flow while it is still on the
+  page, and the dialog now names that as one of the reasons a flow has gone.
+
 ## [0.16.0] - 2026-09-10
 
 ### Added

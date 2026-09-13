@@ -808,10 +808,14 @@ def _gone(serial, kept):
     """The stand-in for a flow the ring no longer holds.
 
     Two ways to arrive and they are worth telling apart. A serial the ring
-    does not answer for is the ordinary one, and it covers two cases that read
-    the same to a reader: a row that has scrolled far enough up that the ring
-    has dropped its flow, and a row left over from before a restart, whose
-    serial this run has either not reached or has given to something else. A
+    does not answer for is the ordinary one, and it covers three cases that
+    read the same to a reader: a row that has scrolled far enough up that the
+    ring has dropped its flow, a row still near the bottom of a tab whose
+    filter hid the newer flows that pushed it out, and a row left over from
+    before a restart, whose serial this run has either not reached or has
+    given to something else. The filter is the one the ring cannot be sized
+    for: it lives in the page, so every flow published takes a place here
+    whether any tab showed it or not. A
     row carrying no serial at all is one published by a collector that was not
     stamping them.
 
@@ -829,8 +833,9 @@ def _gone(serial, kept):
             "facts": [["This flow",
                        "the collector is not holding this flow. It keeps the "
                        "most recent %s it published, and this row is not "
-                       "among them, either because it has scrolled that far "
-                       "up or because it is left over from before a restart. "
+                       "among them: it has scrolled that far up, a filter in "
+                       "this tab has hidden that many newer flows since, or "
+                       "it is left over from before a restart. "
                        "The figures below are for its two addresses, which "
                        "are kept for as long as the run."
                        % "{:,}".format(kept)]],
