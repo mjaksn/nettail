@@ -1296,8 +1296,8 @@ of stdout. `--web-colour off` is how a run says otherwise.
 - The page keeps the last few thousand rows and trims the rest, saying so when
   it does. A tab left open on a busy link would otherwise become unusable.
 - The collector keeps the last four thousand flows each browser was sent, to be
-  asked about, matching what the page itself keeps. An older row is still clickable and
-  says the flow itself has gone.
+  asked about, matching what the page itself keeps. An older row is still
+  clickable and says the flow itself has gone.
 - IPv4 only, matching the collector socket.
 - The page fetches one thing besides itself, `flags.woff2`, and only when
   there are country flags on it to draw, and asks one route a question, which
