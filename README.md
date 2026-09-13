@@ -1167,6 +1167,33 @@ setting for a session left up on a machine other people use. The down arrow
 goes on working there, since it never reaches the collector and so there is
 nothing for a readonly one to refuse.
 
+### Filtering new flows
+
+The box beside **Keys** narrows what the page shows from now on. Type one term
+and press Enter, or click away from the box, and a flow that arrives after that
+is shown only when the term is exactly one of these:
+
+- either end's address
+- either end's port
+- the service name either port has, such as `https`
+- the hostname either address answered to, when it answered to one
+
+Case does not matter and everything else does: the match is against the whole
+value, so `443` finds port 443 and `44` does not. An IPv6 address is matched
+without the brackets and the port the row writes around it. A hostname counts
+only if the name was known when the flow arrived, since that is when its row
+was drawn.
+
+It works forwards only. Rows already on the page stay exactly as they were, and
+a line goes into the table when a filter is applied or cleared, so you can see
+where the narrowing starts. Emptying the box shows every new flow again
+straight away, without waiting for Enter, and that includes emptying it with
+the clear button or the Escape key where a browser gives the box either.
+
+The filter belongs to the tab. Nothing about it reaches the collector, the
+terminal is unaffected, two tabs on one run can filter differently, and it
+works under `--web-readonly`. It is not remembered across a reload.
+
 ### What it is safe to do with
 
 What this serves is a live map of which machines on your network talked to

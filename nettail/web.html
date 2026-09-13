@@ -189,6 +189,23 @@ button:disabled { opacity: .45; cursor: default; }
 #keys button[data-on="1"] .d { color: var(--ink); }
 #keys button[data-on="1"] .k { background: var(--accent); color: var(--ground); }
 
+/* the filter box */
+
+#filter {
+  font: inherit;
+  color: var(--ink);
+  background: var(--ground);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: 3px 8px;
+  width: 22ch;
+}
+#filter::placeholder { color: var(--ink-3); }
+/* Lit while a term is applied, which is not the same as while something is
+   typed: the box takes effect on Enter, so text sitting in it unapplied is
+   left looking like any other input. */
+#filter[data-on="1"] { border-color: var(--accent); }
+
 /* the follow toggle */
 
 .follow {
@@ -273,7 +290,8 @@ tbody tr.prose td {
 }
 tbody tr.prose[data-kind="summary"] td,
 tbody tr.prose[data-kind="hosts"] td,
-tbody tr.prose[data-kind="keys"] td { border-left-color: var(--accent); }
+tbody tr.prose[data-kind="keys"] td,
+tbody tr.prose[data-kind="filter"] td { border-left-color: var(--accent); }
 tbody tr.prose[data-kind="notice"] td { border-left-color: var(--warn); }
 tbody tr.prose[data-kind="gap"] td { border-left-color: var(--bad); color: var(--bad); }
 footer {
@@ -432,6 +450,9 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
   <button type="button" id="drawerToggle" aria-expanded="false" aria-controls="keys" hidden>
     <span class="caret" aria-hidden="true">&#9656;</span><span>Keys</span>
   </button>
+  <input type="search" id="filter" hidden placeholder="filter" spellcheck="false"
+         autocomplete="off" aria-label="Filter new flows"
+         title="Show only new flows where an address, port, service or hostname is exactly this, in any case. Enter applies it; rows already shown stay.">
   <span class="spacer"></span>
   <label class="follow" id="followBox" hidden
          title="Whether new flows pull the view down. The down arrow toggles it.">
@@ -800,7 +821,61 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
     schedule();
   }
 
+  // ---- the filter ------------------------------------------------------
+  //
+  // One term, typed into the box beside the Keys button, and a flow that
+  // arrives after it is applied is shown only when the term is exactly one of
+  // the flow's `terms`, with case folded on both sides. What those are is the
+  // collector's answer, for the reason the cells are: a service name is what
+  // that machine's services database says, and nothing here could read one
+  // back out of a painted, trimmed cell without being a second opinion.
+  //
+  // It is this tab's business and nobody else's, like Follow: nothing about
+  // it reaches the collector, two tabs on one run filter independently, and
+  // it works under --web-readonly for that reason. It is also forward only.
+  // Rows already on the page stay as they are, which is why applying or
+  // clearing it writes a note: the note is the line in the history above
+  // which the rows were not filtered and below which they were.
+  //
+  // Applied on Enter, or when the box loses focus, rather than as each
+  // character is typed. The match is exact, so a term half typed matches
+  // almost nothing, and every flow arriving while somebody typed "443" would
+  // be thrown away against "4" and "44" first. Emptying the box is the
+  // exception and takes effect at once, since showing everything again can
+  // throw nothing away.
+  var filterBox = document.getElementById("filter");
+  var filterTerm = "";
+
+  function applyFilter() {
+    var shown = filterBox.value.trim();
+    var term = shown.toLowerCase();
+    if (term === filterTerm) { return; }
+    filterTerm = term;
+    filterBox.setAttribute("data-on", term ? "1" : "0");
+    note("filter", term
+      ? "Filtering: new flows are shown only when an address, port, service " +
+        "or hostname is exactly \"" + shown + "\". Rows above are as they were."
+      : "Filter cleared: every new flow is shown again.");
+  }
+
+  function passes(payload) {
+    if (!filterTerm) { return true; }
+    var terms = payload.terms || [];
+    for (var i = 0; i < terms.length; i++) {
+      if (String(terms[i]).toLowerCase() === filterTerm) { return true; }
+    }
+    return false;
+  }
+
+  filterBox.addEventListener("change", applyFilter);
+  filterBox.addEventListener("input", function () {
+    if (!filterBox.value.trim()) { applyFilter(); }
+  });
+
   function addFlow(payload) {
+    // Before anything is built, so the lines the p and v keys put under a
+    // flow go with the flow rather than arriving under nothing.
+    if (!passes(payload)) { return; }
     var cells = payload.cells || [];
     var tr = document.createElement("tr");
     tr.className = "flow";
@@ -1598,6 +1673,7 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
         pressable = hello.pressable || [];
         document.title = "nettail " + (hello.nettail || "");
         followLabel.hidden = false;
+        filterBox.hidden = false;
         whereBox.textContent = hello.json
           ? "mirroring the terminal, with json on stdout"
           : "mirroring the terminal";

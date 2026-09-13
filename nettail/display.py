@@ -381,6 +381,35 @@ def extra_lines(rec, args):
     return lines
 
 
+def filter_terms(rec, resolver=None):
+    """What a browser's filter box may match one flow against.
+
+    Each end's address, its port, the service name that port has and the
+    hostname the address answered to, for whichever of those there is. The
+    filter lives in the page, but what it compares against is decided here
+    for the reason the cells are: a service name is whatever this machine's
+    services database calls the port, and a page reading them back out of a
+    painted, trimmed cell would be working a cell out for itself.
+
+    The same questions `endpoint` asks, asked the same way, so that a term
+    matches a flow exactly when the row drawn for it could have shown that
+    term. A port of 0 is left out for that reason: the row does not print one.
+    Nothing is lowercased, because the comparison is the page's and it folds
+    case on both sides at once; folding one side here and the other there
+    would be two opinions about what a capital is.
+    """
+    proto = rec.get("proto")
+    terms = []
+    for addr, port in zip(flow_endpoints(rec),
+                          (rec.get("src_port"), rec.get("dst_port")), strict=True):
+        for term in (addr, str(port) if port else None,
+                     service_name(port, proto),
+                     resolver.lookup(addr) if resolver and addr else None):
+            if term and term not in terms:
+                terms.append(term)
+    return terms
+
+
 def render(rec, hdr, args, resolver, scale):
     cells = row_cells(rec, hdr, args, resolver, scale)
     # Every cell arrives padded to its own column, so the row is the painted

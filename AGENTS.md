@@ -63,11 +63,14 @@ serves it to a browser. That is a mirror rather than a second program. It
 decides nothing about what a flow looks like; it is handed the cells the
 terminal row was built from and lays them out in a table.
 
-It has one thing of its own now, which is the details dialog a click on a row
+It has two things of its own now. One is the details dialog a click on a row
 opens. That is not a mirror of anything, since there is nowhere on a console
 to put it, but the rule above still holds inside it: every value in that
 dialog is worked out and written out by the collector and the page names no
-field, no flag and no protocol. See "Asking about a flow".
+field, no flag and no protocol. See "Asking about a flow". The other is the
+filter box, which decides which new flows the page shows and nothing else,
+and the same rule holds there too: the collector says what a flow can be
+matched on. See "Filtering new flows".
 
 ## Commands
 
@@ -817,6 +820,41 @@ Two things about the page are easy to get wrong.
 Nothing in the suite runs the page, so the dialog's own behaviour is a manual
 check, as the QR code and the flags are. Click a row, watch the figures move on
 their own, press Refresh, close it three ways, and type `x` inside it.
+
+### Filtering new flows
+
+The box beside the Keys button takes one term, and a flow arriving after it is
+applied is shown only when the term is exactly one of that flow's `terms`,
+with case folded. It is the second thing on the page's side of the line, after
+Follow: nothing about it reaches the collector, so it is in neither `KEYS` nor
+the greeting, has no flag, and works under `--web-readonly`.
+
+Four things about it are easy to break.
+
+- **What a flow can be matched on is `filter_terms` in `display.py`**, sent as
+  `terms` on every flow `web_flow` publishes. It asks the questions `endpoint`
+  asks, the same way: both ends from `flow_endpoints`, a port only where the
+  row prints one, `service_name` for each port and `resolver.lookup` for each
+  address. Matching against the cells instead would be the page working a cell
+  out for itself, and against `record` it would be the page naming fields and
+  still not knowing a service name. `test_web_server` greps `passes` for both.
+- **Case is folded in the page, on both sides, and not in Python.** Folding
+  one side with `str.lower` and the other with `toLowerCase` is two opinions
+  about what a capital is, and a hostname from mDNS can be any script.
+- **It is forward only, and the note is what makes that readable.** Nothing
+  already on the page is touched, and applying or clearing writes a row
+  through the queue like any other note, which marks where the filtering
+  starts. The check is the first thing `addFlow` does, so the lines the p and v
+  keys put under a flow go with a flow that is held back rather than arriving
+  under nothing; `test_web_server` holds that order.
+- **A term applies on Enter or blur, and an empty box applies at once.** The
+  match is exact, so applying as each character is typed would throw away
+  every flow that arrived while `443` went through `4` and `44`. Clearing can
+  throw nothing away, so it does not wait.
+
+Nothing in the suite runs the page, so the filter is a manual check too. Send
+traffic, filter on a port and on a service name, watch rows stop arriving and
+the rows above stay, and clear it.
 
 ## There is a QR encoder in here
 

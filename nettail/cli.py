@@ -41,6 +41,7 @@ from .display import (
     HEADER_LINE,
     address_colour,
     extra_lines,
+    filter_terms,
     proto_colour,
     render,
     row_cells,
@@ -2237,6 +2238,10 @@ def main():
                        else flow_record(rec, hdr, resolver)),
             "n": serial,
             "ends": list(flow_endpoints(rec)),
+            # What the page's filter box compares against. Plain rather than
+            # painted, and never drawn: it is there to be matched, and the
+            # cells above are what the reader sees.
+            "terms": filter_terms(rec, resolver),
         }
 
     def show(rec, hdr, record=None):

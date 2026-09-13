@@ -377,6 +377,38 @@ try:
     check("but below the guard that leaves everything to an open dialog",
           -1 < handler.find("if (detail.open)") < arrow)
 
+    # -- the filter box ---------------------------------------------------
+    #
+    # A term typed beside the Keys button holds back the flows that arrive
+    # afterwards unless it is exactly one of their `terms`. Greps again, since
+    # nothing here runs the page, and each is for a way of breaking it that
+    # would look fine on a quiet link.
+    check("the page has a filter box", re.search(r'<input[^>]*id="filter"', body)
+          is not None)
+    start = body.find("function passes(")
+    inside = body[start:body.find("\n  }", start)]
+    check("which matches against the terms the collector sent",
+          start != -1 and "payload.terms" in inside)
+    # The collector decides what a flow can be matched on, for the reason it
+    # decides the cells: a service name is what its services database says. A
+    # filter that read the record or the cells would be the page working that
+    # out for itself.
+    check("and against nothing else about the flow",
+          "payload.record" not in inside and "payload.cells" not in inside)
+    # Asked before anything is built, so the lines under a flow the filter
+    # held back do not arrive under nothing.
+    start = body.find("function addFlow(")
+    inside = body[start:body.find("\n  }", start)]
+    check("a flow is filtered before any of its rows is built",
+          -1 < inside.find("passes(payload)") < inside.find("createElement"))
+    # Shown from the greeting, not from buildKeys, which hides what belongs to
+    # the collector's keys under --web-readonly. Filtering changes nothing
+    # there and a display-only view is still worth narrowing.
+    start = body.find("function buildKeys(")
+    inside = body[start:body.find("\n  }", start)]
+    check("and the box is not tied to whether keys are taken",
+          "filterBox.hidden = false" in body and "filterBox" not in inside)
+
     # -- the greeting -----------------------------------------------------
 
     bus.set_hello({

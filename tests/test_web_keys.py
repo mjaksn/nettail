@@ -605,6 +605,14 @@ check("and its two ends, as the decoder spelled them",
       str([f.get("ends") for f in result["flows"]]))
 check("beside the cells and the record, which are unchanged",
       all("cells" in f and "record" in f for f in result["flows"]))
+# And what the page's filter box may match it on, which is the collector's to
+# say for the reason the cells are.
+check("and the terms a filter may match, holding both ends and their ports",
+      result["flows"] and all(
+          {f["ends"][0], f["ends"][1], str(f["record"]["src_port"]), "443"}
+          <= set(f.get("terms", ()))
+          for f in result["flows"]),
+      str([f.get("terms") for f in result["flows"]]))
 
 # -- and a browser can ask about one --------------------------------------
 

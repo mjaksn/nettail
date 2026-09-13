@@ -11,6 +11,27 @@ but it is a program rather than a library, and the names inside it may move
 without that being a breaking change. `--json` output is the part meant to be
 parsed, and it is treated as public.
 
+## [0.17.0] - 2026-09-12
+
+### Added
+
+- **A filter box in the browser, beside the Keys button.** Type a term and
+  press Enter, and a flow arriving after that is shown only when the term is
+  exactly one of its addresses, one of its ports, the service name either port
+  has, or the hostname either address answered to. Case does not matter; the
+  rest of the term does, so `44` does not match port 443.
+
+  It is forward only. Rows already on the page stay as they are, and applying
+  or clearing a filter writes a line into the table, so the point where the
+  view started being narrowed is there to see. Emptying the box shows every
+  new flow again at once.
+
+  It belongs to the tab. Nothing reaches the collector, two tabs on one run
+  filter independently, the terminal is unaffected, and it works under
+  `--web-readonly`. What a flow can be matched on is still the collector's to
+  say, so each flow the feed publishes now carries a `terms` list beside its
+  cells; `--json` output is unchanged.
+
 ## [0.16.0] - 2026-09-10
 
 ### Added
@@ -1063,6 +1084,7 @@ console: the part that decides what a flow should look like on a terminal.
   reminder line under the startup banner can be a pointer rather than a
   two-hundred-character list that wrapped and then scrolled away.
 
+[0.17.0]: https://github.com/mjaksn/nettail/releases/tag/v0.17.0
 [0.16.0]: https://github.com/mjaksn/nettail/releases/tag/v0.16.0
 [0.15.0]: https://github.com/mjaksn/nettail/releases/tag/v0.15.0
 [0.14.0]: https://github.com/mjaksn/nettail/releases/tag/v0.14.0
