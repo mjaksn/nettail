@@ -85,6 +85,12 @@ UNSETTABLE = ("help", "version", "config", "save_config", "update_country_db")
 # so on purpose.
 NEVER_WRITTEN = ("web_token",)
 
+# Options that take an optional argument and still accept the old true spelling
+# in a config file need the destination that bare flag means.
+BOOLEAN_DEFAULTS = {
+    "flow_store": None,
+}
+
 
 def default_save_path():
     """Where `--save-config` writes when it is given no path.
@@ -259,6 +265,11 @@ def convert(action, text):
         # default and never a hardcoded False: `--no-color` and a flag that
         # turns something off both come out right.
         return action.const if _boolean(text) else action.default
+    if action.nargs == "?" and action.dest in BOOLEAN_DEFAULTS:
+        lowered = text.strip().lower()
+        if lowered in configparser.ConfigParser.BOOLEAN_STATES:
+            return (action.const if _boolean(text)
+                    else BOOLEAN_DEFAULTS[action.dest])
     if isinstance(action, argparse._AppendAction):
         return [_one(action, item) for item in _items(text)]
     return _one(action, text)
