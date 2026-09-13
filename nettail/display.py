@@ -385,18 +385,17 @@ def filter_terms(rec, resolver=None):
     """What a browser's filter box may match one flow against.
 
     Each end's address, its port, the service name that port has and the
-    hostname the address answered to, for whichever of those there is. The
-    filter lives in the page, but what it compares against is decided here
-    for the reason the cells are: a service name is whatever this machine's
-    services database calls the port, and a page reading them back out of a
-    painted, trimmed cell would be working a cell out for itself.
+    hostname the address answered to, for whichever of those there is. Built
+    here for the reason the cells are: a service name is whatever this
+    machine's services database calls the port, and nothing but the program
+    that drew the row can say what the row could have shown.
 
     The same questions `endpoint` asks, asked the same way, so that a term
     matches a flow exactly when the row drawn for it could have shown that
     term. A port of 0 is left out for that reason: the row does not print one.
-    Nothing is lowercased, because the comparison is the page's and it folds
-    case on both sides at once; folding one side here and the other there
-    would be two opinions about what a capital is.
+    Nothing is folded here. `Feed.flow` folds these and `Client.set_term`
+    folds the term, both with `casefold`, so the comparison has one place on
+    each side that decides what a capital is and neither of them is this.
     """
     proto = rec.get("proto")
     terms = []
