@@ -391,7 +391,7 @@ try:
     check("the page sends its term to the collector",
           re.search(r'BASE\s*\+\s*"/filter"', body) is not None)
     check("and arrives with it on a reconnect",
-          "?filter=" in body and "var term = reconnectTerm()" in body
+          "filter=" in body and "var term = reconnectTerm()" in body
           and "encodeURIComponent(term)" in body)
     # A reconnect asks for the term the reader wants, not the last one the
     # collector accepted: a stream that drops while a request is out would

@@ -592,7 +592,8 @@ check("while a status frame does carry the figure the gap moved",
       "%r against %r" % (counts, before.get("flows_shown")))
 replayed = restored(result)
 check("a tab back from the background is sent stored rows it missed",
-      len(replayed) == 1 and [f["record"]["_ingest_id"] for f in replayed[0]["flows"]] == [3, 4],
+      len(replayed) == 1
+      and [f["record"]["_ingest_id"] for f in replayed[0]["flows"]] == [3, 4],
       str(replayed))
 check("and the live rows after it still arrive only once",
       [f["record"]["_ingest_id"] for f in result["flows"]] == [5, 6, 7, 8],
