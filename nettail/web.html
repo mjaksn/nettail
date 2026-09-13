@@ -450,7 +450,7 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
   <button type="button" id="drawerToggle" aria-expanded="false" aria-controls="keys" hidden>
     <span class="caret" aria-hidden="true">&#9656;</span><span>Keys</span>
   </button>
-  <input type="search" id="filter" hidden placeholder="filter" spellcheck="false"
+  <input type="search" id="filter" placeholder="filter" spellcheck="false"
          autocomplete="off" aria-label="Filter new flows"
          title="Show only new flows where an address, port, service or hostname is exactly this, in any case. Enter applies it; rows already shown stay.">
   <span class="spacer"></span>
@@ -850,6 +850,11 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
   // waited for a click elsewhere would let every flow through meanwhile.
   // Both can arrive for one press, which costs nothing: applying the term
   // already applied returns before it writes a note.
+  //
+  // In the page from the start rather than shown by the greeting. It needs
+  // nothing the collector sends, so there is nothing to wait for, and a page
+  // that never gets a greeting, refused as a fifth tab or opened while the
+  // collector is still starting, is no reason for the box to be missing.
   var filterBox = document.getElementById("filter");
   var filterTerm = "";
 
@@ -1683,7 +1688,6 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
         pressable = hello.pressable || [];
         document.title = "nettail " + (hello.nettail || "");
         followLabel.hidden = false;
-        filterBox.hidden = false;
         whereBox.textContent = hello.json
           ? "mirroring the terminal, with json on stdout"
           : "mirroring the terminal";

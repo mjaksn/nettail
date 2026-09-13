@@ -401,19 +401,24 @@ try:
     inside = body[start:body.find("\n  }", start)]
     check("a flow is filtered before any of its rows is built",
           -1 < inside.find("passes(payload)") < inside.find("createElement"))
-    # Shown from the greeting, not from buildKeys, which hides what belongs to
-    # the collector's keys under --web-readonly. Filtering changes nothing
-    # there and a display-only view is still worth narrowing.
-    start = body.find("function buildKeys(")
-    inside = body[start:body.find("\n  }", start)]
     # Enter is listened for directly. A search box may answer it with its own
     # `search` event and no `change`, and the box is documented as applying on
     # Enter.
     check("Enter applies the filter without waiting for the box to lose focus",
           re.search(r'filterBox\.addEventListener\(\s*"keydown"[^}]*"Enter"[^}]*'
                     r"applyFilter\(\)", body) is not None)
-    check("and the box is not tied to whether keys are taken",
-          "filterBox.hidden = false" in body and "filterBox" not in inside)
+    # There from the start. It needs nothing the greeting carries, and it was
+    # hidden until one arrived, so a page without a greeting had no box. Nor is
+    # it anywhere near buildKeys, which hides what belongs to the collector's
+    # keys under --web-readonly: filtering changes nothing there and a
+    # display-only view is still worth narrowing.
+    tag = re.search(r'<input[^>]*id="filter"[^>]*>', body)
+    check("the box is not hidden waiting for anything",
+          tag is not None and not re.search(r"\shidden\b", tag.group(0))
+          and "filterBox.hidden" not in body, tag.group(0) if tag else "")
+    start = body.find("function buildKeys(")
+    inside = body[start:body.find("\n  }", start)]
+    check("and is not tied to whether keys are taken", "filterBox" not in inside)
 
     # -- the greeting -----------------------------------------------------
 
