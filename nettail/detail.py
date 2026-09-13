@@ -1,10 +1,11 @@
 """Everything known about one flow, written out for the details dialog.
 
-Pure functions with no I/O, called on the receive thread because that is the
-only thread allowed to read collector state: a request thread may read a feed
-queue and put an ask on a queue, and that is the whole of its authority. The
-report they build goes back to the browser as a `detail` event with the ask's
-id echoed on it.
+Pure functions with no I/O, and the `Ring` of flows they may be asked about,
+all used on the receive thread because that is the only thread allowed to read
+collector state: a request thread may read a feed queue and put an ask on a
+queue, and apart from its own tab's subscription that is the whole of its
+authority. The report they build goes back to the browser as a `detail` event
+with the ask's id echoed on it.
 
 **Every value here is formatted in Python, and painted here too.** The page
 names no field, no flag and no protocol, for the reason it hardcodes no column

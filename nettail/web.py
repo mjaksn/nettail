@@ -5,12 +5,13 @@ and the queues; this turns one of those queues into a stream a browser can read
 and turns a browser's key press into something the receive loop will act on.
 
 Nothing here touches collector state. A request thread may read from a feed
-queue and it may put a key or an ask on a queue, and that is the whole of its
-authority. Everything that changes what the collector is doing, and everything
-that reads what it has counted, happens on the receive thread, which drains
-both queues between datagrams: the existing dispatch in `Controls` stays the
-one place a key means anything, and `detail.report` is called where the tally
-is safe to read.
+queue and it may put a key or an ask on a queue, and beyond its own tab's
+subscription, which it takes, gives back and sets the filter of under the
+feed's lock, that is the whole of its authority. Everything that changes what
+the collector is doing, and everything that reads what it has counted, happens
+on the receive thread, which drains both queues between datagrams: the
+existing dispatch in `Controls` stays the one place a key means anything, and
+`detail.report` is called where the tally is safe to read.
 
 Nothing here prints, either, and that rule is stricter than it sounds.
 `sticky.py` and `statusbar.py` manage a scroll region on the terminal, and a
@@ -45,8 +46,9 @@ are not optional.
   decided.
 - **An `Origin` check on the control route**, refusing a request that names an
   origin other than this one.
-- **Five routes and no sixth.** The page, the stream, the flags font, the
-  control route and the one that answers a question about a flow. No
+- **Six routes and no seventh.** The page, the stream, the flags font, the
+  control route, the one that answers a question about a flow and the one
+  that sets a tab's filter. No
   directory listing, no file handler, nothing that turns part of a request
   into a path on disk. The page and the font are read once at startup and
   live in memory.

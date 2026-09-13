@@ -210,11 +210,6 @@ class Feed:
         with self._lock:
             return len(self._clients)
 
-    def ids(self):
-        """The ids of the browsers attached now."""
-        with self._lock:
-            return frozenset(c.id for c in self._clients)
-
     # -- publishing ---------------------------------------------------------
 
     def publish(self, kind, data=None):
@@ -262,13 +257,15 @@ class Feed:
         term was folded the same way, so there is one opinion about what a
         capital is and it is Python's.
 
-        Answers the ids of the clients that took it, which is what the details
-        ring keeps records by: a flow no browser was shown cannot be clicked,
-        and one that a browser was shown has to stay clickable for as long as
-        that browser could still have its row.
+        Answers the ids of the clients that took it and of every client
+        attached, which are what the details ring keeps records by: a flow no
+        browser was shown cannot be clicked, one that a browser was shown has
+        to stay clickable for as long as that browser could still have its
+        row, and a browser that has gone has no rows left. Both come from the
+        one pass under the lock, so the hot path takes it once per flow.
         """
         if not self.active:
-            return ()
+            return (), frozenset()
         event = ("flow", record)
         folded = None if terms is None else {t.casefold() for t in terms}
         takers = []
@@ -277,7 +274,8 @@ class Feed:
                 if client.wants(folded):
                     self._put(client, event)
                     takers.append(client.id)
-        return takers
+            attached = frozenset(c.id for c in self._clients)
+        return takers, attached
 
     def prose(self, kind, text):
         """A block the terminal also printed, escape codes and all."""

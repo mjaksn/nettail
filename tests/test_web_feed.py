@@ -155,7 +155,6 @@ narrow = sieve.subscribe()
 check("nobody filters to begin with", sieve.filtering is False)
 check("each client has an id of its own",
       wide.id != narrow.id and len(wide.id) >= 16, "%r %r" % (wide.id, narrow.id))
-check("and the feed lists who is attached", sieve.ids() == {wide.id, narrow.id})
 check("a filter is set on a client by its id",
       sieve.set_filter(narrow.id, "  HTTPS ") is True)
 check("which the publisher can ask about without the lock",
@@ -168,25 +167,29 @@ check("and nobody else is", sieve.drain(wide) == ([], 0))
 check("filter is one of the event kinds",
       "filter" in [name for name, _doc in EVENTS])
 
-took = sieve.flow({"n": 1}, ["192.0.2.1", "443", "https"])
+took, attached = sieve.flow({"n": 1}, ["192.0.2.1", "443", "https"])
 check("a flow whose terms hold the filter reaches both",
       sorted(took) == sorted([wide.id, narrow.id]), str(took))
-took = sieve.flow({"n": 2}, ["192.0.2.1", "53", "domain"])
+check("and the feed says who is attached in the same breath",
+      attached == {wide.id, narrow.id})
+took, attached = sieve.flow({"n": 2}, ["192.0.2.1", "53", "domain"])
 check("one whose terms do not reaches only the client asking for everything",
       took == [wide.id], str(took))
+check("while both are still attached, which is what keeps the narrow "
+      "client's records", attached == {wide.id, narrow.id})
 check("so the narrow client holds the first and not the second",
       [payload["n"] for _kind, payload in sieve.drain(narrow)[0]] == [1])
 check("while the wide one holds both",
       [payload["n"] for _kind, payload in sieve.drain(wide)[0]] == [1, 2])
 check("case is folded on both sides, the Python way",
-      narrow.id in sieve.flow({"n": 3}, ["Https"])
-      and narrow.id in sieve.flow({"n": 4}, ["HTTPS"]))
+      narrow.id in sieve.flow({"n": 3}, ["Https"])[0]
+      and narrow.id in sieve.flow({"n": 4}, ["HTTPS"])[0])
 check("the match is the whole term and not a part of one",
-      narrow.id not in sieve.flow({"n": 5}, ["https-alt"]))
+      narrow.id not in sieve.flow({"n": 5}, ["https-alt"])[0])
 # Terms left out mean the publisher asked `filtering` before the filter was
 # set. A row too many is the smaller wrong than one lost.
 check("a flow published without terms reaches a filtered client anyway",
-      narrow.id in sieve.flow({"n": 6}))
+      narrow.id in sieve.flow({"n": 6})[0])
 sieve.drain(wide)
 sieve.drain(narrow)
 sieve.set_filter(narrow.id, "")

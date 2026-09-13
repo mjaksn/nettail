@@ -2238,8 +2238,8 @@ def main():
         """
         payload = web_flow(rec, hdr, record=record)
         terms = filter_terms(rec, resolver) if bus.filtering else None
-        takers = bus.flow(payload, terms)
-        detail_ring.keep(payload["n"], (rec, hdr), takers, bus.ids())
+        takers, attached = bus.flow(payload, terms)
+        detail_ring.keep(payload["n"], (rec, hdr), takers, attached)
 
     def show(rec, hdr, record=None):
         """Put one flow on screen, with the header cadence around it.

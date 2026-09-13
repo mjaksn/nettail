@@ -762,13 +762,14 @@ The reasoning that is not in the code:
   has been away can find its older rows gone. The worst case is five windows'
   worth of records at `MAX_CLIENTS` of four, each a record and a reference to
   a header. Windows of watchers that have left are let go on the receive
-  thread when the next flow is kept, from `Feed.ids`, rather than by the
+  thread when the next flow is kept, from the ids `Feed.flow` hands back
+  beside the takers, in the same pass under the lock, rather than by the
   request thread that saw the tab close, because the ring is the receive
   thread's. `test_detail` walks the windows with a bound of three and
   `test_web_keys` checks a hidden flow cannot be asked about. A serial the
-  ring has dropped is the ordinary case rather than an error, and `detail.report` answers it with the
-  endpoint and pair panels, built from the addresses the ask carried. That is
-  what the ends are on the ask for.
+  ring has dropped is the ordinary case rather than an error, and
+  `detail.report` answers it with the endpoint and pair panels, built from the
+  addresses the ask carried. That is what the ends are on the ask for.
 - **The serial is never reset, not even by the c key.** A page holding rows
   from before a clear must not have them answered by flows from after it.
 - **A serial is checked against the ask's ends before it is believed, and
@@ -868,7 +869,8 @@ Six things about it are easy to break.
   each port and `resolver.lookup` for each address. `publish_flow` works them
   out only while `Feed.filtering` says some tab has a filter, and they never go
   in the payload: the page is sent what it asked for and has nothing to look
-  through. `test_web_server` greps the page for `terms` to keep it that way.
+  through. `test_web_server` greps the page for `payload.terms` and for any
+  mention of a filter inside `addFlow` to keep it that way.
 - **Case is folded once, in Python, with `casefold`**, on the term in
   `Client.set_term` and on a flow's terms in `Feed.flow`. One fold on each side
   in the same language is the only way the two agree about what a capital is,

@@ -379,10 +379,10 @@ try:
 
     # -- the filter box ---------------------------------------------------
     #
-    # A term typed beside the Keys button holds back the flows that arrive
-    # afterwards unless it is exactly one of their `terms`. Greps again, since
-    # nothing here runs the page, and each is for a way of breaking it that
-    # would look fine on a quiet link.
+    # A term typed beside the Keys button goes to the collector, which then
+    # sends this tab only the flows it names. Greps again, since nothing here
+    # runs the page, and each is for a way of breaking it that would look fine
+    # on a quiet link.
     check("the page has a filter box", re.search(r'<input[^>]*id="filter"', body)
           is not None)
     # The collector matches, so the page must not. It keeps a record for each
@@ -396,7 +396,7 @@ try:
     inside = body[start:body.find("\n  }", start)]
     check("and draws every flow it is sent without looking at it",
           start != -1 and "filter" not in inside.lower()
-          and "terms" not in body)
+          and "payload.terms" not in body)
     # The note goes on when the collector says the filter took, because that
     # event is the line in the stream between the old filter and the new.
     check("the note follows the collector's filter event, not the POST",
