@@ -872,13 +872,12 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
   var filterTaken = "";
   // The term the collector last accepted for this tab: the one a filter
   // request carried when it was answered with a 200, the one a greeting
-  // named, or the one a `filter` event reported while it was still wanted. What a reconnect asks for in its query, and not `filterTaken`,
-  // because the answer to a request comes back before its `filter` event and
-  // a stream can drop in between. A reconnect built from the older term would
-  // start the new subscription under a filter the reader has already left.
-  // It is still a term the collector took once, so a reconnect cannot be
-  // refused over a term it would have refused.
+  // named, or the one a `filter` event reported while it was still wanted.
+  // What a refused term is put back to, and what a reconnect falls back on.
   var filterAccepted = "";
+  // The longest term the collector takes, from the greeting, or null before
+  // there has been one.
+  var filterMax = null;
   // This tab's subscription, from the greeting, or null while there is none.
   var clientId = null;
   // Whether a filter request is on its way. One at a time, and that is not
@@ -891,10 +890,55 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
   // a browser waits by default, so the two kinds of retry look alike.
   var RETRY_WAIT = 3000;
 
+  // The term a new subscription asks for in its query. The one the reader
+  // wants rather than the last one accepted, because a stream can drop at any
+  // point in a request's life: before it is answered, after the answer and
+  // before its `filter` event, or with the answer lost. Built from the
+  // accepted term, each of those reconnected under a filter the reader had
+  // already left, and flows under it came through until the greeting sent
+  // the wanted term again. The wanted term is safe to ask for here because
+  // length is the only thing the collector refuses a term for, and a stream
+  // refused over one is not retried at all. So a term past the greeting's
+  // limit, or any term before there has been a greeting to say what the
+  // limit is, falls back on the accepted one, and goes by the request that
+  // reports its refusal instead.
+  function reconnectTerm() {
+    return filterMax !== null && filterWanted.length <= filterMax
+      ? filterWanted : filterAccepted;
+  }
+
+  // The term the current stream was opened with, or null before the first.
+  var streamTerm = null;
+
+  // Give up the current stream and open another under `reconnectTerm` after
+  // about the pause a browser leaves before its own retry. Used wherever the
+  // browser's retry would reuse an address carrying a term no longer wanted.
+  // `failures` is left as it is, so five of these still give up the way five
+  // of the browser's retries do.
+  function reconnectSoon() {
+    if (stream) { stream.close(); }
+    stream = null;
+    window.setTimeout(function () {
+      // Something else may have reconnected meanwhile: the tab coming back to
+      // the front, or the reader giving up and parking it.
+      if (stream || parked || gaveUp) { return; }
+      connect();
+    }, RETRY_WAIT);
+  }
+
   function applyFilter() {
     var term = filterBox.value.trim();
     if (term === filterWanted) { return; }
     filterWanted = term;
+    // A stream that has already dropped and is waiting on the browser's retry
+    // will come back with the term it was opened with. There is no
+    // subscription to post to meanwhile, so the retry is taken over and made
+    // under the term just asked for.
+    if (stream && stream.readyState === EventSource.CONNECTING &&
+        streamTerm !== null && streamTerm !== reconnectTerm()) {
+      reconnectSoon();
+      return;
+    }
     sendFilter();
   }
 
@@ -1775,14 +1819,15 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
     //
     // The filter this stream was opened under. A browser retries a dropped
     // stream by itself, with the address it was first given, so a term
-    // accepted since would be missing from the subscription that retry makes
+    // wanted since would be missing from the subscription that retry makes
     // and every flow before the page could send it again would come through
-    // unfiltered. The error handler below compares the two and does the retry
-    // itself when they differ.
-    var term = filterAccepted;
+    // under the old one. The error handler below compares the two and does
+    // the retry itself when they differ.
+    var term = reconnectTerm();
     var es = new EventSource(BASE + "/events" + (term
       ? "?filter=" + encodeURIComponent(term) : ""));
     stream = es;
+    streamTerm = term;
     clientId = null;
 
     es.addEventListener("hello", function (event) {
@@ -1820,7 +1865,8 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
       // of its own, with an id of its own, and the filter it arrived under.
       clientId = hello.client || null;
       if (typeof hello.filter_max === "number") {
-        filterBox.maxLength = hello.filter_max;
+        filterMax = hello.filter_max;
+        filterBox.maxLength = filterMax;
       }
       filterAccepted = hello.filter || "";
       filterTook(filterAccepted);
@@ -1910,20 +1956,10 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
                "new URL.");
           return;
         }
-        if (term !== filterAccepted) {
+        if (term !== reconnectTerm()) {
           // The browser is about to retry with the filter this stream opened
-          // under, which is no longer the one confirmed. Retried here instead,
-          // after about the pause a browser leaves, so the new subscription
-          // arrives under the current term. `failures` is left as it is, so
-          // five of these still give up the way five of the browser's do.
-          es.close();
-          stream = null;
-          window.setTimeout(function () {
-            // Something else may have reconnected meanwhile: the tab coming
-            // back to the front, or the reader giving up and parking it.
-            if (stream || parked || gaveUp) { return; }
-            connect();
-          }, RETRY_WAIT);
+          // under, which is no longer the one wanted, so the page does it.
+          reconnectSoon();
         }
       }
     };

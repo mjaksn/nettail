@@ -391,16 +391,31 @@ try:
     check("the page sends its term to the collector",
           re.search(r'BASE\s*\+\s*"/filter"', body) is not None)
     check("and arrives with it on a reconnect",
-          "?filter=" in body and "var term = filterAccepted" in body
+          "?filter=" in body and "var term = reconnectTerm()" in body
           and "encodeURIComponent(term)" in body)
+    # A reconnect asks for the term the reader wants, not the last one the
+    # collector accepted: a stream that drops while a request is out would
+    # otherwise come back under a filter already left. Only a term within the
+    # greeting's limit, since a stream refused over one is never retried.
+    start = body.find("function reconnectTerm(")
+    inside = body[start:body.find("\n  }", start)]
+    check("a reconnect asks for the wanted term, where the collector would take it",
+          start != -1 and "filterWanted.length <= filterMax" in inside
+          and "filterAccepted" in inside)
     # A browser retries a dropped stream with the address it first opened, so
     # a filter confirmed since would be missing from the subscription the
     # retry makes. The page retries itself when the two differ.
     start = body.find("es.onerror")
     inside = body[start:body.find("\n    };", start)]
     check("a dropped stream opened under an older filter is retried by the page",
-          start != -1 and "term !== filterAccepted" in inside
-          and "connect()" in inside)
+          start != -1 and "term !== reconnectTerm()" in inside
+          and "reconnectSoon()" in inside)
+    # And a term applied while the browser's own retry is still pending takes
+    # that retry over, since the retry would come back under the old term.
+    start = body.find("function applyFilter(")
+    inside = body[start:body.find("\n  }", start)]
+    check("a term applied while a dropped stream waits to retry takes the retry "
+          "over", "EventSource.CONNECTING" in inside and "reconnectSoon()" in inside)
     # One request at a time. Each is answered on its own thread, so two sent
     # together can reach the feed's lock in either order and leave the tab
     # under the term typed first. Nothing here runs the page, so it is the

@@ -892,20 +892,24 @@ Seven things about it are easy to break.
 - **A tab back from the background asks for its filter in the stream's query.**
   Giving the stream up makes a new subscription, and setting the filter on it
   with a second request would let everything published in between through.
-  The page puts the term the collector last accepted in the query rather than
-  whatever is in the box, so a reconnect cannot be refused over a term the
-  collector would have refused, and it sends anything newer once the greeting
-  has named the subscription. Accepted means a 200 to the request or the
-  term a greeting named, and deliberately not the last `filter` event: the
-  answer to a request comes back before its event does, and a stream that
-  drops in between would otherwise reconnect under the term the reader has
-  just left. A stream that drops on its own is the same case arriving by
-  another door: the browser retries with the address the stream was opened
-  with, which holds whatever term was accepted back then, so the error
-  handler closes a stream whose term is out of date and reconnects itself
-  after `RETRY_WAIT`. Left to the browser, the retry arrives unfiltered, the
-  page writes that the filter was cleared, and every flow before it sends the
-  term again comes through.
+  The page puts the term the reader wants in the query, from
+  `reconnectTerm`, and not the last one the collector accepted. That was
+  tried first and each round of review found another moment a stream could
+  drop in: before a request was answered, after the answer and before its
+  `filter` event, or with the answer lost. Every one of them reconnected under
+  a filter the reader had already left, with flows under it coming through
+  until the greeting sent the wanted term again. The wanted term is safe in
+  the query because length is the only thing the collector refuses a term
+  for, and a stream refused over one gives up rather than retrying, so a term
+  past the greeting's `filter_max`, or any term before a greeting has said
+  what that is, falls back on the accepted one and is refused by its request
+  instead, where the refusal is only a note. A stream that drops on its own
+  is the same case arriving by another door: the browser retries with the
+  address the stream was opened with, which holds whatever term was wanted
+  back then, so the error handler closes a stream whose term is out of date
+  and reconnects itself after `RETRY_WAIT`. Left to the browser, the retry
+  arrives under the old term, and every flow before the page sends the new
+  one comes through.
 - **A term applies on Enter or blur, and an empty box applies at once.** The
   match is exact, so applying as each character is typed would throw away
   every flow that arrived while `443` went through `4` and `44`. Clearing can
