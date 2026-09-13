@@ -6,8 +6,8 @@ import io
 import os
 import queue
 import signal
-import sqlite3
 import socket
+import sqlite3
 import sys
 import textwrap
 import time
