@@ -1139,11 +1139,12 @@ view down with them. It is on to start with. Scroll up and it clears itself, so
 you can read something without wrestling the page for it; scroll back to the
 bottom and it fills again.
 
-The down arrow key toggles it, from anywhere on the page, which saves reaching
-for the box every time something worth reading goes past. It is the one key the
-page answers by itself. Following the tail is this tab's business rather than
-the collector's, so nothing about the press leaves the browser, and two windows
-watching one run scroll independently.
+The down arrow key toggles it, from anywhere on the page but the filter box,
+which saves reaching for the box every time something worth reading goes past.
+Typed into the filter box, the arrow stays there and only moves the cursor. It
+is the one key the page answers by itself. Following the tail is this tab's
+business rather than the collector's, so nothing about the press leaves the
+browser, and two windows watching one run scroll independently.
 
 The page takes the key rather than leaving it to the browser, so wherever a
 browser would have answered it by scrolling the flows down a line, it no longer

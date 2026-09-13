@@ -918,6 +918,13 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
         if (filterWanted === term) {
           filterWanted = filterAccepted;
           putBack = true;
+          // And the box with it, where it still shows the refused term, so
+          // that what it reads is what the collector is filtering on. A box
+          // the reader has typed something else into since is left alone:
+          // that is a term on its way, not one that was refused.
+          if (filterBox.value.trim() === term) {
+            filterBox.value = filterAccepted;
+          }
         }
       }
       // Anything asked for since, or a greeting that arrived for a new
@@ -959,6 +966,13 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
   filterBox.addEventListener("change", applyFilter);
   filterBox.addEventListener("keydown", function (event) {
     if (event.key === "Enter") { applyFilter(); }
+    // The down arrow works the Follow box from anywhere else on the page,
+    // and is answered above the guard that leaves keys to a focused input,
+    // because that guard would otherwise also swallow it on the Follow box
+    // itself. In here it belongs to the text being edited, so it goes no
+    // further than this box. Not prevented: moving the caret is still its
+    // job here.
+    if (event.key === "ArrowDown") { event.stopPropagation(); }
   });
   filterBox.addEventListener("input", function () {
     if (!filterBox.value.trim()) { applyFilter(); }

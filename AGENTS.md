@@ -861,7 +861,7 @@ bottom of the page. The collector cannot keep records by what a tab shows
 unless it knows what a tab shows, so the filter moved to where the flows are
 sent from. See "The ring and its bound" above for what the ring does with that.
 
-Six things about it are easy to break.
+Seven things about it are easy to break.
 
 - **What a flow can be matched on is `filter_terms` in `display.py`.** It asks
   the questions `endpoint` asks, the same way: both ends from
@@ -911,7 +911,17 @@ Six things about it are easy to break.
   throw nothing away, so it does not wait. Enter has a `keydown` listener of
   its own beside `change`, because a search box may answer Enter with a
   `search` event and nothing else; Chromium fires `change` too, which is why
-  losing the listener would pass a check made only in Edge or Chrome.
+  losing the listener would pass a check made only in Edge or Chrome. The
+  same listener stops the down arrow going any further. The document's
+  handler answers that arrow above its guard for a focused input, so that
+  it works on the Follow box, and without the stop an arrow typed into the
+  filter box toggled Follow as well. It stops propagation and does not
+  prevent the default, since moving the caret is still the arrow's job there.
+- **A refused term comes back out of the box.** The page puts what it wants
+  back to the term the collector accepted, and puts the box back too while
+  the box still reads the refused term, so the box never shows a filter that
+  is not the one in force. A box the reader has typed into since is left
+  alone, because that is a term on its way rather than one that was refused.
 
 Nothing in the suite runs the page, so the filter is a manual check too. Send
 traffic, filter on a port and on a service name, watch rows stop arriving and

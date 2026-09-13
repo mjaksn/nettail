@@ -426,6 +426,21 @@ try:
     check("Enter applies the filter without waiting for the box to lose focus",
           re.search(r'filterBox\.addEventListener\(\s*"keydown"[^}]*"Enter"[^}]*'
                     r"applyFilter\(\)", body) is not None)
+    # The page answers the down arrow above its guard for a focused input, so
+    # that it works on the Follow box itself. Typed into the filter box, the
+    # arrow would toggle Follow as well, so the box keeps it.
+    start = body.find('filterBox.addEventListener("keydown"')
+    inside = body[start:body.find("\n  });", start)]
+    check("and the down arrow typed in the box stays in the box",
+          start != -1 and '"ArrowDown"' in inside
+          and "event.stopPropagation()" in inside
+          and "preventDefault" not in inside)
+    # A refused term is put back in the box as well as in what the page wants,
+    # so the box never reads a term the collector is not filtering on.
+    start = body.find("function sendFilter(")
+    inside = body[start:body.find("\n  }", start)]
+    check("a refused term is taken back out of the box",
+          "filterBox.value = filterAccepted" in inside)
     # There from the start. It needs nothing the greeting carries, and it was
     # hidden until one arrived, so a page without a greeting had no box. Nor is
     # it anywhere near buildKeys, which hides what belongs to the collector's
