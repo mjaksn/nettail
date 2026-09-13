@@ -874,6 +874,11 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
   var filterTaken = "";
   // This tab's subscription, from the greeting, or null while there is none.
   var clientId = null;
+  // Whether a filter request is on its way. One at a time, and that is not
+  // caution: each request is answered on a thread of its own at the other
+  // end, so two sent together can take the feed's lock in either order, and
+  // a reader who typed HTTPS and then 53 could be left under HTTPS.
+  var filterSending = false;
 
   function applyFilter() {
     var term = filterBox.value.trim();
@@ -884,23 +889,43 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
 
   function sendFilter() {
     // A tab with no subscription has nothing to set. The greeting of the next
-    // one compares what it was given with what is wanted and sends then.
-    if (!stream || !clientId) { return; }
+    // one compares what it was given with what is wanted and sends then. A
+    // request already out finishes first and sends whatever is wanted by then.
+    if (filterSending || !stream || !clientId) { return; }
     var term = filterWanted;
+    var client = clientId;
+    filterSending = true;
+    function done(refusal) {
+      filterSending = false;
+      var putBack = false;
+      if (refusal) {
+        note("gap", refusal);
+        // Put back only the term this request carried. One typed while it
+        // was out is the reader's newer wish, and a late failure must not
+        // undo it. A term put back is what the collector already has, since
+        // a refused request changed nothing, so there is nothing to resend.
+        if (filterWanted === term) {
+          filterWanted = filterTaken;
+          putBack = true;
+        }
+      }
+      // Anything asked for since, or a greeting that arrived for a new
+      // subscription while this one was out, goes now, and in order.
+      if ((!putBack && filterWanted !== term) || clientId !== client) {
+        sendFilter();
+      }
+    }
     fetch(BASE + "/filter", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ client: clientId, term: term })
+      body: JSON.stringify({ client: client, term: term })
     }).then(function (response) {
       // A 404 is a subscription that has just gone, and the next greeting
       // sends the term again, so it is not worth a line in the table.
-      if (!response.ok && response.status !== 404) {
-        filterWanted = filterTaken;
-        note("gap", "the collector refused that filter (" + response.status + ")");
-      }
+      done(response.ok || response.status === 404 ? null
+        : "the collector refused that filter (" + response.status + ")");
     }).catch(function () {
-      filterWanted = filterTaken;
-      note("gap", "could not reach the collector to set that filter");
+      done("could not reach the collector to set that filter");
     });
   }
 

@@ -392,6 +392,15 @@ try:
           re.search(r'BASE\s*\+\s*"/filter"', body) is not None)
     check("and arrives with it on a reconnect",
           "?filter=" in body and "encodeURIComponent(filterTaken)" in body)
+    # One request at a time. Each is answered on its own thread, so two sent
+    # together can reach the feed's lock in either order and leave the tab
+    # under the term typed first. Nothing here runs the page, so it is the
+    # guard that is grepped for.
+    start = body.find("function sendFilter(")
+    inside = body[start:body.find("\n  }", start)]
+    check("and sends it one request at a time, so terms cannot cross",
+          start != -1 and "if (filterSending" in inside
+          and "filterSending = true" in inside)
     start = body.find("function addFlow(")
     inside = body[start:body.find("\n  }", start)]
     check("and draws every flow it is sent without looking at it",
