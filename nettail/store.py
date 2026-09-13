@@ -62,7 +62,7 @@ def cadence_arg(text):
         seconds = float(text)
     except ValueError as exc:
         raise ValueError("expected seconds, not %r" % (text,)) from exc
-    if seconds <= 0:
+    if not 0 < seconds < float("inf"):
         raise ValueError("expected more than 0 seconds, not %r" % (text,))
     return seconds
 
