@@ -406,6 +406,12 @@ try:
     # there and a display-only view is still worth narrowing.
     start = body.find("function buildKeys(")
     inside = body[start:body.find("\n  }", start)]
+    # Enter is listened for directly. A search box may answer it with its own
+    # `search` event and no `change`, and the box is documented as applying on
+    # Enter.
+    check("Enter applies the filter without waiting for the box to lose focus",
+          re.search(r'filterBox\.addEventListener\(\s*"keydown"[^}]*"Enter"[^}]*'
+                    r"applyFilter\(\)", body) is not None)
     check("and the box is not tied to whether keys are taken",
           "filterBox.hidden = false" in body and "filterBox" not in inside)
 

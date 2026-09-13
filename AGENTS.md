@@ -850,7 +850,10 @@ Four things about it are easy to break.
 - **A term applies on Enter or blur, and an empty box applies at once.** The
   match is exact, so applying as each character is typed would throw away
   every flow that arrived while `443` went through `4` and `44`. Clearing can
-  throw nothing away, so it does not wait.
+  throw nothing away, so it does not wait. Enter has a `keydown` listener of
+  its own beside `change`, because a search box may answer Enter with a
+  `search` event and nothing else; Chromium fires `change` too, which is why
+  losing the listener would pass a check made only in Edge or Chrome.
 
 Nothing in the suite runs the page, so the filter is a manual check too. Send
 traffic, filter on a port and on a service name, watch rows stop arriving and

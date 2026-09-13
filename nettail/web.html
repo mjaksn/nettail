@@ -843,6 +843,13 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
   // be thrown away against "4" and "44" first. Emptying the box is the
   // exception and takes effect at once, since showing everything again can
   // throw nothing away.
+  //
+  // Enter is listened for itself as well as through `change`. A browser that
+  // answers Enter in a search box with its own `search` event is not obliged
+  // to fire `change` too, and a box documented as applying on Enter that
+  // waited for a click elsewhere would let every flow through meanwhile.
+  // Both can arrive for one press, which costs nothing: applying the term
+  // already applied returns before it writes a note.
   var filterBox = document.getElementById("filter");
   var filterTerm = "";
 
@@ -868,6 +875,9 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
   }
 
   filterBox.addEventListener("change", applyFilter);
+  filterBox.addEventListener("keydown", function (event) {
+    if (event.key === "Enter") { applyFilter(); }
+  });
   filterBox.addEventListener("input", function () {
     if (!filterBox.value.trim()) { applyFilter(); }
   });
