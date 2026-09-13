@@ -99,7 +99,7 @@ check("and the service names this machine gives those ports",
       all(name in terms for name in expected), "%s against %s" % (terms, expected))
 check("and nothing else, with no repeats",
       len(terms) == len(set(terms)) == 5 + len(set(expected)), str(terms))
-check("unfolded, since the page folds case on both sides at once",
+check("unfolded, since the feed folds case on both sides of the match",
       display.filter_terms({"src_addr": "10.0.0.1", "proto": 6},
                            type("R", (), {"lookup": lambda s, a: "NAS.Local"})())
       == ["10.0.0.1", "NAS.Local"])
