@@ -867,11 +867,18 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
   var filterBox = document.getElementById("filter");
   // The term as the reader last applied it, trimmed. What is sent.
   var filterWanted = "";
-  // The term the collector last said this tab's flows are under. What the
-  // note and the box's border follow, and what a reconnect asks for in its
-  // query: a term the collector has already taken once, so a reconnect cannot
-  // be refused over a term it would have refused.
+  // The term the collector last said, on the stream, this tab's flows are
+  // under. What the note and the box's border follow.
   var filterTaken = "";
+  // The term the collector last accepted for this tab: the one a filter
+  // request carried when it was answered with a 200, or the one a greeting
+  // named. What a reconnect asks for in its query, and not `filterTaken`,
+  // because the answer to a request comes back before its `filter` event and
+  // a stream can drop in between. A reconnect built from the older term would
+  // start the new subscription under a filter the reader has already left.
+  // It is still a term the collector took once, so a reconnect cannot be
+  // refused over a term it would have refused.
+  var filterAccepted = "";
   // This tab's subscription, from the greeting, or null while there is none.
   var clientId = null;
   // Whether a filter request is on its way. One at a time, and that is not
@@ -909,7 +916,7 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
         // undo it. A term put back is what the collector already has, since
         // a refused request changed nothing, so there is nothing to resend.
         if (filterWanted === term) {
-          filterWanted = filterTaken;
+          filterWanted = filterAccepted;
           putBack = true;
         }
       }
@@ -924,6 +931,9 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ client: client, term: term })
     }).then(function (response) {
+      // Set by the time the collector answers, so accepted now, for the
+      // subscription it was sent to if that is still this tab's.
+      if (response.ok && client === clientId) { filterAccepted = term; }
       // A 404 is a subscription that has just gone, and the next greeting
       // sends the term again, so it is not worth a line in the table.
       done(response.ok || response.status === 404 ? null
@@ -1730,13 +1740,14 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
     // close whichever stream is current, and every handler works from its own
     // `es` so that one left over from a previous connection cannot answer for
     // the one that replaced it.
+    //
     // The filter this stream was opened under. A browser retries a dropped
     // stream by itself, with the address it was first given, so a term
-    // confirmed since would be missing from the subscription that retry makes
+    // accepted since would be missing from the subscription that retry makes
     // and every flow before the page could send it again would come through
     // unfiltered. The error handler below compares the two and does the retry
     // itself when they differ.
-    var term = filterTaken;
+    var term = filterAccepted;
     var es = new EventSource(BASE + "/events" + (term
       ? "?filter=" + encodeURIComponent(term) : ""));
     stream = es;
@@ -1779,8 +1790,9 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
       if (typeof hello.filter_max === "number") {
         filterBox.maxLength = hello.filter_max;
       }
-      filterTook(hello.filter || "");
-      if (filterWanted !== filterTaken) { sendFilter(); }
+      filterAccepted = hello.filter || "";
+      filterTook(filterAccepted);
+      if (filterWanted !== filterAccepted) { sendFilter(); }
     });
 
     es.addEventListener("filter", function (event) {
@@ -1860,7 +1872,7 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
                "new URL.");
           return;
         }
-        if (term !== filterTaken) {
+        if (term !== filterAccepted) {
           // The browser is about to retry with the filter this stream opened
           // under, which is no longer the one confirmed. Retried here instead,
           // after about the pause a browser leaves, so the new subscription

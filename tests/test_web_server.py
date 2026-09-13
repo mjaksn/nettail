@@ -391,7 +391,7 @@ try:
     check("the page sends its term to the collector",
           re.search(r'BASE\s*\+\s*"/filter"', body) is not None)
     check("and arrives with it on a reconnect",
-          "?filter=" in body and "var term = filterTaken" in body
+          "?filter=" in body and "var term = filterAccepted" in body
           and "encodeURIComponent(term)" in body)
     # A browser retries a dropped stream with the address it first opened, so
     # a filter confirmed since would be missing from the subscription the
@@ -399,7 +399,7 @@ try:
     start = body.find("es.onerror")
     inside = body[start:body.find("\n    };", start)]
     check("a dropped stream opened under an older filter is retried by the page",
-          start != -1 and "term !== filterTaken" in inside
+          start != -1 and "term !== filterAccepted" in inside
           and "connect()" in inside)
     # One request at a time. Each is answered on its own thread, so two sent
     # together can reach the feed's lock in either order and leave the tab
