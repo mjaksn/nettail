@@ -879,6 +879,10 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
   // end, so two sent together can take the feed's lock in either order, and
   // a reader who typed HTTPS and then 53 could be left under HTTPS.
   var filterSending = false;
+  // How long the page waits before retrying a dropped stream itself, which it
+  // does only when the browser's own retry would lose the filter. About what
+  // a browser waits by default, so the two kinds of retry look alike.
+  var RETRY_WAIT = 3000;
 
   function applyFilter() {
     var term = filterBox.value.trim();
@@ -1726,8 +1730,15 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
     // close whichever stream is current, and every handler works from its own
     // `es` so that one left over from a previous connection cannot answer for
     // the one that replaced it.
-    var es = new EventSource(BASE + "/events" + (filterTaken
-      ? "?filter=" + encodeURIComponent(filterTaken) : ""));
+    // The filter this stream was opened under. A browser retries a dropped
+    // stream by itself, with the address it was first given, so a term
+    // confirmed since would be missing from the subscription that retry makes
+    // and every flow before the page could send it again would come through
+    // unfiltered. The error handler below compares the two and does the retry
+    // itself when they differ.
+    var term = filterTaken;
+    var es = new EventSource(BASE + "/events" + (term
+      ? "?filter=" + encodeURIComponent(term) : ""));
     stream = es;
     clientId = null;
 
@@ -1847,6 +1858,22 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
           note("gap", "The stream has ended. If the collector is still " +
                "running, reload this page; if it was restarted, it printed a " +
                "new URL.");
+          return;
+        }
+        if (term !== filterTaken) {
+          // The browser is about to retry with the filter this stream opened
+          // under, which is no longer the one confirmed. Retried here instead,
+          // after about the pause a browser leaves, so the new subscription
+          // arrives under the current term. `failures` is left as it is, so
+          // five of these still give up the way five of the browser's do.
+          es.close();
+          stream = null;
+          window.setTimeout(function () {
+            // Something else may have reconnected meanwhile: the tab coming
+            // back to the front, or the reader giving up and parking it.
+            if (stream || parked || gaveUp) { return; }
+            connect();
+          }, RETRY_WAIT);
         }
       }
     };

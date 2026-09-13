@@ -894,7 +894,13 @@ Six things about it are easy to break.
   The page puts the term the collector last confirmed in the query rather than
   whatever is in the box, so a reconnect cannot be refused over a term the
   collector would have refused, and it sends anything newer once the greeting
-  has named the subscription.
+  has named the subscription. A stream that drops on its own is the same case
+  arriving by another door: the browser retries with the address the stream
+  was opened with, which holds whatever term was confirmed back then, so the
+  error handler closes a stream whose term is out of date and reconnects
+  itself after `RETRY_WAIT`. Left to the browser, the retry arrives
+  unfiltered, the page writes that the filter was cleared, and every flow
+  before it sends the term again comes through.
 - **A term applies on Enter or blur, and an empty box applies at once.** The
   match is exact, so applying as each character is typed would throw away
   every flow that arrived while `443` went through `4` and `44`. Clearing can
