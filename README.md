@@ -1028,13 +1028,18 @@ holds them still until Refresh is pressed. `Esc`, the backdrop and **Close**
 all shut the dialog. Keys are not forwarded while it is open, so typing `x` in
 it does not clear the table underneath.
 
-The collector keeps the last four thousand flows it published, which is as many
-rows as the page itself keeps. Clicking a row older than that says so, and still
-shows the two endpoint panels and the pair, since those are kept for as long as
-the run. A row left over from before a restart says the same thing, and it is
-worth knowing that it does: a bookmarked tab reconnects with the previous run's
-rows still on the page, and none of them can be looked up in the run that
+The collector keeps the last four thousand flows each tab was sent, which is as
+many rows as the page itself keeps. Clicking a row older than that says so, and
+still shows the two endpoint panels and the pair, since those are kept for as
+long as the run. A row left over from before a restart says the same thing, and
+it is worth knowing that it does: a bookmarked tab reconnects with the previous
+run's rows still on the page, and none of them can be looked up in the run that
 replaced it.
+
+A tab that went to the background and came back is a new watcher as far as the
+collector is concerned. Its older rows stay clickable for as long as they are
+among the last four thousand flows sent to anybody, which on a busy link under a
+narrow filter may not be long.
 
 It works under `--web-readonly`. Asking what a flow was changes nothing, and a
 view served for watching is still a view worth reading properly.
@@ -1134,11 +1139,12 @@ view down with them. It is on to start with. Scroll up and it clears itself, so
 you can read something without wrestling the page for it; scroll back to the
 bottom and it fills again.
 
-The down arrow key toggles it, from anywhere on the page, which saves reaching
-for the box every time something worth reading goes past. It is the one key the
-page answers by itself. Following the tail is this tab's business rather than
-the collector's, so nothing about the press leaves the browser, and two windows
-watching one run scroll independently.
+The down arrow key toggles it, from anywhere on the page but the filter box,
+which saves reaching for the box every time something worth reading goes past.
+Typed into the filter box, the arrow stays there and only moves the cursor. It
+is the one key the page answers by itself. Following the tail is this tab's
+business rather than the collector's, so nothing about the press leaves the
+browser, and two windows watching one run scroll independently.
 
 The page takes the key rather than leaving it to the browser, so wherever a
 browser would have answered it by scrolling the flows down a line, it no longer
@@ -1166,6 +1172,41 @@ flow arrives to carry you there.
 setting for a session left up on a machine other people use. The down arrow
 goes on working there, since it never reaches the collector and so there is
 nothing for a readonly one to refuse.
+
+### Filtering new flows
+
+The box beside **Keys** narrows what the page shows from now on. Type one term
+and press Enter, or click away from the box, and a flow that arrives after that
+is shown only when the term is exactly one of these:
+
+- either end's address
+- either end's port
+- the service name either port has, such as `https`
+- the hostname either address answered to, when it answered to one
+
+Case does not matter and everything else does: the match is against the whole
+value, so `443` finds port 443 and `44` does not. An IPv6 address is matched
+without the brackets and the port the row writes around it. A hostname counts
+only if the name was known when the flow arrived, since that is when its row
+was drawn.
+
+It works forwards only. Rows already on the page stay exactly as they were, and
+a line goes into the table when a filter is applied or cleared, so you can see
+where the narrowing starts. Emptying the box shows every new flow again
+straight away, without waiting for Enter, and that includes emptying it with
+the clear button or the Escape key where a browser gives the box either.
+
+The filter belongs to the tab. The terminal is unaffected, two tabs on one run
+can filter differently, and it works under `--web-readonly`, since it changes
+what one browser is sent and nothing the collector is doing. It survives the
+tab going to the background and coming back, and is not remembered across a
+reload.
+
+The collector does the matching rather than the page, so a filtered tab is
+never sent the flows it would have thrown away. That is what keeps the
+[details dialog](#clicking-a-flow) working under a filter: the collector keeps
+the last four thousand flows each tab was sent, not the last four thousand it
+published, so flows a filter hid cannot push out the ones still on the page.
 
 ### What it is safe to do with
 
@@ -1255,9 +1296,9 @@ of stdout. `--web-colour off` is how a run says otherwise.
   told how many, rather than being shown a gap that looks like continuity.
 - The page keeps the last few thousand rows and trims the rest, saying so when
   it does. A tab left open on a busy link would otherwise become unusable.
-- The collector keeps the last four thousand flows a browser can ask about,
-  matching what the page itself keeps. An older row is still clickable and
-  says the flow itself has gone.
+- The collector keeps the last four thousand flows each browser was sent, to be
+  asked about, matching what the page itself keeps. An older row is still
+  clickable and says the flow itself has gone.
 - IPv4 only, matching the collector socket.
 - The page fetches one thing besides itself, `flags.woff2`, and only when
   there are country flags on it to draw, and asks one route a question, which

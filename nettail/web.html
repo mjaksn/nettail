@@ -189,6 +189,23 @@ button:disabled { opacity: .45; cursor: default; }
 #keys button[data-on="1"] .d { color: var(--ink); }
 #keys button[data-on="1"] .k { background: var(--accent); color: var(--ground); }
 
+/* the filter box */
+
+#filter {
+  font: inherit;
+  color: var(--ink);
+  background: var(--ground);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: 3px 8px;
+  width: 22ch;
+}
+#filter::placeholder { color: var(--ink-3); }
+/* Lit while a term is applied, which is not the same as while something is
+   typed: the box takes effect on Enter, so text sitting in it unapplied is
+   left looking like any other input. */
+#filter[data-on="1"] { border-color: var(--accent); }
+
 /* the follow toggle */
 
 .follow {
@@ -273,7 +290,8 @@ tbody tr.prose td {
 }
 tbody tr.prose[data-kind="summary"] td,
 tbody tr.prose[data-kind="hosts"] td,
-tbody tr.prose[data-kind="keys"] td { border-left-color: var(--accent); }
+tbody tr.prose[data-kind="keys"] td,
+tbody tr.prose[data-kind="filter"] td { border-left-color: var(--accent); }
 tbody tr.prose[data-kind="notice"] td { border-left-color: var(--warn); }
 tbody tr.prose[data-kind="gap"] td { border-left-color: var(--bad); color: var(--bad); }
 footer {
@@ -432,6 +450,9 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
   <button type="button" id="drawerToggle" aria-expanded="false" aria-controls="keys" hidden>
     <span class="caret" aria-hidden="true">&#9656;</span><span>Keys</span>
   </button>
+  <input type="search" id="filter" placeholder="filter" spellcheck="false"
+         autocomplete="off" aria-label="Filter new flows"
+         title="Show only new flows where an address, port, service or hostname is exactly this, in any case. Enter applies it; rows already shown stay.">
   <span class="spacer"></span>
   <label class="follow" id="followBox" hidden
          title="Whether new flows pull the view down. The down arrow toggles it.">
@@ -799,6 +820,181 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
     untold = false;
     schedule();
   }
+
+  // ---- the filter ------------------------------------------------------
+  //
+  // One term, typed into the box beside the Keys button. The collector does
+  // the matching and this page draws what it is sent: after the term is
+  // applied, a flow reaches this tab only when the term is exactly one of its
+  // addresses, ports, service names or hostnames, case aside. Nothing here
+  // looks at a flow to decide, for the reason nothing here works a cell out:
+  // a service name is what that machine's services database says.
+  //
+  // It lives in the collector because of the details dialog. The collector
+  // keeps a record for each row a tab could click, and a filter the collector
+  // could not see would let the flows it hid push those records out while
+  // their rows were still on the page. Known there, the bound is the flows
+  // each tab was actually sent.
+  //
+  // It is still this tab's own. Two tabs on one run filter independently,
+  // the terminal is untouched, and it works under --web-readonly, since it
+  // changes what one browser is sent and nothing the collector is doing. It
+  // is forward only as well: rows already on the page stay, and the note it
+  // writes is the line above which rows were not filtered and below which
+  // they were. The note is written when the collector's `filter` event
+  // arrives rather than when the term is sent, because that event sits in the
+  // stream exactly between the last flow sent under the old filter and the
+  // first under the new one.
+  //
+  // Applied on Enter, or when the box loses focus, rather than as each
+  // character is typed. The match is exact, so a term half typed matches
+  // almost nothing, and every flow arriving while somebody typed "443" would
+  // be thrown away against "4" and "44" first. Emptying the box is the
+  // exception and takes effect at once, since showing everything again can
+  // throw nothing away.
+  //
+  // Enter is listened for itself as well as through `change`. A browser that
+  // answers Enter in a search box with its own `search` event is not obliged
+  // to fire `change` too, and a box documented as applying on Enter that
+  // waited for a click elsewhere would let every flow through meanwhile.
+  // Both can arrive for one press, which costs nothing: a term already asked
+  // for is not asked for twice.
+  //
+  // In the page from the start rather than shown by the greeting, so that a
+  // page whose greeting has not come, or never will, still has the box. A term
+  // typed then waits for the greeting and is sent the moment there is a
+  // subscription to set it on.
+  var filterBox = document.getElementById("filter");
+  // The term as the reader last applied it, trimmed. What is sent.
+  var filterWanted = "";
+  // The term the collector last said, on the stream, this tab's flows are
+  // under. What the note and the box's border follow.
+  var filterTaken = "";
+  // The term the collector last accepted for this tab: the one a filter
+  // request carried when it was answered with a 200, the one a greeting
+  // named, or the one a `filter` event reported while it was still wanted. What a reconnect asks for in its query, and not `filterTaken`,
+  // because the answer to a request comes back before its `filter` event and
+  // a stream can drop in between. A reconnect built from the older term would
+  // start the new subscription under a filter the reader has already left.
+  // It is still a term the collector took once, so a reconnect cannot be
+  // refused over a term it would have refused.
+  var filterAccepted = "";
+  // This tab's subscription, from the greeting, or null while there is none.
+  var clientId = null;
+  // Whether a filter request is on its way. One at a time, and that is not
+  // caution: each request is answered on a thread of its own at the other
+  // end, so two sent together can take the feed's lock in either order, and
+  // a reader who typed HTTPS and then 53 could be left under HTTPS.
+  var filterSending = false;
+  // How long the page waits before retrying a dropped stream itself, which it
+  // does only when the browser's own retry would lose the filter. About what
+  // a browser waits by default, so the two kinds of retry look alike.
+  var RETRY_WAIT = 3000;
+
+  function applyFilter() {
+    var term = filterBox.value.trim();
+    if (term === filterWanted) { return; }
+    filterWanted = term;
+    sendFilter();
+  }
+
+  function sendFilter(again) {
+    // A tab with no subscription has nothing to set. The greeting of the next
+    // one compares what it was given with what is wanted and sends then. A
+    // request already out finishes first and sends whatever is wanted by then.
+    if (filterSending || !stream || !clientId) { return; }
+    var term = filterWanted;
+    var client = clientId;
+    filterSending = true;
+    function done(refusal, lost) {
+      filterSending = false;
+      var putBack = false;
+      if (lost) {
+        // Not a refusal, and not safe to treat as one. The collector sets the
+        // filter before it writes its answer, so an answer that never arrived
+        // may belong to a term that is already in force, and putting the old
+        // one back here would leave the box and the collector disagreeing the
+        // other way round. So nothing is put back. The term is asked for once
+        // more after a pause, which changes nothing if it did land, and past
+        // that the stream settles it: the `filter` event if the term took, or
+        // the next greeting if the connection went with the answer.
+        note("gap", lost);
+        if (!again) {
+          window.setTimeout(function () {
+            if (filterWanted === term && filterAccepted !== term) {
+              sendFilter(true);
+            }
+          }, RETRY_WAIT);
+        }
+      }
+      if (refusal) {
+        note("gap", refusal);
+        // Put back only the term this request carried. One typed while it
+        // was out is the reader's newer wish, and a late failure must not
+        // undo it. A term put back is what the collector already has, since
+        // a refused request changed nothing, so there is nothing to resend.
+        if (filterWanted === term) {
+          filterWanted = filterAccepted;
+          putBack = true;
+          // And the box with it, where it still shows the refused term, so
+          // that what it reads is what the collector is filtering on. A box
+          // the reader has typed something else into since is left alone:
+          // that is a term on its way, not one that was refused.
+          if (filterBox.value.trim() === term) {
+            filterBox.value = filterAccepted;
+          }
+        }
+      }
+      // Anything asked for since, or a greeting that arrived for a new
+      // subscription while this one was out, goes now, and in order.
+      if ((!putBack && filterWanted !== term) || clientId !== client) {
+        sendFilter();
+      }
+    }
+    fetch(BASE + "/filter", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ client: client, term: term })
+    }).then(function (response) {
+      // Set by the time the collector answers, so accepted now, for the
+      // subscription it was sent to if that is still this tab's.
+      if (response.ok && client === clientId) { filterAccepted = term; }
+      // A 404 is a subscription that has just gone, and the next greeting
+      // sends the term again, so it is not worth a line in the table.
+      done(response.ok || response.status === 404 ? null
+        : "the collector refused that filter (" + response.status + ")");
+    }).catch(function () {
+      done(null, "could not reach the collector to set that filter");
+    });
+  }
+
+  // What the collector says this tab is now under, from a `filter` event or a
+  // greeting. The note is written only when that is a change, so a tab coming
+  // back from the background under the filter it left with says nothing.
+  function filterTook(term) {
+    filterBox.setAttribute("data-on", term ? "1" : "0");
+    if (term === filterTaken) { return; }
+    filterTaken = term;
+    note("filter", term
+      ? "Filtering: new flows are shown only when an address, port, service " +
+        "or hostname is exactly \"" + term + "\". Rows above are as they were."
+      : "Filter cleared: every new flow is shown again.");
+  }
+
+  filterBox.addEventListener("change", applyFilter);
+  filterBox.addEventListener("keydown", function (event) {
+    if (event.key === "Enter") { applyFilter(); }
+    // The down arrow works the Follow box from anywhere else on the page,
+    // and is answered above the guard that leaves keys to a focused input,
+    // because that guard would otherwise also swallow it on the Follow box
+    // itself. In here it belongs to the text being edited, so it goes no
+    // further than this box. Not prevented: moving the caret is still its
+    // job here.
+    if (event.key === "ArrowDown") { event.stopPropagation(); }
+  });
+  filterBox.addEventListener("input", function () {
+    if (!filterBox.value.trim()) { applyFilter(); }
+  });
 
   function addFlow(payload) {
     var cells = payload.cells || [];
@@ -1576,8 +1772,18 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
     // close whichever stream is current, and every handler works from its own
     // `es` so that one left over from a previous connection cannot answer for
     // the one that replaced it.
-    var es = new EventSource(BASE + "/events");
+    //
+    // The filter this stream was opened under. A browser retries a dropped
+    // stream by itself, with the address it was first given, so a term
+    // accepted since would be missing from the subscription that retry makes
+    // and every flow before the page could send it again would come through
+    // unfiltered. The error handler below compares the two and does the retry
+    // itself when they differ.
+    var term = filterAccepted;
+    var es = new EventSource(BASE + "/events" + (term
+      ? "?filter=" + encodeURIComponent(term) : ""));
     stream = es;
+    clientId = null;
 
     es.addEventListener("hello", function (event) {
       var hello = JSON.parse(event.data);
@@ -1610,6 +1816,25 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
         note("notice", "reconnected to the collector");
       }
       if (status) { showStatus(status); }
+      // Every greeting, not only the first: each connection is a subscription
+      // of its own, with an id of its own, and the filter it arrived under.
+      clientId = hello.client || null;
+      if (typeof hello.filter_max === "number") {
+        filterBox.maxLength = hello.filter_max;
+      }
+      filterAccepted = hello.filter || "";
+      filterTook(filterAccepted);
+      if (filterWanted !== filterAccepted) { sendFilter(); }
+    });
+
+    es.addEventListener("filter", function (event) {
+      var term = JSON.parse(event.data).term || "";
+      // The stream saying a term took is also how one whose answer was lost
+      // becomes accepted. Only the term the reader still wants, though: the
+      // events of earlier requests can arrive after a later one was answered,
+      // and accepting one of those would send a reconnect back to it.
+      if (term === filterWanted) { filterAccepted = term; }
+      filterTook(term);
     });
 
     es.addEventListener("flow", function (event) {
@@ -1683,6 +1908,22 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
           note("gap", "The stream has ended. If the collector is still " +
                "running, reload this page; if it was restarted, it printed a " +
                "new URL.");
+          return;
+        }
+        if (term !== filterAccepted) {
+          // The browser is about to retry with the filter this stream opened
+          // under, which is no longer the one confirmed. Retried here instead,
+          // after about the pause a browser leaves, so the new subscription
+          // arrives under the current term. `failures` is left as it is, so
+          // five of these still give up the way five of the browser's do.
+          es.close();
+          stream = null;
+          window.setTimeout(function () {
+            // Something else may have reconnected meanwhile: the tab coming
+            // back to the front, or the reader giving up and parking it.
+            if (stream || parked || gaveUp) { return; }
+            connect();
+          }, RETRY_WAIT);
         }
       }
     };

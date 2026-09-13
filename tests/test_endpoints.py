@@ -7,7 +7,8 @@ from harness import check, finish
 from netflume import flow_endpoints
 
 import nettail as main
-from nettail import cli
+from nettail import cli, display
+from nettail.services import service_name
 
 HDR = {"exporter": "10.0.0.1"}
 
@@ -74,5 +75,48 @@ check("the pair table uses the same ends",
       str(sorted(tally.traffic.pairs)))
 check("and the talkers table", tally.talkers["8.8.8.8"] == 1000,
       str(dict(tally.talkers)))
+
+# And what the browser's filter box may match a flow on is read off the same
+# ends, so a post-NAT flow can be found by the addresses its row shows.
+
+
+class Named:
+    """A resolver that knows one name, as a real one knows some and not others."""
+
+    def lookup(self, addr):
+        return {"8.8.8.8": "dns.google"}.get(addr)
+
+
+terms = display.filter_terms(post_nat, Named())
+check("the filter's terms carry the post-NAT addresses",
+      "192.168.1.10" in terms and "8.8.8.8" in terms, str(terms))
+check("and both ports, as the row writes them",
+      "51000" in terms and "443" in terms, str(terms))
+check("and the hostname of the end that has one",
+      "dns.google" in terms, str(terms))
+expected = [name for name in (service_name(51000, 6), service_name(443, 6)) if name]
+check("and the service names this machine gives those ports",
+      all(name in terms for name in expected), "%s against %s" % (terms, expected))
+check("and nothing else, with no repeats",
+      len(terms) == len(set(terms)) == 5 + len(set(expected)), str(terms))
+check("unfolded, since the feed folds case on both sides of the match",
+      display.filter_terms({"src_addr": "10.0.0.1", "proto": 6},
+                           type("R", (), {"lookup": lambda s, a: "NAS.Local"})())
+      == ["10.0.0.1", "NAS.Local"])
+check("a port of 0 is not a term, since no row prints one",
+      display.filter_terms({"src_addr": "10.0.0.1", "src_port": 0, "proto": 1})
+      == ["10.0.0.1"])
+check("and a flow with no ends has nothing to match",
+      display.filter_terms({"proto": 6}, Named()) == [])
+# A record can carry a port with no address beside it, and the row draws that
+# end as a dash. Its port and service would otherwise let a filter through a
+# row that shows neither.
+headless = {"dst_addr": "8.8.8.8", "src_port": 51000, "dst_port": 53, "proto": 17}
+check("an end with no address offers nothing, port and service included",
+      display.filter_terms(headless) == ["8.8.8.8", "53"]
+      + [name for name in (service_name(53, 17),) if name],
+      str(display.filter_terms(headless)))
+check("which is what the row draws for it",
+      display.endpoint(None, 51000, 17, 40).strip() == "-")
 
 finish("endpoint agreement")

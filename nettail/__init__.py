@@ -59,10 +59,9 @@ caller wanting either asks ``detail`` for it. The tables that other things are
 held against do come up, since they are what a suite compares to netflume.
 """
 
-__version__ = "0.16.0"
+__version__ = "0.17.0"
 
 from .cli import (
-    DETAIL_RING,
     WatchedTemplates,
     ask_yes_no,
     at_a_terminal,
@@ -104,7 +103,7 @@ from .country import (
     spell_flags,
     terminal_flags,
 )
-from .detail import DETAIL_ROWS, FIELD_LABELS, TCP_FLAG_NAMES
+from .detail import DETAIL_RING, DETAIL_ROWS, FIELD_LABELS, TCP_FLAG_NAMES
 from .display import (
     COLUMNS,
     ENDPOINT_INDENT,

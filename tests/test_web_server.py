@@ -18,7 +18,7 @@ import urllib.request
 from harness import check, finish
 
 from nettail.feed import Feed
-from nettail.web import ASK_QUEUE_MAX, MAX_CLIENTS, WebInterface, unpad
+from nettail.web import ASK_QUEUE_MAX, FILTER_MAX, MAX_CLIENTS, WebInterface, unpad
 
 TIMEOUT = 6.0
 
@@ -377,6 +377,89 @@ try:
     check("but below the guard that leaves everything to an open dialog",
           -1 < handler.find("if (detail.open)") < arrow)
 
+    # -- the filter box ---------------------------------------------------
+    #
+    # A term typed beside the Keys button goes to the collector, which then
+    # sends this tab only the flows it names. Greps again, since nothing here
+    # runs the page, and each is for a way of breaking it that would look fine
+    # on a quiet link.
+    check("the page has a filter box", re.search(r'<input[^>]*id="filter"', body)
+          is not None)
+    # The collector matches, so the page must not. It keeps a record for each
+    # flow a tab was sent, and a page quietly throwing some away would put the
+    # records of its own rows back at the mercy of flows it hid.
+    check("the page sends its term to the collector",
+          re.search(r'BASE\s*\+\s*"/filter"', body) is not None)
+    check("and arrives with it on a reconnect",
+          "?filter=" in body and "var term = filterAccepted" in body
+          and "encodeURIComponent(term)" in body)
+    # A browser retries a dropped stream with the address it first opened, so
+    # a filter confirmed since would be missing from the subscription the
+    # retry makes. The page retries itself when the two differ.
+    start = body.find("es.onerror")
+    inside = body[start:body.find("\n    };", start)]
+    check("a dropped stream opened under an older filter is retried by the page",
+          start != -1 and "term !== filterAccepted" in inside
+          and "connect()" in inside)
+    # One request at a time. Each is answered on its own thread, so two sent
+    # together can reach the feed's lock in either order and leave the tab
+    # under the term typed first. Nothing here runs the page, so it is the
+    # guard that is grepped for.
+    start = body.find("function sendFilter(")
+    inside = body[start:body.find("\n  }", start)]
+    check("and sends it one request at a time, so terms cannot cross",
+          start != -1 and "if (filterSending" in inside
+          and "filterSending = true" in inside)
+    start = body.find("function addFlow(")
+    inside = body[start:body.find("\n  }", start)]
+    check("and draws every flow it is sent without looking at it",
+          start != -1 and "filter" not in inside.lower()
+          and "payload.terms" not in body)
+    # The note goes on when the collector says the filter took, because that
+    # event is the line in the stream between the old filter and the new.
+    check("the note follows the collector's filter event, not the POST",
+          re.search(r'addEventListener\(\s*"filter"', body) is not None
+          and "function filterTook(" in body)
+    # Enter is listened for directly. A search box may answer it with its own
+    # `search` event and no `change`, and the box is documented as applying on
+    # Enter.
+    check("Enter applies the filter without waiting for the box to lose focus",
+          re.search(r'filterBox\.addEventListener\(\s*"keydown"[^}]*"Enter"[^}]*'
+                    r"applyFilter\(\)", body) is not None)
+    # The page answers the down arrow above its guard for a focused input, so
+    # that it works on the Follow box itself. Typed into the filter box, the
+    # arrow would toggle Follow as well, so the box keeps it.
+    start = body.find('filterBox.addEventListener("keydown"')
+    inside = body[start:body.find("\n  });", start)]
+    check("and the down arrow typed in the box stays in the box",
+          start != -1 and '"ArrowDown"' in inside
+          and "event.stopPropagation()" in inside
+          and "preventDefault" not in inside)
+    # A refused term is put back in the box as well as in what the page wants,
+    # so the box never reads a term the collector is not filtering on.
+    start = body.find("function sendFilter(")
+    inside = body[start:body.find("\n  }", start)]
+    check("a refused term is taken back out of the box",
+          "filterBox.value = filterAccepted" in inside)
+    # But a request whose answer never came is not a refusal: the collector
+    # sets the filter before it answers, so the term may already be in force.
+    # The catch must not take the path that puts the old term back.
+    catch = inside[inside.find(".catch("):]
+    check("and a lost answer is not treated as a refusal",
+          'done(null, "could not reach' in catch)
+    # There from the start. It needs nothing the greeting carries, and it was
+    # hidden until one arrived, so a page without a greeting had no box. Nor is
+    # it anywhere near buildKeys, which hides what belongs to the collector's
+    # keys under --web-readonly: filtering changes nothing there and a
+    # display-only view is still worth narrowing.
+    tag = re.search(r'<input[^>]*id="filter"[^>]*>', body)
+    check("the box is not hidden waiting for anything",
+          tag is not None and not re.search(r"\shidden\b", tag.group(0))
+          and "filterBox.hidden" not in body, tag.group(0) if tag else "")
+    start = body.find("function buildKeys(")
+    inside = body[start:body.find("\n  }", start)]
+    check("and is not tied to whether keys are taken", "filterBox" not in inside)
+
     # -- the greeting -----------------------------------------------------
 
     bus.set_hello({
@@ -504,8 +587,9 @@ try:
             asks.get_nowait()
 
         # And an unknown route under a good token is still a 404, so the
-        # branch that added a second one did not open the door to a third.
-        check("no third control route appeared",
+        # branches that added the detail and filter routes did not open the
+        # door to anything else.
+        check("no other control route appeared",
               post("anything", {"ask": 1}) == 404)
 
         # The answer goes back on the stream rather than in the response,
@@ -517,6 +601,82 @@ try:
         check("the answer arrives on the stream",
               bool(frames) and frames[0][0] == "detail", repr(frames))
         check("with the ask's id on it", frames[0][1]["ask"] == 41)
+
+        # -- a tab's filter ----------------------------------------------
+        #
+        # Set on this subscription, by the id its greeting carried. The
+        # collector does the matching, so what is checked is what reaches the
+        # stream afterwards rather than anything the page does.
+        check("the greeting names this subscription",
+              isinstance(hello.get("client"), str) and len(hello["client"]) >= 16,
+              repr(hello.get("client")))
+        check("and the filter it is under, which is none yet",
+              hello.get("filter") == "", repr(hello.get("filter")))
+        check("and the longest term the filter route takes",
+              hello.get("filter_max") == FILTER_MAX)
+        check("a filter is set by the id the greeting named",
+              post("filter", {"client": hello["client"], "term": "HTTPS"}) == 200)
+        frames = read_frames(stream, 1)
+        check("and the tab is told where it took effect",
+              frames == [("filter", {"term": "HTTPS"})], repr(frames))
+        bus.flow({"n": 1}, ["53", "domain"])
+        bus.flow({"n": 2}, ["443", "https"])
+        frames = read_frames(stream, 1)
+        check("after which a flow the term does not name never reaches it",
+              frames == [("flow", {"n": 2})], repr(frames))
+        check("clearing it is setting an empty term",
+              post("filter", {"client": hello["client"], "term": ""}) == 200
+              and read_frames(stream, 1) == [("filter", {"term": ""})])
+
+        for name, payload, code in (
+            ("a client nobody holds", {"client": "nobody", "term": "53"}, 404),
+            ("no client", {"term": "53"}, 400),
+            ("no term", {"client": hello["client"]}, 400),
+            ("a term that is not a string",
+             {"client": hello["client"], "term": 53}, 400),
+            ("a client that is not a string", {"client": 7, "term": "53"}, 400),
+            ("a term longer than any it could match",
+             {"client": hello["client"], "term": "x" * (FILTER_MAX + 1)}, 400),
+            ("a field this route does not know",
+             {"client": hello["client"], "term": "53", "extra": 1}, 400),
+            ("a body that is not an object", ["53"], 400),
+        ):
+            got = post("filter", payload)
+            check("the filter route refuses %s" % name, got == code,
+                  "got %r" % (got,))
+        check("and a foreign origin, as every control route does",
+              post("filter", {"client": hello["client"], "term": "53"},
+                   origin="http://evil.example.com") == 403)
+
+        # A tab back from the background asks for its filter in the query, so
+        # that it is filtering from the first flow of the new subscription.
+        host = "127.0.0.1:%d" % site.port
+        returning = urllib.request.urlopen(urllib.request.Request(
+            "http://%s/t/%s/events?filter=53" % (host, site.token),
+            headers={"Host": host}), timeout=TIMEOUT)
+        try:
+            frames = read_frames(returning, 1)
+            check("a stream opened with a filter in its query is under it",
+                  frames and frames[0][1].get("filter") == "53", repr(frames))
+            check("and has an id of its own",
+                  frames and frames[0][1].get("client") != hello["client"])
+        finally:
+            returning.close()
+        # The server notices a closed stream by looking, so its place against
+        # the cap comes back a moment later rather than at once, and the cap
+        # is counted below.
+        deadline = time.time() + TIMEOUT
+        while bus.clients > 1 and time.time() < deadline:
+            time.sleep(0.05)
+        try:
+            urllib.request.urlopen(urllib.request.Request(
+                "http://%s/t/%s/events?filter=%s" % (host, site.token,
+                                                     "x" * (FILTER_MAX + 1)),
+                headers={"Host": host}), timeout=TIMEOUT)
+            check("a stream asking for an impossible filter is refused", False)
+        except urllib.error.HTTPError as exc:
+            check("a stream asking for an impossible filter is refused",
+                  exc.code == 400, str(exc.code))
 
         # -- falling behind ----------------------------------------------
         #
