@@ -922,6 +922,12 @@ Seven things about it are easy to break.
   the box still reads the refused term, so the box never shows a filter that
   is not the one in force. A box the reader has typed into since is left
   alone, because that is a term on its way rather than one that was refused.
+  A request whose answer never arrived is not a refusal and takes none of
+  that path: the collector sets the filter and queues the `filter` event
+  before it writes the answer, so a lost answer may belong to a term already
+  in force. Nothing is put back; the term is asked for once more after
+  `RETRY_WAIT`, which changes nothing if it did land, and a `filter` event
+  naming the term still wanted is what marks it accepted.
 
 Nothing in the suite runs the page, so the filter is a manual check too. Send
 traffic, filter on a port and on a service name, watch rows stop arriving and

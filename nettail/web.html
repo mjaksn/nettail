@@ -871,8 +871,8 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
   // under. What the note and the box's border follow.
   var filterTaken = "";
   // The term the collector last accepted for this tab: the one a filter
-  // request carried when it was answered with a 200, or the one a greeting
-  // named. What a reconnect asks for in its query, and not `filterTaken`,
+  // request carried when it was answered with a 200, the one a greeting
+  // named, or the one a `filter` event reported while it was still wanted. What a reconnect asks for in its query, and not `filterTaken`,
   // because the answer to a request comes back before its `filter` event and
   // a stream can drop in between. A reconnect built from the older term would
   // start the new subscription under a filter the reader has already left.
@@ -898,7 +898,7 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
     sendFilter();
   }
 
-  function sendFilter() {
+  function sendFilter(again) {
     // A tab with no subscription has nothing to set. The greeting of the next
     // one compares what it was given with what is wanted and sends then. A
     // request already out finishes first and sends whatever is wanted by then.
@@ -906,9 +906,27 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
     var term = filterWanted;
     var client = clientId;
     filterSending = true;
-    function done(refusal) {
+    function done(refusal, lost) {
       filterSending = false;
       var putBack = false;
+      if (lost) {
+        // Not a refusal, and not safe to treat as one. The collector sets the
+        // filter before it writes its answer, so an answer that never arrived
+        // may belong to a term that is already in force, and putting the old
+        // one back here would leave the box and the collector disagreeing the
+        // other way round. So nothing is put back. The term is asked for once
+        // more after a pause, which changes nothing if it did land, and past
+        // that the stream settles it: the `filter` event if the term took, or
+        // the next greeting if the connection went with the answer.
+        note("gap", lost);
+        if (!again) {
+          window.setTimeout(function () {
+            if (filterWanted === term && filterAccepted !== term) {
+              sendFilter(true);
+            }
+          }, RETRY_WAIT);
+        }
+      }
       if (refusal) {
         note("gap", refusal);
         // Put back only the term this request carried. One typed while it
@@ -946,7 +964,7 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
       done(response.ok || response.status === 404 ? null
         : "the collector refused that filter (" + response.status + ")");
     }).catch(function () {
-      done("could not reach the collector to set that filter");
+      done(null, "could not reach the collector to set that filter");
     });
   }
 
@@ -1810,7 +1828,13 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
     });
 
     es.addEventListener("filter", function (event) {
-      filterTook(JSON.parse(event.data).term || "");
+      var term = JSON.parse(event.data).term || "";
+      // The stream saying a term took is also how one whose answer was lost
+      // becomes accepted. Only the term the reader still wants, though: the
+      // events of earlier requests can arrive after a later one was answered,
+      // and accepting one of those would send a reconnect back to it.
+      if (term === filterWanted) { filterAccepted = term; }
+      filterTook(term);
     });
 
     es.addEventListener("flow", function (event) {

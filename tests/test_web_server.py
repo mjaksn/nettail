@@ -441,6 +441,12 @@ try:
     inside = body[start:body.find("\n  }", start)]
     check("a refused term is taken back out of the box",
           "filterBox.value = filterAccepted" in inside)
+    # But a request whose answer never came is not a refusal: the collector
+    # sets the filter before it answers, so the term may already be in force.
+    # The catch must not take the path that puts the old term back.
+    catch = inside[inside.find(".catch("):]
+    check("and a lost answer is not treated as a refusal",
+          'done(null, "could not reach' in catch)
     # There from the start. It needs nothing the greeting carries, and it was
     # hidden until one arrived, so a page without a greeting had no box. Nor is
     # it anywhere near buildKeys, which hides what belongs to the collector's
