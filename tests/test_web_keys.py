@@ -578,7 +578,7 @@ check("the greeting carries it too, for a tab that reconnects",
 # figure the page noted on its way out. It has to wait for a status frame.
 
 result = run([], [v5_packet(n) for n in (0, 2, 4, 6)], gap=(2, 4), settle=0.6,
-             argv=["--flow-store", ""], restore_after=lambda seen: 2)
+             argv=["--flow-store"], restore_after=lambda seen: 2)
 before = (result.get("hello_before_gap") or {}).get("status") or {}
 after = (result.get("hello_after_gap") or {}).get("status") or {}
 check("a figure exists before the gap", before.get("flows_shown", 0) > 0,
@@ -591,13 +591,14 @@ check("while a status frame does carry the figure the gap moved",
       counts and max(counts) > before.get("flows_shown", 0),
       "%r against %r" % (counts, before.get("flows_shown")))
 replayed = restored(result)
+ids = [f["n"] for f in replayed[0]["flows"]] if replayed else []
+payload_counts = [len(p.get("flows", [])) for p in replayed]
 check("a tab back from the background is sent stored rows it missed",
-      len(replayed) == 1
-      and [f["record"]["_ingest_id"] for f in replayed[0]["flows"]] == [3, 4],
-      str(replayed))
+      payload_counts == [4] and ids == [3, 4, 5, 6],
+      repr(payload_counts + ids))
 check("and the live rows after it still arrive only once",
-      [f["record"]["_ingest_id"] for f in result["flows"]] == [5, 6, 7, 8],
-      str([f["record"]["_ingest_id"] for f in result["flows"]]))
+      [f["n"] for f in result["flows"]] == [7, 8],
+      repr([f["n"] for f in result["flows"]]))
 
 # The figure has to be flows *shown*, not flows decoded. Under --external-only
 # the two differ by a lot, and a count of everything decoded would tell a

@@ -83,6 +83,7 @@ from .web import (
     DEFAULT_DETAIL_REFRESH,
     DEFAULT_WEB_PORT,
     KEY_QUEUE_MAX,
+    RESTORE_MAX,
     WEB_ENDPOINT_WIDTH,
     WEB_TOKEN_ENV,
     WebInterface,
@@ -1975,7 +1976,7 @@ def main():
         if args.flow_store is None:
             return
         folded = term.casefold() or None
-        rows = flow_store.since(after_ingest, limit=web.RESTORE_MAX)
+        rows = flow_store.since(after_ingest, limit=RESTORE_MAX)
         flows = []
         for row in rows:
             record = json.loads(row["record_json"])
