@@ -64,6 +64,7 @@ SAMPLES = {
     "json": "/var/log/nettail/flows.jsonl",
     "flow_store": "/var/lib/nettail/flows.sqlite3",
     "flow_retention_days": "21",
+    "flow_prune_every": "1800",
     "colour": "never",
     "no_color": "true",
     "header_every": "12",

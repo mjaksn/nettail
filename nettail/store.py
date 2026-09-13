@@ -17,6 +17,7 @@ import time
 
 SCHEMA_VERSION = 1
 DB_NAME = "flows.sqlite3"
+DEFAULT_PRUNE_CADENCE = 12 * 60 * 60
 
 # A collector without any help from the reader is the point of this feature, so
 # the history file lives in the same per-user place the saved config does rather
@@ -54,13 +55,26 @@ def retention_arg(text):
     return days
 
 
+def cadence_arg(text):
+    """One prune cadence in seconds, off the command line or out of a file."""
+    try:
+        seconds = float(text)
+    except ValueError as exc:
+        raise ValueError("expected seconds, not %r" % (text,)) from exc
+    if seconds <= 0:
+        raise ValueError("expected more than 0 seconds, not %r" % (text,))
+    return seconds
+
+
 class FlowStore:
     """The SQLite file a collector appends shown flows to."""
 
-    def __init__(self, path, retention_days):
+    def __init__(self, path, retention_days, prune_every=DEFAULT_PRUNE_CADENCE):
         self.path = path
         self.retention_days = retention_days
+        self.prune_every = prune_every
         self._next_id = 0
+        self._next_prune = 0.0
         directory = os.path.dirname(path)
         if directory:
             os.makedirs(directory, exist_ok=True)
@@ -155,6 +169,12 @@ class FlowStore:
         floor = now - (self.retention_days * 24 * 60 * 60)
         self._db.execute("DELETE FROM flows WHERE received < ?", (floor,))
         self._db.commit()
+        self._next_prune = now + self.prune_every
+
+    def prune_due(self, now=None):
+        """Whether the scheduled prune time has arrived."""
+        now = time.time() if now is None else now
+        return now >= self._next_prune
 
     def count(self):
         """How many rows are in the durable history."""
@@ -183,12 +203,16 @@ class DisabledStore:
 
     path = None
     retention_days = None
+    prune_every = None
 
     def write(self, record):
         return None
 
     def prune(self, now=None):
         return None
+
+    def prune_due(self, now=None):
+        return False
 
     def count(self):
         return 0
@@ -200,10 +224,22 @@ class DisabledStore:
         return None
 
 
-def describe(path, retention_days):
+def describe(path, retention_days, prune_every):
     """One startup line naming the durable history file and its bound."""
     buffer = io.StringIO()
-    print("recording shown flows in %s, keeping %d day%s"
-          % (path, retention_days, "" if retention_days == 1 else "s"),
+    print("recording shown flows in %s, keeping %d day%s, pruning every %s"
+          % (path, retention_days, "" if retention_days == 1 else "s",
+             _seconds(prune_every)),
           file=buffer, end="")
     return buffer.getvalue()
+
+
+def _seconds(value):
+    """A cadence as a short piece of prose for the startup line."""
+    if value >= 3600 and value % 3600 == 0:
+        hours = int(value // 3600)
+        return "%d hour%s" % (hours, "" if hours == 1 else "s")
+    if value >= 60 and value % 60 == 0:
+        minutes = int(value // 60)
+        return "%d minute%s" % (minutes, "" if minutes == 1 else "s")
+    return ("%g second%s" % (value, "" if value == 1 else "s"))

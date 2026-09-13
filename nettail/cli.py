@@ -1315,6 +1315,10 @@ def build_parser():
                     default=14, metavar="DAYS",
                     help="how many days of flow history to keep in the SQLite "
                          "store (default 14)")
+    ap.add_argument("--flow-prune-every", type=store.cadence_arg,
+                    default=store.DEFAULT_PRUNE_CADENCE, metavar="SECONDS",
+                    help="how often the flow history store prunes old rows "
+                         "(default 43200, which is 12 hours)")
     ap.add_argument("--colour", "--color", choices=("auto", "always", "never"),
                     default="auto", metavar="WHEN",
                     help="when to use ANSI colour on this terminal: auto (a "
@@ -1765,7 +1769,11 @@ def main():
     flow_store = store.DisabledStore()
     if args.flow_store is not None:
         try:
-            flow_store = store.FlowStore(args.flow_store, args.flow_retention_days)
+            flow_store = store.FlowStore(
+                args.flow_store,
+                args.flow_retention_days,
+                prune_every=args.flow_prune_every,
+            )
         except (OSError, sqlite3.Error, RuntimeError) as exc:
             ap.error("cannot write flow history to %s: %s"
                      % (args.flow_store, exc))
@@ -2020,8 +2028,12 @@ def main():
         if keys_on:
             print(f"{C.GREY}{KEY_HELP}{C.RESET}", file=out)
         if args.flow_store is not None:
-            print(f"{C.GREY}{store.describe(args.flow_store, args.flow_retention_days)}"
-                  f"{C.RESET}", file=out)
+            note = store.describe(
+                args.flow_store,
+                args.flow_retention_days,
+                args.flow_prune_every,
+            )
+            print(f"{C.GREY}{note}{C.RESET}", file=out)
         for warning in web_warnings:
             print(warning, file=out)
 
@@ -2377,6 +2389,8 @@ def main():
                     if bus.active:
                         bus.status(web_status(snap))
             bar.update(lambda s=snap: s if s is not None else take_snapshot())
+            if flow_store.prune_due(now):
+                flow_store.prune(now=now)
 
             try:
                 data, addr = sock.recvfrom(65535)

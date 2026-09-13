@@ -28,6 +28,9 @@ windows = store.default_path(platform="win32",
 check("the default Windows path prefers APPDATA",
       windows == os.path.join(r"C:\Users\alice\AppData\Roaming", "nettail",
                               "flows.sqlite3"), windows)
+check("the default prune cadence is 12 hours",
+      store.DEFAULT_PRUNE_CADENCE == 12 * 60 * 60,
+      str(store.DEFAULT_PRUNE_CADENCE))
 
 # --- one row goes in and comes back ------------------------------------------
 history = store.FlowStore(target, retention_days=7)
@@ -74,6 +77,12 @@ check("retention drops rows older than the bound",
       retained.count() == 1, str(retained.count()))
 check("and leaves the newest row behind",
       retained.latest()["exporter"] == "10.0.0.3", str(retained.latest()))
+check("pruning schedules the next run from now",
+      retained.prune_due(now=now + retained.prune_every - 1) is False,
+      str(retained.prune_every))
+check("and becomes due once the cadence has passed",
+      retained.prune_due(now=now + retained.prune_every),
+      str(retained.prune_every))
 retained.close()
 
 # --- the config type is strict about days ------------------------------------
@@ -85,5 +94,19 @@ for bad in ("0", "-1", "three"):
     except ValueError:
         ok = True
     check("%r is refused as a retention period" % bad, ok)
+
+check("a prune cadence accepts seconds", store.cadence_arg("1800") == 1800)
+check("and accepts fractions of a second", store.cadence_arg("0.5") == 0.5)
+for bad in ("0", "-1", "never"):
+    try:
+        store.cadence_arg(bad)
+        ok = False
+    except ValueError:
+        ok = True
+    check("%r is refused as a prune cadence" % bad, ok)
+
+check("the startup note names the cadence in hours",
+      "12 hours" in store.describe("flows.sqlite3", 14, store.DEFAULT_PRUNE_CADENCE),
+      store.describe("flows.sqlite3", 14, store.DEFAULT_PRUNE_CADENCE))
 
 finish("flow store")
