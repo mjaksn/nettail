@@ -27,6 +27,7 @@ goes to the client so that a gap is something it can say out loud rather than a
 silence it presents as continuity.
 """
 
+import secrets
 import threading
 from collections import deque
 
@@ -47,6 +48,7 @@ EVENTS = (
     ("prose", "a block of text the terminal also printed, ANSI intact"),
     ("clear", "the x key: throw away what is on screen"),
     ("detail", "the answer to one browser's ask about a flow, by id"),
+    ("filter", "this client's filter changed, and every flow after this obeys it"),
     ("dropped", "how many events this client missed while it was behind"),
 )
 
@@ -67,9 +69,20 @@ class Client:
     and taking one lock beats taking N.
     """
 
-    def __init__(self, backlog=CLIENT_BACKLOG):
+    def __init__(self, backlog=CLIENT_BACKLOG, term=None):
         self.queue = deque(maxlen=backlog)
         self.dropped = 0
+        # What the page names this subscription by when it changes its filter.
+        # Random rather than counted, so that one tab cannot set another's
+        # filter by guessing the number next to its own. Every tab already
+        # holds the token, so this is about accidents rather than attackers.
+        self.id = secrets.token_urlsafe(16)
+        # The term as the reader typed it, for saying back to them, and the
+        # same term case folded, which is what flows are compared against.
+        # Both empty and None respectively when this client sees every flow.
+        self.term = ""
+        self.filter = None
+        self.set_term(term)
         # Set when the writer should stop: on shutdown, or when the client cap
         # turns a browser away after it has already been given a queue.
         self.closed = False
@@ -78,6 +91,22 @@ class Client:
         # because a writer only ever waits for "something happened", and the
         # queue itself is the state it then reads.
         self.ready = threading.Event()
+
+    def set_term(self, term):
+        """Take a filter term, or clear the filter with an empty one."""
+        self.term = (term or "").strip()
+        self.filter = self.term.casefold() or None
+
+    def wants(self, folded):
+        """Whether a flow with these case folded terms passes this filter.
+
+        None for `folded` means the terms were never worked out, which happens
+        when the filter was set between the publisher asking whether anybody
+        filters and handing the flow over. The flow goes through: a row too
+        many under a filter just applied is a smaller wrong than a row lost
+        from a view that asked for everything.
+        """
+        return self.filter is None or folded is None or self.filter in folded
 
 
 class Feed:
@@ -99,6 +128,10 @@ class Feed:
         # published to a browser that connected microseconds ago, and neither
         # is worth serialising the receive loop for.
         self.active = False
+        # Whether any client has a filter, which is whether a publisher has to
+        # work out what a flow can be matched on at all. Written and read the
+        # way `active` is, and for the same reason.
+        self.filtering = False
         # What a browser needs to render a complete page when it arrives an
         # hour into a session. Held rather than rebuilt, because the collector
         # is the only thing that can produce it and it is not on the HTTP
@@ -111,7 +144,7 @@ class Feed:
 
     # -- subscribing --------------------------------------------------------
 
-    def subscribe(self, limit=None):
+    def subscribe(self, limit=None, term=None):
         """Hand back a Client, or None when it cannot have one.
 
         None means either that the collector is shutting down or that the
@@ -119,15 +152,21 @@ class Feed:
         same lock that appends, because checking it outside and subscribing
         after leaves room for two browsers arriving together to both find
         space and both take it.
+
+        `term` is a filter the client arrives with, which is how a tab that
+        gave its stream up in the background comes back still filtering.
+        Setting it afterwards would let every flow published in between
+        through, and the page would have nothing to tell them apart by.
         """
         with self._lock:
             if self._closed_down:
                 return None
             if limit is not None and len(self._clients) >= limit:
                 return None
-            client = Client(self.backlog)
+            client = Client(self.backlog, term)
             self._clients.append(client)
             self.active = True
+            self._count_filters()
             return client
 
     def unsubscribe(self, client):
@@ -136,8 +175,34 @@ class Feed:
             if client in self._clients:
                 self._clients.remove(client)
             self.active = bool(self._clients)
+            self._count_filters()
         client.closed = True
         client.ready.set()
+
+    def set_filter(self, client_id, term):
+        """Change one client's filter. False when there is no such client.
+
+        Called from a request thread, and allowed to be for the reason
+        subscribing is: it changes what one browser is sent and nothing about
+        what the collector is doing, and it happens under the lock every
+        publish takes. That lock is also what makes the `filter` event exact.
+        It goes on the client's own queue in the same breath the filter
+        changes, so every flow ahead of it was sent under the old filter and
+        every flow behind it under the new one, and the page's note about the
+        change lands on the line where the change really is.
+        """
+        with self._lock:
+            client = next((c for c in self._clients if c.id == client_id), None)
+            if client is None:
+                return False
+            client.set_term(term)
+            self._count_filters()
+            self._put(client, ("filter", {"term": client.term}))
+        return True
+
+    def _count_filters(self):
+        # Under the lock, from every place a client or its filter changes.
+        self.filtering = any(c.filter is not None for c in self._clients)
 
     @property
     def clients(self):
@@ -160,10 +225,15 @@ class Feed:
         event = (kind, data)
         with self._lock:
             for client in self._clients:
-                if len(client.queue) == client.queue.maxlen:
-                    client.dropped += 1
-                client.queue.append(event)
-                client.ready.set()
+                self._put(client, event)
+
+    @staticmethod
+    def _put(client, event):
+        # Under the lock. The one place an event joins a queue.
+        if len(client.queue) == client.queue.maxlen:
+            client.dropped += 1
+        client.queue.append(event)
+        client.ready.set()
 
     def drain(self, client):
         """Everything one client is waiting for, and how much it missed.
@@ -178,9 +248,34 @@ class Feed:
             dropped, client.dropped = client.dropped, 0
         return events, dropped
 
-    def flow(self, record):
-        """One flow as the browser needs it: its cells, and the --json record."""
-        self.publish("flow", record)
+    def flow(self, record, terms=None):
+        """One flow, to every client whose filter it passes.
+
+        `terms` is what the flow can be matched on, from
+        `display.filter_terms`, and is only worth working out when `filtering`
+        says somebody is asking. Case is folded here, once, and the client's
+        term was folded the same way, so there is one opinion about what a
+        capital is and it is Python's.
+
+        Answers the ids of the clients that took it and of every client
+        attached, which are what the details ring keeps records by: a flow no
+        browser was shown cannot be clicked, one that a browser was shown has
+        to stay clickable for as long as that browser could still have its
+        row, and a browser that has gone has no rows left. Both come from the
+        one pass under the lock, so the hot path takes it once per flow.
+        """
+        if not self.active:
+            return (), frozenset()
+        event = ("flow", record)
+        folded = None if terms is None else {t.casefold() for t in terms}
+        takers = []
+        with self._lock:
+            for client in self._clients:
+                if client.wants(folded):
+                    self._put(client, event)
+                    takers.append(client.id)
+            attached = frozenset(c.id for c in self._clients)
+        return takers, attached
 
     def prose(self, kind, text):
         """A block the terminal also printed, escape codes and all."""

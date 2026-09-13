@@ -381,6 +381,39 @@ def extra_lines(rec, args):
     return lines
 
 
+def filter_terms(rec, resolver=None):
+    """What a browser's filter box may match one flow against.
+
+    Each end's address, its port, the service name that port has and the
+    hostname the address answered to, for whichever of those there is. Built
+    here for the reason the cells are: a service name is whatever this
+    machine's services database calls the port, and nothing but the program
+    that drew the row can say what the row could have shown.
+
+    The same questions `endpoint` asks, asked the same way, so that a term
+    matches a flow exactly when the row drawn for it could have shown that
+    term. A port of 0 is left out for that reason: the row does not print one.
+    So is the whole of an end with no address, port and service name
+    included, because `endpoint` draws that end as a dash and nothing else,
+    and a v9 or IPFIX record can carry transport fields with no address to
+    go with them. Nothing is folded here. `Feed.flow` folds these and `Client.set_term`
+    folds the term, both with `casefold`, so the comparison has one place on
+    each side that decides what a capital is and neither of them is this.
+    """
+    proto = rec.get("proto")
+    terms = []
+    for addr, port in zip(flow_endpoints(rec),
+                          (rec.get("src_port"), rec.get("dst_port")), strict=True):
+        if addr is None:
+            continue
+        for term in (addr, str(port) if port else None,
+                     service_name(port, proto),
+                     resolver.lookup(addr) if resolver and addr else None):
+            if term and term not in terms:
+                terms.append(term)
+    return terms
+
+
 def render(rec, hdr, args, resolver, scale):
     cells = row_cells(rec, hdr, args, resolver, scale)
     # Every cell arrives padded to its own column, so the row is the painted

@@ -667,6 +667,18 @@ try:
         check("while still answering questions about a flow",
               fetch(quiet_url + "detail", host_header=quiet_host,
                     method="POST", body=asking) == 200)
+        # And still takes a tab's filter, for the same reason: it changes what
+        # one browser is sent and nothing the collector is doing. A subscriber
+        # is made on the feed directly, since what is checked is the route's
+        # decision rather than the stream.
+        watching = quiet_bus.subscribe()
+        narrowing = json.dumps({"client": watching.id,
+                                "term": "53"}).encode("utf-8")
+        check("and still taking a tab's filter",
+              fetch(quiet_url + "filter", host_header=quiet_host,
+                    method="POST", body=narrowing) == 200
+              and watching.filter == "53")
+        quiet_bus.unsubscribe(watching)
     finally:
         quiet.stop(timeout=1.0)
 
