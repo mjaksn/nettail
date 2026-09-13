@@ -18,6 +18,7 @@ import time
 SCHEMA_VERSION = 1
 DB_NAME = "flows.sqlite3"
 DEFAULT_PRUNE_CADENCE = 12 * 60 * 60
+DEFAULT_COMMIT_CADENCE = 1.0
 
 # A collector without any help from the reader is the point of this feature, so
 # the history file lives in the same per-user place the saved config does rather
@@ -69,22 +70,28 @@ def cadence_arg(text):
 class FlowStore:
     """The SQLite file a collector appends shown flows to."""
 
-    def __init__(self, path, retention_days, prune_every=DEFAULT_PRUNE_CADENCE):
+    def __init__(self, path, retention_days, prune_every=DEFAULT_PRUNE_CADENCE,
+                 commit_every=DEFAULT_COMMIT_CADENCE):
         self.path = path
         self.retention_days = retention_days
         self.prune_every = prune_every
+        self.commit_every = commit_every
         self._next_id = 0
         self._next_prune = 0.0
+        self._next_commit = 0.0
+        self._dirty = False
         directory = os.path.dirname(path)
         if directory:
             os.makedirs(directory, exist_ok=True)
-        self._db = sqlite3.connect(path)
+        self._db = sqlite3.connect(path, isolation_level=None)
         self._db.row_factory = sqlite3.Row
         self._configure()
+        self._db.execute("BEGIN")
         self._create_schema()
         self._check_schema()
         self._next_id = self._read_next_id()
         self.prune()
+        self.flush()
 
     def _configure(self):
         self._db.execute("PRAGMA journal_mode = WAL")
@@ -119,7 +126,7 @@ class FlowStore:
         """)
         if self._db.execute("PRAGMA user_version").fetchone()[0] == 0:
             self._db.execute("PRAGMA user_version = %d" % SCHEMA_VERSION)
-        self._db.commit()
+        self._dirty = True
 
     def _check_schema(self):
         version = self._db.execute("PRAGMA user_version").fetchone()[0]
@@ -160,7 +167,7 @@ class FlowStore:
                 json.dumps(record, default=str),
             ),
         )
-        self._db.commit()
+        self._dirty = True
         return self._next_id
 
     def prune(self, now=None):
@@ -168,7 +175,7 @@ class FlowStore:
         now = time.time() if now is None else now
         floor = now - (self.retention_days * 24 * 60 * 60)
         self._db.execute("DELETE FROM flows WHERE received < ?", (floor,))
-        self._db.commit()
+        self._dirty = True
         self._next_prune = now + self.prune_every
         return self._next_prune
 
@@ -176,6 +183,21 @@ class FlowStore:
         """Whether the scheduled prune time has arrived."""
         now = time.time() if now is None else now
         return now >= self._next_prune
+
+    def flush_due(self, now=None):
+        """Whether the buffered transaction should be committed now."""
+        now = time.time() if now is None else now
+        return self._dirty and now >= self._next_commit
+
+    def flush(self, now=None):
+        """Commit buffered writes and open the next transaction."""
+        now = time.time() if now is None else now
+        if self._dirty:
+            self._db.commit()
+            self._db.execute("BEGIN")
+            self._dirty = False
+        self._next_commit = now + self.commit_every
+        return self._next_commit
 
     def count(self):
         """How many rows are in the durable history."""
@@ -195,6 +217,7 @@ class FlowStore:
 
     def close(self):
         if self._db is not None:
+            self.flush()
             self._db.close()
             self._db = None
 
@@ -205,6 +228,7 @@ class DisabledStore:
     path = None
     retention_days = None
     prune_every = None
+    commit_every = None
 
     def write(self, record):
         return None
@@ -214,6 +238,12 @@ class DisabledStore:
 
     def prune_due(self, now=None):
         return False
+
+    def flush_due(self, now=None):
+        return False
+
+    def flush(self, now=None):
+        return None
 
     def count(self):
         return 0
@@ -225,12 +255,13 @@ class DisabledStore:
         return None
 
 
-def describe(path, retention_days, prune_every):
+def describe(path, retention_days, prune_every, commit_every):
     """One startup line naming the durable history file and its bound."""
     buffer = io.StringIO()
-    print("recording shown flows in %s, keeping %d day%s, pruning every %s"
+    print("recording shown flows in %s, keeping %d day%s, pruning every %s, "
+          "committing every %s"
           % (path, retention_days, "" if retention_days == 1 else "s",
-             _seconds(prune_every)),
+             _seconds(prune_every), _seconds(commit_every)),
           file=buffer, end="")
     return buffer.getvalue()
 

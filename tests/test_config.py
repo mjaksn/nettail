@@ -65,6 +65,7 @@ SAMPLES = {
     "flow_store": "/var/lib/nettail/flows.sqlite3",
     "flow_retention_days": "21",
     "flow_prune_every": "1800",
+    "flow_commit_every": "2.5",
     "colour": "never",
     "no_color": "true",
     "header_every": "12",

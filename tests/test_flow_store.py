@@ -31,6 +31,9 @@ check("the default Windows path prefers APPDATA",
 check("the default prune cadence is 12 hours",
       store.DEFAULT_PRUNE_CADENCE == 12 * 60 * 60,
       str(store.DEFAULT_PRUNE_CADENCE))
+check("the default commit cadence is 1 second",
+      store.DEFAULT_COMMIT_CADENCE == 1.0,
+      str(store.DEFAULT_COMMIT_CADENCE))
 
 # --- one row goes in and comes back ------------------------------------------
 history = store.FlowStore(target, retention_days=7)
@@ -56,6 +59,41 @@ check("the stored row keeps its exporter", latest["exporter"] == "10.0.0.1",
 check("and keeps the record as JSON",
       json.loads(latest["record_json"])["dst_port"] == 443, latest["record_json"])
 history.close()
+
+# --- writes stay buffered until the commit cadence says otherwise -------------
+buffered_path = os.path.join(work, "buffered.sqlite3")
+buffered = store.FlowStore(buffered_path, retention_days=7, commit_every=60.0)
+base = time.time()
+buffered.write({
+    "_received": base,
+    "_timestamp": base,
+    "_exporter": "10.0.0.4",
+    "_version": 5,
+})
+visible = buffered._db.execute("SELECT COUNT(*) FROM flows").fetchone()[0]
+check("the writer sees its buffered row immediately", visible == 1, str(visible))
+outside = store.sqlite3.connect(buffered_path)
+try:
+    hidden = outside.execute("SELECT COUNT(*) FROM flows").fetchone()[0]
+finally:
+    outside.close()
+check("another connection does not see it before a flush", hidden == 0, str(hidden))
+check("the buffered commit is not due early",
+      buffered.flush_due(now=base + buffered.commit_every - 1) is False,
+      str(buffered.commit_every))
+check("and is due at the configured cadence",
+      buffered.flush_due(now=base + buffered.commit_every),
+      str(buffered.commit_every))
+next_commit = buffered.flush(now=base + buffered.commit_every)
+check("flushing schedules the next commit window",
+      next_commit == base + (2 * buffered.commit_every), str(next_commit))
+outside = store.sqlite3.connect(buffered_path)
+try:
+    shown = outside.execute("SELECT COUNT(*) FROM flows").fetchone()[0]
+finally:
+    outside.close()
+check("a flushed row is visible to another connection", shown == 1, str(shown))
+buffered.close()
 
 # --- retention drops what is too old ----------------------------------------
 retained = store.FlowStore(os.path.join(work, "retained.sqlite3"), retention_days=1)
@@ -112,7 +150,16 @@ for bad in ("0", "-1", "never"):
     check("%r is refused as a prune cadence" % bad, ok)
 
 check("the startup note names the cadence in hours",
-      "12 hours" in store.describe("flows.sqlite3", 14, store.DEFAULT_PRUNE_CADENCE),
-      store.describe("flows.sqlite3", 14, store.DEFAULT_PRUNE_CADENCE))
+      "12 hours" in store.describe("flows.sqlite3", 14,
+                                   store.DEFAULT_PRUNE_CADENCE,
+                                   store.DEFAULT_COMMIT_CADENCE),
+      store.describe("flows.sqlite3", 14, store.DEFAULT_PRUNE_CADENCE,
+                     store.DEFAULT_COMMIT_CADENCE))
+check("and the commit cadence in seconds",
+      "1 second" in store.describe("flows.sqlite3", 14,
+                                   store.DEFAULT_PRUNE_CADENCE,
+                                   store.DEFAULT_COMMIT_CADENCE),
+      store.describe("flows.sqlite3", 14, store.DEFAULT_PRUNE_CADENCE,
+                     store.DEFAULT_COMMIT_CADENCE))
 
 finish("flow store")

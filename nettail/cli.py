@@ -1319,6 +1319,10 @@ def build_parser():
                     default=store.DEFAULT_PRUNE_CADENCE, metavar="SECONDS",
                     help="how often the flow history store prunes old rows "
                          "(default 43200, which is 12 hours)")
+    ap.add_argument("--flow-commit-every", type=store.cadence_arg,
+                    default=store.DEFAULT_COMMIT_CADENCE, metavar="SECONDS",
+                    help="how often buffered flow history writes are committed "
+                         "(default 1)")
     ap.add_argument("--colour", "--color", choices=("auto", "always", "never"),
                     default="auto", metavar="WHEN",
                     help="when to use ANSI colour on this terminal: auto (a "
@@ -1773,6 +1777,7 @@ def main():
                 args.flow_store,
                 args.flow_retention_days,
                 prune_every=args.flow_prune_every,
+                commit_every=args.flow_commit_every,
             )
         except (OSError, sqlite3.Error, RuntimeError) as exc:
             ap.error("cannot write flow history to %s: %s"
@@ -2032,6 +2037,7 @@ def main():
                 args.flow_store,
                 args.flow_retention_days,
                 args.flow_prune_every,
+                args.flow_commit_every,
             )
             print(f"{C.GREY}{note}{C.RESET}", file=out)
         for warning in web_warnings:
@@ -2391,6 +2397,8 @@ def main():
             bar.update(lambda s=snap: s if s is not None else take_snapshot())
             if flow_store.prune_due(now):
                 flow_store.prune(now=now)
+            if flow_store.flush_due(now):
+                flow_store.flush(now=now)
 
             try:
                 data, addr = sock.recvfrom(65535)
