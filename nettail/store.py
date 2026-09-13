@@ -170,6 +170,7 @@ class FlowStore:
         self._db.execute("DELETE FROM flows WHERE received < ?", (floor,))
         self._db.commit()
         self._next_prune = now + self.prune_every
+        return self._next_prune
 
     def prune_due(self, now=None):
         """Whether the scheduled prune time has arrived."""

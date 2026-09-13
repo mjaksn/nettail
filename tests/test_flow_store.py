@@ -83,6 +83,12 @@ check("pruning schedules the next run from now",
 check("and becomes due once the cadence has passed",
       retained.prune_due(now=now + retained.prune_every),
       str(retained.prune_every))
+next_prune = retained.prune(now=now + retained.prune_every)
+check("a due prune schedules the one after it too",
+      next_prune == now + (2 * retained.prune_every),
+      str(next_prune))
+check("and is not immediately due again after it runs",
+      retained.prune_due(now=next_prune - 1) is False, str(next_prune))
 retained.close()
 
 # --- the config type is strict about days ------------------------------------
