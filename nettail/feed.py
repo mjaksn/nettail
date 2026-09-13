@@ -44,6 +44,7 @@ CLIENT_BACKLOG = 4000
 EVENTS = (
     ("hello", "the collector's settings, the key table, the columns, a status"),
     ("flow", "one flow's cells to draw, and the record --json prints"),
+    ("restore", "flows replayed to fill what a backgrounded tab missed"),
     ("status", "the status bar snapshot, on a clock"),
     ("prose", "a block of text the terminal also printed, ANSI intact"),
     ("clear", "the x key: throw away what is on screen"),
@@ -168,6 +169,11 @@ class Feed:
             self.active = True
             self._count_filters()
             return client
+
+    def client(self, client_id):
+        """One client by id, or None when it is gone."""
+        with self._lock:
+            return next((c for c in self._clients if c.id == client_id), None)
 
     def unsubscribe(self, client):
         """Drop a client. Safe to call twice, which a writer's finally does."""
@@ -326,6 +332,21 @@ class Feed:
         greeting = dict(self._hello or {})
         greeting["status"] = self._last_status
         return greeting
+
+    def restore(self, client, flows):
+        """Replay stored flows to one client, before live ones catch up.
+
+        This is a per-client event for the same reason `detail` is not: the rows
+        are what one tab missed rather than part of the live stream. It therefore
+        does cross the thread boundary `detail` avoids, but only in the shape the
+        request thread is already allowed: adding to one client's own queue under
+        the feed's lock.
+        """
+        if not flows:
+            return
+        with self._lock:
+            if client in self._clients and not client.closed:
+                self._put(client, ("restore", {"flows": flows}))
 
     # -- shutting down ------------------------------------------------------
 

@@ -219,6 +219,19 @@ class FlowStore:
             return None
         return dict(row)
 
+    def since(self, ingest_id, limit=None):
+        """Rows newer than this ingest id, including buffered writes."""
+        sql = (
+            "SELECT ingest_id, record_json FROM flows "
+            "WHERE ingest_id > ? ORDER BY ingest_id"
+        )
+        params = [int(ingest_id)]
+        if limit is not None:
+            sql += " LIMIT ?"
+            params.append(int(limit))
+        rows = self._db.execute(sql, params).fetchall()
+        return [dict(row) for row in rows]
+
     def close(self):
         if self._db is not None:
             self.flush()
@@ -254,6 +267,9 @@ class DisabledStore:
 
     def latest(self):
         return None
+
+    def since(self, ingest_id, limit=None):
+        return []
 
     def close(self):
         return None

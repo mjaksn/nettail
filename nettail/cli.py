@@ -121,6 +121,8 @@ def flow_record(rec, hdr, resolver):
     out["_exporter"] = hdr["exporter"]
     out["_version"] = hdr["version"]
     out["_timestamp"] = flow_timestamp(rec, hdr)
+    if hdr.get("ingest_id") is not None:
+        out["_ingest_id"] = hdr["ingest_id"]
     # What the datagram said about itself, which nothing downstream of the
     # receive loop used to see. A flow is one record out of one export message,
     # and half the questions worth asking about it are about the message: which
@@ -1961,6 +1963,26 @@ def main():
     web = None
     web_url = None
     web_warnings = []
+    def restore_flows(client, after_ingest, term):
+        """Send stored rows after this id to one returning client.
+
+        The durable store is the long tail and the live queue is the edge. What
+        a tab gets back is whatever the store still has plus whatever this
+        process has accepted since, so there is no gap between restored rows and
+        new live ones while a commit is still buffered.
+        """
+        if args.flow_store is None:
+            return
+        folded = term.casefold() or None
+        rows = flow_store.since(after_ingest, limit=web.RESTORE_MAX)
+        flows = []
+        for row in rows:
+            record = json.loads(row["record_json"])
+            if folded is not None and folded not in {
+                    t.casefold() for t in filter_terms(record, resolver)}:
+                continue
+            flows.append(stored_flow(record))
+        bus.restore(client, flows)
     if args.web:
         web_keyset = set()
         if not args.web_readonly:
@@ -1971,7 +1993,7 @@ def main():
         web = WebInterface(bus, key_queue, web_keyset, bind=args.web_bind,
                            port=args.web_port, token=args.web_token,
                            readonly=args.web_readonly, hosts=args.web_host,
-                           asks=ask_queue)
+                           asks=ask_queue, restore=restore_flows)
         try:
             # Bound but not yet answering. The greeting a browser is met with
             # has to be in place before the first one can arrive, and it cannot
@@ -2042,6 +2064,7 @@ def main():
             print(f"{C.GREY}{note}{C.RESET}", file=out)
         for warning in web_warnings:
             print(warning, file=out)
+
 
     # The QR key is offered only where it can be answered: it needs a web
     # interface to point at and a keyboard to be pressed on. Whether the window
@@ -2261,6 +2284,29 @@ def main():
             "n": serial,
             "ends": list(flow_endpoints(rec)),
         }
+
+    def stored_flow(record):
+        """A stored record as the browser needs it, rebuilt once here.
+
+        A row replayed after a tab returns is still this collector's answer to
+        what that flow looked like, so the page is given the same payload shape
+        as a live row. The record already holds everything needed to rebuild it,
+        and reading from the store through this path keeps the browser as the
+        renderer rather than the reason the store freezes any display detail into
+        its own schema.
+        """
+        hdr = {
+            "exporter": record["_exporter"],
+            "version": record["_version"],
+            "unix_secs": record.get("_export_time"),
+            "sys_uptime": record.get("_uptime"),
+            "received": record.get("_received"),
+            "sampling_rate": record.get("_sampling_rate"),
+            "sequence": record.get("_sequence"),
+            "domain": record.get("_domain"),
+        }
+        return web_flow(record, hdr, record=record)
+
 
     def publish_flow(rec, hdr, record=None):
         """Send one flow to the browsers whose filter it passes, and keep it.
@@ -2494,7 +2540,8 @@ def main():
                     out = flow_record(rec, hdr, resolver)
 
                 if args.flow_store is not None:
-                    flow_store.write(out)
+                    ingest_id = flow_store.write(out)
+                    out["_ingest_id"] = ingest_id
 
                 if json_stdout:
                     # stdout is carrying the records, so there is no table

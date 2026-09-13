@@ -72,6 +72,14 @@ check("and it is one of the documented events",
       "detail" in [name for name, _doc in EVENTS],
       str([name for name, _doc in EVENTS]))
 
+bus.restore(client, [{"n": 4}, {"n": 5}])
+events, _dropped = bus.drain(client)
+check("a restore answer publishes under its own name",
+      events == [("restore", {"flows": [{"n": 4}, {"n": 5}]})], str(events))
+check("and it is one of the documented events",
+      "restore" in [name for name, _doc in EVENTS],
+      str([name for name, _doc in EVENTS]))
+
 # -- overflow drops the oldest and counts it -----------------------------
 
 small = Feed(backlog=4)
@@ -206,5 +214,7 @@ check("a client can arrive already filtering, as a tab back from the "
       "background does", returning.term == "53" and sieve.filtering is True)
 check("and is sent no marker for it, having asked in the query",
       sieve.drain(returning) == ([], 0))
+check("a client can be found by its id", sieve.client(returning.id) is returning)
+check("and an id nobody holds finds nothing", sieve.client("nobody") is None)
 
 finish("web feed")
