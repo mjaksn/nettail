@@ -103,7 +103,8 @@ class FlowStore:
             CREATE INDEX IF NOT EXISTS flows_exporter_received
                 ON flows(exporter, received, ingest_id);
         """)
-        self._db.execute("PRAGMA user_version = %d" % SCHEMA_VERSION)
+        if self._db.execute("PRAGMA user_version").fetchone()[0] == 0:
+            self._db.execute("PRAGMA user_version = %d" % SCHEMA_VERSION)
         self._db.commit()
 
     def _check_schema(self):
