@@ -81,10 +81,13 @@ class FlowStore:
         self._next_commit = 0.0
         self._dirty = False
         directory = os.path.dirname(path)
-        os.umask(0o077)  # make the files readable only by this user
-        if directory:
-            os.makedirs(directory, exist_ok=True)
-        self._db = sqlite3.connect(path, isolation_level=None)
+        old_umask = os.umask(0o077)
+        try:
+            if directory:
+                os.makedirs(directory, exist_ok=True)
+            self._db = sqlite3.connect(path, isolation_level=None)
+        finally:
+            os.umask(old_umask)
         self._db.row_factory = sqlite3.Row
         self._configure()
         self._db.execute("BEGIN")
