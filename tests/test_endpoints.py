@@ -108,5 +108,15 @@ check("a port of 0 is not a term, since no row prints one",
       == ["10.0.0.1"])
 check("and a flow with no ends has nothing to match",
       display.filter_terms({"proto": 6}, Named()) == [])
+# A record can carry a port with no address beside it, and the row draws that
+# end as a dash. Its port and service would otherwise let a filter through a
+# row that shows neither.
+headless = {"dst_addr": "8.8.8.8", "src_port": 51000, "dst_port": 53, "proto": 17}
+check("an end with no address offers nothing, port and service included",
+      display.filter_terms(headless) == ["8.8.8.8", "53"]
+      + [name for name in (service_name(53, 17),) if name],
+      str(display.filter_terms(headless)))
+check("which is what the row draws for it",
+      display.endpoint(None, 51000, 17, 40).strip() == "-")
 
 finish("endpoint agreement")

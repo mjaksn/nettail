@@ -865,7 +865,8 @@ Seven things about it are easy to break.
 
 - **What a flow can be matched on is `filter_terms` in `display.py`.** It asks
   the questions `endpoint` asks, the same way: both ends from
-  `flow_endpoints`, a port only where the row prints one, `service_name` for
+  `flow_endpoints`, nothing at all for an end with no address, which the row
+  draws as a dash, a port only where the row prints one, `service_name` for
   each port and `resolver.lookup` for each address. `publish_flow` works them
   out only while `Feed.filtering` says some tab has a filter, and they never go
   in the payload: the page is sent what it asked for and has nothing to look
