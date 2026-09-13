@@ -11,7 +11,7 @@ but it is a program rather than a library, and the names inside it may move
 without that being a breaking change. `--json` output is the part meant to be
 parsed, and it is treated as public.
 
-## [0.17.0] - 2026-09-12
+## [0.17.0] - 2026-09-13
 
 ### Added
 
@@ -28,9 +28,10 @@ parsed, and it is treated as public.
 
   It belongs to the tab. Two tabs on one run filter independently, the
   terminal is unaffected, it works under `--web-readonly`, and it survives the
-  tab going to the background and back. The collector does the matching, so a
-  filtered tab is never sent the flows it would have thrown away; `--json`
-  output is unchanged.
+  tab going to the background and back, and the connection dropping and
+  coming back, including a term changed while it was down. The collector does
+  the matching, so a filtered tab is never sent the flows it would have thrown
+  away; `--json` output is unchanged.
 
 ### Changed
 
