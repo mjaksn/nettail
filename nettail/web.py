@@ -811,7 +811,9 @@ class _Handler(BaseHTTPRequestHandler):
         if len(term) > FILTER_MAX:
             self._refuse(400, "a filter term is at most %d characters" % FILTER_MAX)
             return
-        client = site.bus.subscribe(limit=MAX_CLIENTS, term=term)
+        after = query.get("after", [""])[-1]
+        subscriber = site.bus.subscribe_blocked if after else site.bus.subscribe
+        client = subscriber(limit=MAX_CLIENTS, term=term)
         if client is None:
             # Either the cap is reached or the collector is going away. Both are
             # temporary from the browser's point of view, so both say so.
@@ -840,9 +842,9 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_header("X-Accel-Buffering", "no")
             self.send_header("Connection", "close")
             self.end_headers()
-            restore = query.get("after", [""])[-1]
-            if restore:
-                self.site.restore(client, restore, term)
+            if after:
+                self.site.restore(client, after, term)
+                site.bus.release(client)
             # No content length, so the body runs until the connection closes,
             # which is what a stream is.
             self.close_connection = True
@@ -865,7 +867,7 @@ class _Handler(BaseHTTPRequestHandler):
         greeting["client"] = client.id
         greeting["filter"] = client.term
         greeting["filter_max"] = FILTER_MAX
-        greeting["restore_max"] = RESTORE_MAX
+        greeting["restore_max"] = RESTORE_MAX if self.site.restore_enabled else 0
         self._send(_frame("hello", greeting))
         idle_since = time.time()
         while True:
@@ -1176,6 +1178,7 @@ class WebInterface:
         self.asks = asks if asks is not None else queue.Queue(
             maxsize=ASK_QUEUE_MAX)
         self.restore = restore or (lambda client, after, term: None)
+        self.restore_enabled = restore is not None
         self.allowed = frozenset(allowed)
         self.bind_addr = bind
         self.port = port

@@ -355,11 +355,11 @@ class Controls:
 
     # -- the flows held while paused ---------------------------------------
 
-    def hold(self, rec, hdr):
+    def hold(self, rec, hdr, record=None):
         """Keep a flow back until the display is resumed."""
         if len(self.held) == self.held.maxlen:
             self.dropped += 1
-        self.held.append((rec, hdr))
+        self.held.append((rec, hdr, record))
 
     def drain(self):
         """Hand back what was held, oldest first, and forget it."""

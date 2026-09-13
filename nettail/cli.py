@@ -1975,15 +1975,22 @@ def main():
         """
         if args.flow_store is None:
             return
+        after_ingest = int(after_ingest)
         folded = term.casefold() or None
-        rows = flow_store.since(after_ingest, limit=RESTORE_MAX)
         flows = []
-        for row in rows:
+        number = max(flow_serial[0], after_ingest)
+        for row in flow_store.since(after_ingest):
             record = json.loads(row["record_json"])
+            record["_ingest_id"] = row["ingest_id"]
             if folded is not None and folded not in {
                     t.casefold() for t in filter_terms(record, resolver)}:
                 continue
-            flows.append(stored_flow(record))
+            number += 1
+            flows.append(stored_flow(record, number=number))
+            if len(flows) >= RESTORE_MAX:
+                break
+        if number > flow_serial[0]:
+            flow_serial[0] = number
         bus.restore(client, flows)
     if args.web:
         web_keyset = set()
@@ -2244,7 +2251,7 @@ def main():
             },
         }
 
-    def web_flow(rec, hdr, record=None):
+    def web_flow(rec, hdr, record=None, n=None):
         """A flow as a browser needs it: the cells to draw, and the record.
 
         The cells come from the same function the terminal row comes from,
@@ -2269,8 +2276,11 @@ def main():
 
         Only builds. `publish_flow` below sends it and keeps the record.
         """
-        flow_serial[0] += 1
-        serial = flow_serial[0]
+        if n is None:
+            flow_serial[0] += 1
+            serial = flow_serial[0]
+        else:
+            serial = n
         return {
             "cells": [for_web(unpad(painted)) for _plain, painted
                       in row_cells(rec, hdr, args, resolver, scale,
@@ -2287,7 +2297,7 @@ def main():
             "ends": list(flow_endpoints(rec)),
         }
 
-    def stored_flow(record):
+    def stored_flow(record, number=None):
         """A stored record as the browser needs it, rebuilt once here.
 
         A row replayed after a tab returns is still this collector's answer to
@@ -2307,7 +2317,7 @@ def main():
             "sequence": record.get("_sequence"),
             "domain": record.get("_domain"),
         }
-        return web_flow(record, hdr, record=record)
+        return web_flow(record, hdr, record=record, n=number)
 
 
     def publish_flow(rec, hdr, record=None):
@@ -2411,15 +2421,15 @@ def main():
             if controls.quit:
                 break
             if not controls.paused and controls.held:
-                for held_rec, held_hdr in controls.drain():
+                for held_rec, held_hdr, held_record in controls.drain():
                     if json_stdout:
                         # With the records on stdout nothing was held back
                         # from it, only from the browser, so resuming owes the
                         # browser the flows and stdout nothing.
                         if bus.active:
-                            publish_flow(held_rec, held_hdr)
+                            publish_flow(held_rec, held_hdr, record=held_record)
                     else:
-                        show(held_rec, held_hdr)
+                        show(held_rec, held_hdr, record=held_record)
 
             # Once round the loop is a quarter second on a silent network and
             # one datagram on a busy one.
@@ -2552,11 +2562,11 @@ def main():
                     # terminal path uses.
                     if bus.active:
                         if controls.paused:
-                            controls.hold(rec, hdr)
+                            controls.hold(rec, hdr, record=out)
                         else:
                             publish_flow(rec, hdr, record=out)
                 elif controls.paused:
-                    controls.hold(rec, hdr)
+                    controls.hold(rec, hdr, record=out)
                 else:
                     show(rec, hdr, record=out)
 
