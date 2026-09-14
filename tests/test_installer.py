@@ -64,10 +64,48 @@ from nettail.cli import build_parser
 from nettail.web import WEB_TOKEN_ENV
 
 INSTALLER = os.path.join(ROOT, "scripts", "install.sh")
-BASH = shutil.which("bash")
+
+
+def find_bash():
+    """A real Bash executable, or None when this machine has none.
+
+    On Windows, `shutil.which("bash")` may find the WindowsApps alias first.
+    That stub exists to open an installer and is not a binary Python can run, so
+    a suite that trusts it dies in `CreateProcess` before it learns anything
+    about the installer. A zero length candidate is the same shape and is
+    refused on the same terms.
+    """
+    candidates = []
+    found = shutil.which("bash")
+    if found:
+        candidates.append(found)
+    if os.name == "nt":
+        local = os.environ.get("LOCALAPPDATA")
+        if local:
+            windowsapps = os.path.join(local, "Microsoft", "WindowsApps", "bash.exe")
+            candidates = [path for path in candidates
+                          if os.path.normcase(path) != os.path.normcase(windowsapps)]
+        candidates.extend([
+            r"C:\Program Files\Git\bin\bash.exe",
+            r"C:\Program Files\Git\usr\bin\bash.exe",
+            r"C:\msys64\usr\bin\bash.exe",
+        ])
+    for path in candidates:
+        if not path or not os.path.isfile(path):
+            continue
+        try:
+            if os.path.getsize(path) == 0:
+                continue
+        except OSError:
+            continue
+        return path
+    return None
+
+
+BASH = find_bash()
 
 check("the installer is where the tests think it is", os.path.isfile(INSTALLER))
-
+print("check")
 if BASH is None:
     # Not a failure. The file is bash and a machine without bash cannot say
     # anything about it, which is different from it being wrong.
