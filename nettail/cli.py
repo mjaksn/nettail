@@ -3,6 +3,7 @@
 
 import argparse
 import io
+import json
 import os
 import queue
 import signal
@@ -82,6 +83,7 @@ from .web import (
     DEFAULT_DETAIL_REFRESH,
     DEFAULT_WEB_PORT,
     KEY_QUEUE_MAX,
+    RESTORE_MAX,
     WEB_ENDPOINT_WIDTH,
     WEB_TOKEN_ENV,
     WebInterface,
@@ -121,6 +123,8 @@ def flow_record(rec, hdr, resolver):
     out["_exporter"] = hdr["exporter"]
     out["_version"] = hdr["version"]
     out["_timestamp"] = flow_timestamp(rec, hdr)
+    if hdr.get("ingest_id") is not None:
+        out["_ingest_id"] = hdr["ingest_id"]
     # What the datagram said about itself, which nothing downstream of the
     # receive loop used to see. A flow is one record out of one export message,
     # and half the questions worth asking about it are about the message: which
@@ -1961,6 +1965,33 @@ def main():
     web = None
     web_url = None
     web_warnings = []
+    def restore_flows(client, after_ingest, term):
+        """Send stored rows after this id to one returning client.
+
+        The durable store is the long tail and the live queue is the edge. What
+        a tab gets back is whatever the store still has plus whatever this
+        process has accepted since, so there is no gap between restored rows and
+        new live ones while a commit is still buffered.
+        """
+        if args.flow_store is None:
+            return
+        after_ingest = int(after_ingest)
+        folded = term.casefold() or None
+        flows = []
+        number = max(flow_serial[0], after_ingest)
+        for row in flow_store.since(after_ingest):
+            record = json.loads(row["record_json"])
+            record["_ingest_id"] = row["ingest_id"]
+            if folded is not None and folded not in {
+                    t.casefold() for t in filter_terms(record, resolver)}:
+                continue
+            number += 1
+            flows.append(stored_flow(record, number=number))
+            if len(flows) >= RESTORE_MAX:
+                break
+        if number > flow_serial[0]:
+            flow_serial[0] = number
+        bus.restore(client, flows)
     if args.web:
         web_keyset = set()
         if not args.web_readonly:
@@ -1971,7 +2002,7 @@ def main():
         web = WebInterface(bus, key_queue, web_keyset, bind=args.web_bind,
                            port=args.web_port, token=args.web_token,
                            readonly=args.web_readonly, hosts=args.web_host,
-                           asks=ask_queue)
+                           asks=ask_queue, restore=restore_flows)
         try:
             # Bound but not yet answering. The greeting a browser is met with
             # has to be in place before the first one can arrive, and it cannot
@@ -2042,6 +2073,7 @@ def main():
             print(f"{C.GREY}{note}{C.RESET}", file=out)
         for warning in web_warnings:
             print(warning, file=out)
+
 
     # The QR key is offered only where it can be answered: it needs a web
     # interface to point at and a keyboard to be pressed on. Whether the window
@@ -2219,7 +2251,7 @@ def main():
             },
         }
 
-    def web_flow(rec, hdr, record=None):
+    def web_flow(rec, hdr, record=None, n=None):
         """A flow as a browser needs it: the cells to draw, and the record.
 
         The cells come from the same function the terminal row comes from,
@@ -2244,8 +2276,11 @@ def main():
 
         Only builds. `publish_flow` below sends it and keeps the record.
         """
-        flow_serial[0] += 1
-        serial = flow_serial[0]
+        if n is None:
+            flow_serial[0] += 1
+            serial = flow_serial[0]
+        else:
+            serial = n
         return {
             "cells": [for_web(unpad(painted)) for _plain, painted
                       in row_cells(rec, hdr, args, resolver, scale,
@@ -2261,6 +2296,29 @@ def main():
             "n": serial,
             "ends": list(flow_endpoints(rec)),
         }
+
+    def stored_flow(record, number=None):
+        """A stored record as the browser needs it, rebuilt once here.
+
+        A row replayed after a tab returns is still this collector's answer to
+        what that flow looked like, so the page is given the same payload shape
+        as a live row. The record already holds everything needed to rebuild it,
+        and reading from the store through this path keeps the browser as the
+        renderer rather than the reason the store freezes any display detail into
+        its own schema.
+        """
+        hdr = {
+            "exporter": record["_exporter"],
+            "version": record["_version"],
+            "unix_secs": record.get("_export_time"),
+            "sys_uptime": record.get("_uptime"),
+            "received": record.get("_received"),
+            "sampling_rate": record.get("_sampling_rate"),
+            "sequence": record.get("_sequence"),
+            "domain": record.get("_domain"),
+        }
+        return web_flow(record, hdr, record=record, n=number)
+
 
     def publish_flow(rec, hdr, record=None):
         """Send one flow to the browsers whose filter it passes, and keep it.
@@ -2363,15 +2421,15 @@ def main():
             if controls.quit:
                 break
             if not controls.paused and controls.held:
-                for held_rec, held_hdr in controls.drain():
+                for held_rec, held_hdr, held_record in controls.drain():
                     if json_stdout:
                         # With the records on stdout nothing was held back
                         # from it, only from the browser, so resuming owes the
                         # browser the flows and stdout nothing.
                         if bus.active:
-                            publish_flow(held_rec, held_hdr)
+                            publish_flow(held_rec, held_hdr, record=held_record)
                     else:
-                        show(held_rec, held_hdr)
+                        show(held_rec, held_hdr, record=held_record)
 
             # Once round the loop is a quarter second on a silent network and
             # one datagram on a busy one.
@@ -2494,7 +2552,8 @@ def main():
                     out = flow_record(rec, hdr, resolver)
 
                 if args.flow_store is not None:
-                    flow_store.write(out)
+                    ingest_id = flow_store.write(out)
+                    out["_ingest_id"] = ingest_id
 
                 if json_stdout:
                     # stdout is carrying the records, so there is no table
@@ -2503,11 +2562,11 @@ def main():
                     # terminal path uses.
                     if bus.active:
                         if controls.paused:
-                            controls.hold(rec, hdr)
+                            controls.hold(rec, hdr, record=out)
                         else:
                             publish_flow(rec, hdr, record=out)
                 elif controls.paused:
-                    controls.hold(rec, hdr)
+                    controls.hold(rec, hdr, record=out)
                 else:
                     show(rec, hdr, record=out)
 

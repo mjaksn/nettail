@@ -71,7 +71,7 @@ check("the terminal listing still shows every key, browser or not",
 
 def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
         keyboard=None, presses=(), window=None, port_notices=(), asks=(),
-        filters=()):
+        filters=(), restore_after=None):
     """Drive main() with keys arriving as if from a browser.
 
     `web_presses` is a list of (after_n_polls, key, value). The queue is filled
@@ -184,7 +184,13 @@ def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
                     bus.unsubscribe(seen["client"])
                     seen["client"] = None
                 elif FakeSocket.calls == gap[1]:
-                    seen["client"] = bus.subscribe()
+                    term = None
+                    after = None
+                    if restore_after is not None:
+                        after = restore_after(seen)
+                    seen["client"] = bus.subscribe(term=term)
+                    if after is not None:
+                        seen["site"].restore(seen["client"], str(after), term or "")
                     seen["hello_after_gap"] = bus.hello()
                     time.sleep(main.REPAINT_INTERVAL + 0.1)
             if FakeSocket.calls > rounds:
@@ -216,6 +222,7 @@ def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
             self.stopped = False
             self.serving = False
             self.port_notice = None
+            self.restore = kw.get("restore", lambda client, after, term: None)
             seen["site"] = self
 
         # Bound and serving are two steps for a reason: the greeting has to be
@@ -542,6 +549,10 @@ def statuses(result):
     return [payload for kind, payload in result["events"] if kind == "status"]
 
 
+def restored(result):
+    return [payload for kind, payload in result["events"] if kind == "restore"]
+
+
 result = run([], [v5_packet(0), v5_packet(2)], settle=0.6)
 counts = [s["flows_shown"] for s in statuses(result) if "flows_shown" in s]
 check("the status carries a count of flows shown", counts != [])
@@ -566,7 +577,8 @@ check("the greeting carries it too, for a tab that reconnects",
 # status spliced into a greeting is the one from before the gap: the very
 # figure the page noted on its way out. It has to wait for a status frame.
 
-result = run([], [v5_packet(n) for n in (0, 2, 4, 6)], gap=(2, 4), settle=0.6)
+result = run([], [v5_packet(n) for n in (0, 2, 4, 6)], gap=(2, 4), settle=0.6,
+             argv=["--flow-store"], restore_after=lambda seen: 2)
 before = (result.get("hello_before_gap") or {}).get("status") or {}
 after = (result.get("hello_after_gap") or {}).get("status") or {}
 check("a figure exists before the gap", before.get("flows_shown", 0) > 0,
@@ -578,6 +590,15 @@ counts = [s["flows_shown"] for s in statuses(result) if "flows_shown" in s]
 check("while a status frame does carry the figure the gap moved",
       counts and max(counts) > before.get("flows_shown", 0),
       "%r against %r" % (counts, before.get("flows_shown")))
+replayed = restored(result)
+ids = [f["n"] for f in replayed[0]["flows"]] if replayed else []
+payload_counts = [len(p.get("flows", [])) for p in replayed]
+check("a tab back from the background is sent stored rows it missed",
+      payload_counts == [4] and ids == [3, 4, 5, 6],
+      repr(payload_counts + ids))
+check("and the live rows after it still arrive only once",
+      [f["n"] for f in result["flows"]] == [7, 8],
+      repr([f["n"] for f in result["flows"]]))
 
 # The figure has to be flows *shown*, not flows decoded. Under --external-only
 # the two differ by a lot, and a count of everything decoded would tell a

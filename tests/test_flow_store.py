@@ -58,6 +58,9 @@ check("the stored row keeps its exporter", latest["exporter"] == "10.0.0.1",
       str(latest))
 check("and keeps the record as JSON",
       json.loads(latest["record_json"])["dst_port"] == 443, latest["record_json"])
+seen = history.since(0)
+check("rows since an id include the first row",
+      [row["ingest_id"] for row in seen] == [1], str(seen))
 history.close()
 
 # --- writes stay buffered until the commit cadence says otherwise -------------
@@ -93,6 +96,9 @@ try:
 finally:
     outside.close()
 check("a flushed row is visible to another connection", shown == 1, str(shown))
+check("rows since an id include buffered writes from this connection",
+      [row["ingest_id"] for row in buffered.since(0)] == [1],
+      str(buffered.since(0)))
 buffered.close()
 
 # --- retention drops what is too old ----------------------------------------

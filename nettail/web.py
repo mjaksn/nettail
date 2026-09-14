@@ -109,6 +109,7 @@ KEY_QUEUE_MAX = 64
 # four of these every few seconds, so sixteen is a long way past a person and
 # a long way short of a way to keep the collector busy.
 ASK_QUEUE_MAX = 16
+RESTORE_MAX = 4000
 
 # How often the details dialog asks the collector for its figures again, in
 # seconds, and 0 for not at all. Five is short enough that a dialog left open
@@ -805,11 +806,14 @@ class _Handler(BaseHTTPRequestHandler):
         # the new subscription rather than from whenever a second request
         # caught up with it. Refused rather than trimmed when it is not a
         # term, since the page never sends one that is not.
-        term = parse_qs(urlsplit(self.path).query).get("filter", [""])[-1]
+        query = parse_qs(urlsplit(self.path).query)
+        term = query.get("filter", [""])[-1]
         if len(term) > FILTER_MAX:
             self._refuse(400, "a filter term is at most %d characters" % FILTER_MAX)
             return
-        client = site.bus.subscribe(limit=MAX_CLIENTS, term=term)
+        after = query.get("after", [""])[-1]
+        subscriber = site.bus.subscribe_blocked if after else site.bus.subscribe
+        client = subscriber(limit=MAX_CLIENTS, term=term)
         if client is None:
             # Either the cap is reached or the collector is going away. Both are
             # temporary from the browser's point of view, so both say so.
@@ -838,6 +842,9 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_header("X-Accel-Buffering", "no")
             self.send_header("Connection", "close")
             self.end_headers()
+            if after:
+                self.site.restore(client, after, term)
+                site.bus.release(client)
             # No content length, so the body runs until the connection closes,
             # which is what a stream is.
             self.close_connection = True
@@ -860,6 +867,7 @@ class _Handler(BaseHTTPRequestHandler):
         greeting["client"] = client.id
         greeting["filter"] = client.term
         greeting["filter_max"] = FILTER_MAX
+        greeting["restore_max"] = RESTORE_MAX if self.site.restore_enabled else 0
         self._send(_frame("hello", greeting))
         idle_since = time.time()
         while True:
@@ -1159,7 +1167,7 @@ class WebInterface:
 
     def __init__(self, bus, keys, allowed, bind="127.0.0.1",
                  port=DEFAULT_WEB_PORT, token=None, readonly=False,
-                 hosts=(), asks=None):
+                 hosts=(), asks=None, restore=None):
         self.bus = bus
         self.keys = keys
         # Where a browser's questions about a flow wait for the receive loop,
@@ -1169,6 +1177,8 @@ class WebInterface:
         # it; a real run hands over the queue its loop drains.
         self.asks = asks if asks is not None else queue.Queue(
             maxsize=ASK_QUEUE_MAX)
+        self.restore = restore or (lambda client, after, term: None)
+        self.restore_enabled = restore is not None
         self.allowed = frozenset(allowed)
         self.bind_addr = bind
         self.port = port

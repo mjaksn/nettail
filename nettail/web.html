@@ -1674,10 +1674,24 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
   // Whether the page was following the tail when the tab was hidden,
   // or null while it is in front.
   var hiddenFollowing = null;
+  // The newest stored row this tab knows about. Live rows and replayed ones both
+  // move it, so a return from the background can ask for everything after it and
+  // receive what the store still has plus the rows not yet committed there.
+  var lastIngestId = 0;
+  // The most a reconnect asks the collector to replay from the store in one go.
+  var restoreMax = 0;
 
   function flowsShown(status) {
     return status && typeof status.flows_shown === "number"
       ? status.flows_shown : null;
+  }
+
+  function noteIngest(flow) {
+    var record = flow && flow.record;
+    if (record && typeof record._ingest_id === "number" &&
+        record._ingest_id > lastIngestId) {
+      lastIngestId = record._ingest_id;
+    }
   }
 
   function park() {
@@ -1732,7 +1746,7 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
     parkedAt = null;
     if (now === null || then === null) { return; }
     var missed = now - then;
-    if (missed > 0) {
+    if (missed > 0 && restoreMax <= 0) {
       note("gap", missed.toLocaleString() + " flow" + (missed === 1 ? "" : "s") +
            " arrived while this tab was in the background. The collector has " +
            "them in its totals; they were not kept for the page.");
@@ -1824,8 +1838,11 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
     // under the old one. The error handler below compares the two and does
     // the retry itself when they differ.
     var term = reconnectTerm();
-    var es = new EventSource(BASE + "/events" + (term
-      ? "?filter=" + encodeURIComponent(term) : ""));
+    var params = [];
+    if (term) { params.push("filter=" + encodeURIComponent(term)); }
+    if (lastIngestId > 0) { params.push("after=" + encodeURIComponent(String(lastIngestId))); }
+    var es = new EventSource(BASE + "/events" + (params.length
+      ? "?" + params.join("&") : ""));
     stream = es;
     streamTerm = term;
     clientId = null;
@@ -1843,6 +1860,9 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
         // whatever that says: asking what a flow was changes nothing.
         if (typeof hello.detail_refresh === "number") {
           detailRefreshMs = Math.max(hello.detail_refresh, 0) * 1000;
+        }
+        if (typeof hello.restore_max === "number") {
+          restoreMax = Math.max(hello.restore_max, 0);
         }
         buildHead(hello.columns || []);
         buildKeys(hello.keys || []);
@@ -1884,7 +1904,18 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
     });
 
     es.addEventListener("flow", function (event) {
-      addFlow(JSON.parse(event.data));
+      var payload = JSON.parse(event.data);
+      noteIngest(payload);
+      addFlow(payload);
+    });
+
+    es.addEventListener("restore", function (event) {
+      var payload = JSON.parse(event.data);
+      var flows = payload && Array.isArray(payload.flows) ? payload.flows : [];
+      for (var i = 0; i < flows.length; i += 1) {
+        noteIngest(flows[i]);
+        addFlow(flows[i]);
+      }
     });
 
     es.addEventListener("status", function (event) {

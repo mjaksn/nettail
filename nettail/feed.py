@@ -44,6 +44,7 @@ CLIENT_BACKLOG = 4000
 EVENTS = (
     ("hello", "the collector's settings, the key table, the columns, a status"),
     ("flow", "one flow's cells to draw, and the record --json prints"),
+    ("restore", "flows replayed to fill what a backgrounded tab missed"),
     ("status", "the status bar snapshot, on a clock"),
     ("prose", "a block of text the terminal also printed, ANSI intact"),
     ("clear", "the x key: throw away what is on screen"),
@@ -86,6 +87,7 @@ class Client:
         # Set when the writer should stop: on shutdown, or when the client cap
         # turns a browser away after it has already been given a queue.
         self.closed = False
+        self.blocked = False
         # Raised by the feed when something is put on the queue, so a writer
         # waits rather than polls. A threading.Event rather than a Condition
         # because a writer only ever waits for "something happened", and the
@@ -168,6 +170,26 @@ class Feed:
             self.active = True
             self._count_filters()
             return client
+
+    def subscribe_blocked(self, limit=None, term=None):
+        """Hand back a client whose queue stays dark until `release()` says so.
+
+        A tab returning from the background needs two things to be true at once:
+        its replay must be queued before any new live flow for that tab, and the
+        replay itself must still be whatever the store can see inside the writer's
+        own transaction. This side answers the first half only: the client exists
+        now, under the feed's lock, but publish sites skip it until the request
+        thread has queued whatever catch-up it owes and calls `release()`.
+        """
+        client = self.subscribe(limit=limit, term=term)
+        if client is not None:
+            client.blocked = True
+        return client
+
+    def client(self, client_id):
+        """One client by id, or None when it is gone."""
+        with self._lock:
+            return next((c for c in self._clients if c.id == client_id), None)
 
     def unsubscribe(self, client):
         """Drop a client. Safe to call twice, which a writer's finally does."""
@@ -271,6 +293,8 @@ class Feed:
         takers = []
         with self._lock:
             for client in self._clients:
+                if client.blocked:
+                    continue
                 if client.wants(folded):
                     self._put(client, event)
                     takers.append(client.id)
@@ -326,6 +350,33 @@ class Feed:
         greeting = dict(self._hello or {})
         greeting["status"] = self._last_status
         return greeting
+
+    def restore(self, client, flows):
+        """Replay stored flows to one client, before live ones catch up.
+
+        This is a per-client event for the same reason `detail` is not: the rows
+        are what one tab missed rather than part of the live stream. It therefore
+        does cross the thread boundary `detail` avoids, but only in the shape the
+        request thread is already allowed: adding to one client's own queue under
+        the feed's lock.
+        """
+        if not flows:
+            return
+        with self._lock:
+            if client in self._clients and not client.closed:
+                self._put(client, ("restore", {"flows": flows}))
+
+    def release(self, client):
+        """Let one blocked client start taking live events.
+
+        Called by the request thread once any replay it owes has been put on the
+        queue. The wake here covers the ordinary case of an empty replay: `_pump`
+        may already be waiting and has to re-check the queue and the live stream.
+        """
+        with self._lock:
+            if client in self._clients and not client.closed:
+                client.blocked = False
+                client.ready.set()
 
     # -- shutting down ------------------------------------------------------
 
