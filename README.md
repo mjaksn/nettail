@@ -105,6 +105,10 @@ nettail --json > flows.jsonl
 
 # Or to a file of its own, with the table still on the screen
 nettail --json flows.jsonl
+
+# Keep a durable history of which rows were shown, and replay the ones a
+# browser tab missed when it comes back from the background
+nettail --flow-store --flow-retention-days 30
 ```
 
 Press `Ctrl-C` to stop. A summary prints on exit with datagram counts, template
@@ -229,6 +233,8 @@ different reason.
 usage: nettail [-h] [--version] [--config FILE | --save-config [FILE]]
                [--bind BIND] [--port PORT] [--external-only] [--names]
                [--macs] [--verbose] [--templates] [--json [FILE]]
+               [--flow-store [FILE]] [--flow-retention-days DAYS]
+               [--flow-prune-every SECONDS] [--flow-commit-every SECONDS]
                [--colour WHEN] [--no-color] [--header-every HEADER_EVERY]
                [--sticky-header] [--hide-status] [--no-supplemental-services]
                [--web] [--web-port PORT] [--web-bind ADDR] [--web-host NAME]
@@ -257,6 +263,10 @@ usage: nettail [-h] [--version] [--config FILE | --save-config [FILE]]
 | `--verbose` | off | Print every decoded field on an indented line under each flow, and report datagrams that could not be decoded. The `v` key moves the same setting mid-run |
 | `--templates` | off | Spell out each template the first time an exporter sends it, and note in one line each time a template is sent again. v9 and IPFIX only; v5 carries no templates. The `t` key moves the same setting mid-run |
 | `--json [FILE]` | off | Emit one JSON object per flow. On its own, or given `-`, the objects go to stdout in place of the table. Given a path they are appended to that file instead, and the table, the keys and the browser view carry on as if the flag were not there |
+| `--flow-store [FILE]` | off | Append each shown flow to a local SQLite history file. On its own it writes under a per-user data directory (such as `%LOCALAPPDATA%\nettail` on Windows or `$XDG_DATA_HOME/nettail` elsewhere), and given a path it writes there instead. Turning it on lets a backgrounded browser tab ask for the flows it missed when it comes back |
+| `--flow-retention-days DAYS` | `14` | How long to keep rows in the durable flow store. At least one day, and a value of 14 keeps the last two weeks unless you change it |
+| `--flow-prune-every SECONDS` | `43200` | How often old rows are pruned from the SQLite store. This is 12 hours by default, and it is a background maintenance pass rather than a freeze on the collector |
+| `--flow-commit-every SECONDS` | `1` | How often buffered writes are committed to the file. Lower values make the history more current, while higher values allow a little more batching |
 | `--colour WHEN` | `auto` | When to use ANSI colour **on this terminal**: `auto`, `always` or `never`. Under `auto` a terminal gets colour and a redirected stream does not, and `NO_COLOR` in the environment turns it off. The browser view has its own switch, `--web-colour`, and is not decided by this one. `--color` is accepted too |
 | `--no-color` | off | The same as `--colour never`, and like it, about this terminal |
 | `--header-every N` | `40` | Reprint the column header every N lines. `0` disables repeats |
@@ -362,6 +372,8 @@ port = 2055
 external-only = true
 web = true
 web-bind = 127.0.0.1
+flow-store = true
+flow-retention-days = 30
 resolve = dns
 hosts =
     /etc/hosts.lan
@@ -389,6 +401,13 @@ The one exception is an option that may be repeated, `--hosts` and
 `--web-host`. Typing one of those adds to what the file listed rather than
 replacing it, because that is what repeatable means everywhere else here. A run
 that wants none of them wants `--config` pointed at a file that lists none.
+
+The durable flow store is a different shape of option. In a file it accepts the
+same bare true value as the command line does, so `flow-store = true` turns it
+on, and `flow-store = /var/lib/nettail/flows.sqlite3` writes there instead of in
+its default per-user path. The retention and cadence settings are ordinary
+values, so `flow-retention-days = 30`, `flow-prune-every = 3600`, and
+`flow-commit-every = 2.5` all work exactly as the flags do.
 
 Options that are alternatives win the same way, and it is worth saying because
 they are the one place where winning means the file's setting is dropped
@@ -1120,17 +1139,37 @@ and when its own clock shows it has not been run for ten seconds. Any of the
 three is enough on its own, and whichever noticed, coming back works the same
 way and reports the same count.
 
-On return the page says how many flows went past:
+On return the page asks the collector for whatever it missed, and a store is
+what makes that possible. When `--flow-store` is on, the browser is replayed the
+rows it still has in the durable history, plus everything accepted since, capped
+at four thousand flows. The page appends them before the live stream resumes, so
+it does not look like the tail jumped forward and then dropped back to the live
+feed.
 
 ```
-12,431 flows arrived while this tab was in the background. The collector has
-them in its totals; they were not kept for the page.
+12,431 flows arrived while this tab was in the background. The page is
+replaying the ones it still has and whatever has arrived since.
 ```
 
 That figure is the collector's own count of flows that passed the display
 filter, asked for on reconnection rather than counted by the page, which by
 definition saw none of them. The totals in the status bar and the traffic
 summary are unaffected: nothing was missed by the collector, only by the view.
+
+### Durable flow history
+
+`--flow-store` keeps a local SQLite file of the flows a browser was shown, one
+row per flow with its ingest ID and enough facts to answer a later replay. It
+lives in a per-user data directory rather than in the working tree, so a restart
+still has the history it had before, and it is created readable only by the
+current user. The file is opened in WAL mode so a reader elsewhere is never
+blocked by the writer.
+
+The store is kept for a limited time. `--flow-retention-days` sets the window,
+`--flow-prune-every` decides how often old rows are dropped, and
+`--flow-commit-every` decides how often buffered writes are flushed to disk.
+That means a tab that went to the background can still ask for the rows it
+missed, without the process having to keep every flow it ever saw in memory.
 
 ### Following the tail
 
@@ -2844,10 +2883,11 @@ too.
   `--web` adds threads, but none of them go near the socket or change any
   collector state: they read a queue and serve it, which is what keeps this
   claim true of the part that matters.
-- **No persistence.** Everything is in memory and lost on exit. Use `--json`
-  with a file to name if you want history, which costs the display nothing. The web interface is a live view and keeps no
-  history of its own: a browser opened late is shown the banner and the current
-  figures, not the flows it missed.
+- **Persistence is optional.** `--flow-store` writes every shown flow to a local
+  SQLite file and replays any rows a backgrounded tab missed when it comes back,
+  so a web reader is not forced to live entirely in the moment. A browser
+  opened late is still shown the banner, the current figures, and whatever
+  retained rows the store can answer from.
 - **The web interface has no TLS and no login.** A token in the URL over plain
   HTTP is enough for something bound to loopback and nowhere near enough for
   anything else. See [The web interface](#the-web-interface).
