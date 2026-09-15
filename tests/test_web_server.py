@@ -287,6 +287,9 @@ try:
     # thing to grep for, but nothing here runs the page, and the alternative
     # is a rule that fails nowhere when it is dropped.
     check("the page records having stopped trying", "gaveUp" in body)
+    check("and ignores stale errors from an old stream",
+          "currentConnection(es)" in body and
+          "if (!currentConnection(es)) { return; }" in body)
 
     # What arrives on the stream waits for an animation frame and goes on in
     # one append. `toTail` reads `scrollHeight`, which lays the table out, and
