@@ -1847,7 +1847,12 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
     streamTerm = term;
     clientId = null;
 
+    function currentConnection(source) {
+      return source === stream;
+    }
+
     es.addEventListener("hello", function (event) {
+      if (!currentConnection(es)) { return; }
       var hello = JSON.parse(event.data);
       failures = 0;
       setState("yes", "watching");
@@ -1894,6 +1899,7 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
     });
 
     es.addEventListener("filter", function (event) {
+      if (!currentConnection(es)) { return; }
       var term = JSON.parse(event.data).term || "";
       // The stream saying a term took is also how one whose answer was lost
       // becomes accepted. Only the term the reader still wants, though: the
@@ -1904,12 +1910,14 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
     });
 
     es.addEventListener("flow", function (event) {
+      if (!currentConnection(es)) { return; }
       var payload = JSON.parse(event.data);
       noteIngest(payload);
       addFlow(payload);
     });
 
     es.addEventListener("restore", function (event) {
+      if (!currentConnection(es)) { return; }
       var payload = JSON.parse(event.data);
       var flows = payload && Array.isArray(payload.flows) ? payload.flows : [];
       for (var i = 0; i < flows.length; i += 1) {
@@ -1919,6 +1927,7 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
     });
 
     es.addEventListener("status", function (event) {
+      if (!currentConnection(es)) { return; }
       var payload = JSON.parse(event.data);
       showStatus(payload);
       // The first of these after coming back is the first figure that counts
@@ -1928,15 +1937,18 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
     });
 
     es.addEventListener("prose", function (event) {
+      if (!currentConnection(es)) { return; }
       var payload = JSON.parse(event.data);
       addProse(payload.kind || "notice", payload.text || "");
     });
 
     es.addEventListener("clear", function () {
+      if (!currentConnection(es)) { return; }
       clearTable();
     });
 
     es.addEventListener("detail", function (event) {
+      if (!currentConnection(es)) { return; }
       var payload = JSON.parse(event.data);
       // Every watcher is sent every answer, so this is where a page picks out
       // its own. A reply from before the dialog was closed fails the same
@@ -1946,12 +1958,18 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
     });
 
     es.addEventListener("dropped", function (event) {
+      if (!currentConnection(es)) { return; }
       var payload = JSON.parse(event.data);
       note("gap", payload.count.toLocaleString() +
            " events were dropped: this browser fell behind the collector.");
     });
 
     es.onerror = function () {
+      // A stale error from a stream this page has already closed or replaced
+      // would still be able to fire after a backgrounded tab has reopened one,
+      // and it would wrongly mark the new stream as dead. Ignore it: the page
+      // is already on a newer connection, or it gave the stream up for good.
+      if (!currentConnection(es)) { return; }
       if (es.readyState === EventSource.CLOSED) {
         // The server answered with something that was not a 200, which by the
         // specification fails the connection for good rather than retrying.
