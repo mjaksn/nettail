@@ -11,6 +11,41 @@ but it is a program rather than a library, and the names inside it may move
 without that being a breaking change. `--json` output is the part meant to be
 parsed, and it is treated as public.
 
+## [0.18.0] - 2026-09-14
+
+### Added
+
+- **`--flow-store` keeps a durable history of shown flows in a local SQLite
+  file.** Given on its own, or as `true` in a config file, it writes to a
+  per-user default path (under `%LOCALAPPDATA%` or `%APPDATA%` on Windows,
+  `~/Library/Application Support/nettail` on macOS, `$XDG_DATA_HOME/nettail`
+  or `~/.local/share/nettail` elsewhere); given a path, it writes there
+  instead. `--flow-retention-days` bounds how long a row is kept, 14 by
+  default; `--flow-prune-every` sets how often rows past that bound are
+  dropped, every 12 hours by default; `--flow-commit-every` sets how often
+  buffered writes reach the file rather than sitting in the process holding
+  it, every second by default. The file is created readable only by the
+  current user, opened in WAL mode so a reader elsewhere is never blocked by
+  the writer, and named on the startup line together with the retention and
+  the two cadences it was given.
+
+- **A browser tab returning from the background is replayed the flows it
+  missed, when `--flow-store` is on.** Reconnecting now asks for everything
+  after the newest row the tab already holds, and the collector answers with
+  whatever the store still has plus whatever it has accepted since, on a new
+  `restore` event, capped at four thousand flows. The note that used to say a
+  gap of flows "arrived while this tab was in the background... they were not
+  kept for the page" is no longer shown once there is a store to answer from,
+  since the rows it used to report as gone are sent instead.
+
+### Changed
+
+- **The record `--json` writes gains `_ingest_id` while `--flow-store` is
+  on.** It is the row's number in the durable history, present only when a
+  store is running and appended after everything else the record already
+  carried, so a reader keyed on the fields that were there before sees no
+  difference.
+
 ## [0.17.0] - 2026-09-13
 
 ### Added
@@ -1096,6 +1131,7 @@ console: the part that decides what a flow should look like on a terminal.
   reminder line under the startup banner can be a pointer rather than a
   two-hundred-character list that wrapped and then scrolled away.
 
+[0.18.0]: https://github.com/mjaksn/nettail/releases/tag/v0.18.0
 [0.17.0]: https://github.com/mjaksn/nettail/releases/tag/v0.17.0
 [0.16.0]: https://github.com/mjaksn/nettail/releases/tag/v0.16.0
 [0.15.0]: https://github.com/mjaksn/nettail/releases/tag/v0.15.0
