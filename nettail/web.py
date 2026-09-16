@@ -886,10 +886,18 @@ class _Handler(BaseHTTPRequestHandler):
                 # while it is blocked, so nothing lands between its read and
                 # its release. Reading the store from here was the defect
                 # that ended every returning tab's stream after the greeting.
-                # A full queue means no replay rather than no stream.
+                # A full queue means no replay rather than no stream, and
+                # the tab is told so on its own queue, ahead of the live
+                # flows: the greeting still says a replay is on offer, so
+                # without the line the page would suppress its own note
+                # about the gap and the rows would go missing silently.
                 try:
                     site.lookups.put_nowait(("after", client, int(after), term))
                 except queue.Full:
+                    site.bus.note(client, "The flows this tab missed while it "
+                                  "was away were not replayed: the collector "
+                                  "had too many lookups waiting. Switch away "
+                                  "and back to ask again.")
                     site.bus.release(client)
             # No content length, so the body runs until the connection closes,
             # which is what a stream is.

@@ -396,6 +396,17 @@ class Feed:
                     "flows": flows, "asked": asked, "before": before,
                     "more": more, "failed": failed}))
 
+    def note(self, client, text):
+        """A notice for one client alone, on its own queue.
+
+        Prose is published to everybody, since it is what the terminal also
+        printed. This is for the one case that is one tab's business and
+        nobody else's: a replay that could not be made for it.
+        """
+        with self._lock:
+            if client in self._clients and not client.closed:
+                self._put(client, ("prose", {"kind": "notice", "text": text}))
+
     def release(self, client):
         """Let one blocked client start taking live events.
 

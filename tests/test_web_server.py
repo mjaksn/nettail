@@ -845,6 +845,34 @@ try:
                        origin="http://evil.example.com") == 403)
         finally:
             returning.close()
+        # A queue with no room means no replay, and the tab is told so on
+        # its own stream before the live flows start, since the greeting
+        # still says a replay is on offer and the page would otherwise
+        # suppress its own note about the gap.
+        while True:
+            try:
+                lookups.put_nowait(("before", None, 1, ""))
+            except queue.Full:
+                break
+        crowded = urllib.request.urlopen(urllib.request.Request(
+            "http://%s/t/%s/events?after=7" % (host, site.token),
+            headers={"Host": host}), timeout=TIMEOUT)
+        try:
+            frames = read_frames(crowded, 1)
+            told = bus.client(frames[0][1]["client"]) if frames else None
+            bus.flow({"n": 10})
+            frames = read_frames(crowded, 2)
+            check("a tab whose replay could not be queued is told, then goes live",
+                  [k for k, _p in frames] == ["prose", "flow"]
+                  and "not replayed" in frames[0][1]["text"]
+                  and told is not None and told.blocked is False, repr(frames))
+        finally:
+            crowded.close()
+            while True:
+                try:
+                    lookups.get_nowait()
+                except queue.Empty:
+                    break
         for bad in ("abc", "-1", "1e3", "9" * 17, "٢"):
             try:
                 urllib.request.urlopen(urllib.request.Request(

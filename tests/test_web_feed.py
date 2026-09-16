@@ -107,6 +107,16 @@ events, _dropped = bus.drain(client)
 check("and a failed one is marked as such with the cursor left alone",
       events == [("history", {"flows": [], "asked": 9, "before": 9,
                               "more": True, "failed": True})], str(events))
+# And a note for one client alone, which a replay that could not be made
+# leaves on the tab's own queue.
+bus.note(client, "not replayed")
+other_note = bus.subscribe()
+bus.note(client, "still not")
+check("a note for one client reaches it as prose",
+      bus.drain(client)[0] == [("prose", {"kind": "notice", "text": "not replayed"}),
+                               ("prose", {"kind": "notice", "text": "still not"})])
+check("and nobody else", bus.drain(other_note)[0] == [])
+bus.unsubscribe(other_note)
 check("and it is one of the documented events",
       "history" in [name for name, _doc in EVENTS],
       str([name for name, _doc in EVENTS]))
