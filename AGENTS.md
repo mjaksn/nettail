@@ -994,7 +994,10 @@ Seven things about it are easy to break.
   page alone is over the bound, which only a prepend can bring about while the
   reader is at the top of it; a reader a few hundred rows up from the tail
   never sees a painted row vanish. They are counted in `droppedNewest` rather
-  than `trimmed`, because they are not lost the way the oldest are. And they
+  than `trimmed`, because they are not lost the way the oldest are. Only flows
+  and their extra lines go from that end: prose is kept, since a key's reply
+  or a filter's note is replayed by nothing, and the newest flow above it goes
+  instead, which keeps the flows one unbroken run. And they
   go down to the bound exactly, not to `TRIM_TO`: a trim of a thousand at a
   time keeps the rows that arrive between one trim and the next and drops the
   ones in between, which is a history full of holes, and a replay that starts

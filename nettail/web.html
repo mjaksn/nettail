@@ -774,12 +774,25 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
       // its newest row could never fill. Stopping at the bound means that
       // once it is reached every newer row goes, and what is kept is one
       // unbroken run ending where the replay will begin.
-      while (total > MAX_ROWS) {
-        var end = pending.childElementCount ? pending : rows;
-        end.removeChild(end.lastElementChild);
-        droppedNewest += 1;
-        total -= 1;
-      }
+      //
+      // Flows and their extra lines only. A key's reply, a filter's note or
+      // the summary is prose nothing replays, so it stays, and the newest
+      // flow above it goes instead; the flows kept are still one unbroken
+      // run, since it is always the newest of them that goes.
+      var cut = function (list) {
+        var tr = list.lastElementChild;
+        while (tr && total > MAX_ROWS) {
+          var above = tr.previousElementSibling;
+          if (tr.className !== "prose") {
+            list.removeChild(tr);
+            if (tr.className !== "extra") { droppedNewest += 1; }
+            total -= 1;
+          }
+          tr = above;
+        }
+      };
+      cut(pending);
+      cut(rows);
       return;
     }
     // Rows taken from the top move the beginning of what the page holds, so
@@ -1308,7 +1321,7 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
     var newest = newestIngest();
     if (newest === null) { return; }
     lastIngestId = newest;
-    note("gap", count.toLocaleString() + " row" + (count === 1 ? "" : "s") +
+    note("gap", count.toLocaleString() + " flow" + (count === 1 ? "" : "s") +
          " arrived while you were reading earlier flows and were not kept. " +
          "The collector is sending them again.");
     resyncing = true;
