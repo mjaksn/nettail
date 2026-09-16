@@ -11,8 +11,16 @@ build/
 dist/
 .venv/
 venv/
-.idea/
-.vscode/
+
+# Everything under these two is a workspace's own state, machine-specific and
+# not this project's to ship, except the launch configs, which are shared on
+# purpose so a checkout comes with a working "start the collector" button in
+# either editor.
+.idea/*
+!.idea/runConfigurations/
+.vscode/*
+!.vscode/launch.json
+
 .pytest_cache/
 .coverage
 
