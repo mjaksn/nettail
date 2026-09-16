@@ -72,7 +72,8 @@ check("the terminal listing still shows every key, browser or not",
 
 def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
         keyboard=None, presses=(), window=None, port_notices=(), asks=(),
-        filters=(), restore_after=None, history_before=None):
+        filters=(), restore_after=None, history_before=None,
+        history_term=""):
     """Drive main() with keys arriving as if from a browser.
 
     `web_presses` is a list of (after_n_polls, key, value). The queue is filled
@@ -207,7 +208,7 @@ def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
                         # the same pass.
                         seen["site"].lookups.put_nowait(
                             ("before", seen["client"], history_before,
-                             term or ""))
+                             history_term or term or ""))
                     seen["hello_after_gap"] = bus.hello()
                     time.sleep(main.REPAINT_INTERVAL + 0.1)
                     if after is not None:
@@ -654,6 +655,24 @@ check("the older rows are numbered on from the rows before them",
 check("and the live rows after them carry on counting",
       [f["n"] for f in result["flows"]] == [9, 10],
       repr([f["n"] for f in result["flows"]]))
+
+# Under a filter the walk reads every row and keeps the ones the term
+# matches, the way the live path matches: each packet's second flow has
+# source port 51001 and its first does not. The cursor is the oldest row
+# read, not the oldest kept, so the rows that did not match are not read
+# again by the next ask.
+own_store = os.path.join(tempfile.mkdtemp(prefix="nettail-history-"),
+                         "flows.sqlite3")
+result = run([], [v5_packet(n) for n in (0, 2, 4, 6)], gap=(2, 4), settle=0.6,
+             argv=["--flow-store", own_store], restore_after=lambda seen: 2,
+             history_before=7, history_term="51001")
+older = [p for k, p in result["events"] if k == "history"]
+ids = [f["record"]["_ingest_id"] for f in older[0]["flows"]] if older else []
+check("a filtered scroll up is sent only the older rows the term matches",
+      len(older) == 1 and ids == [2, 4, 6], repr(ids))
+check("with the cursor at the oldest row read rather than the oldest kept",
+      older and older[0]["before"] == 1 and older[0]["more"] is False,
+      repr(older))
 
 # The figure has to be flows *shown*, not flows decoded. Under --external-only
 # the two differ by a lot, and a count of everything decoded would tell a

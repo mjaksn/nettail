@@ -956,9 +956,10 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
 
   // Give up the current stream and open another under `reconnectTerm` after
   // about the pause a browser leaves before its own retry. Used wherever the
-  // browser's retry would reuse an address carrying a term no longer wanted.
-  // `failures` is left as it is, so five of these still give up the way five
-  // of the browser's retries do.
+  // browser's retry would reuse an address carrying a term no longer wanted,
+  // and by `resync`, which wants a fresh subscription for the replay it
+  // carries. `failures` is left as it is, so five of these still give up the
+  // way five of the browser's retries do.
   function reconnectSoon() {
     if (stream) { stream.close(); }
     stream = null;
@@ -1311,9 +1312,12 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
          " arrived while you were reading earlier flows and were not kept. " +
          "The collector is sending them again.");
     resyncing = true;
-    stream.close();
-    stream = null;
-    connect();
+    // After the pause the page leaves before any reconnect of its own, and
+    // not at once: the collector frees a watcher's place when its pump next
+    // looks, so with every place taken a new connection made in the same
+    // breath as the close is a fifth, is refused, and the refusal ends the
+    // tab with a note telling the reader to reload.
+    reconnectSoon();
   }
 
   // What both ways of turning Follow on come through. The scroll handler
@@ -2282,6 +2286,10 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
   // is a table shorter than the window, and a reader turning the wheel up
   // there has said what they want as plainly as one scrolling up does.
   scroller.addEventListener("wheel", function (event) {
+    // Only where there is something to ask for. On a run with no store the
+    // wheel would otherwise clear the box with nothing visible happening,
+    // and the page would quietly stop following.
+    if (!historyRows) { return; }
     if (event.deltaY < 0 && scroller.scrollTop === 0) {
       followBox.checked = false;
       askHistory();

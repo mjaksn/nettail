@@ -348,8 +348,13 @@ try:
     # it was sent. Both `resync` and `park` have to work that out.
     start = body.find("function resync(")
     inside = body[start:body.find("\n  function ", start + 1)]
+    # Through the delayed reconnect and not a fresh `connect()` in the same
+    # breath as the close: the collector frees a watcher's place when its
+    # pump next looks, so at the cap an immediate reconnect is a fifth
+    # connection, refused, and the refusal ends the tab.
     check("coming back to the tail replays what was dropped meanwhile",
-          "lastIngestId = newest" in inside and "connect()" in inside)
+          "lastIngestId = newest" in inside and "reconnectSoon()" in inside
+          and "connect()" not in inside.replace("reconnectSoon()", ""))
     start = body.find("function park(")
     inside = body[start:body.find("\n  function ", start + 1)]
     check("and so does a tab parked while up in the history",
