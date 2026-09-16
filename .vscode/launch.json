@@ -8,6 +8,15 @@
             "program": "${workspaceFolder}/scripts/debug_web.py",
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal"
+        },
+        {
+            "name": "nettail: web debug (templates)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/debug_web.py",
+            "args": ["templates"],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal"
         }
     ]
 }

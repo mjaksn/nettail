@@ -7,7 +7,8 @@ fixed delay would race that, so this polls the URL and opens a browser only
 once something answers.
 
 The argument list lives here and nowhere else, so the two IDE configs do not
-carry two copies of it to drift apart: each just points at this file.
+carry two copies of it to drift apart: each just points at this file, and a
+variant is a name in VARIANTS rather than a second copy of ARGS.
 """
 
 import os
@@ -48,6 +49,17 @@ ARGS = [
     "--flow-store",
 ]
 
+# A launch config can ask for one of these by name, as its one argument, to
+# add a few flags on top of ARGS rather than carrying a second copy of the
+# whole list. "templates" is for the p, t and v keys, which need IPFIX
+# traffic to show anything at all: see "Traffic for the manual checks" in
+# AGENTS.md. nettail decodes whatever arrives rather than choosing an
+# exporter, so the other half of that is pointing
+# tests/tools/send_flows.py --port 9000 --exporter ipfix at this listener.
+VARIANTS = {
+    "templates": ["--macs", "--templates", "--verbose"],
+}
+
 
 def _open_when_ready():
     deadline = time.monotonic() + POLL_TIMEOUT
@@ -68,7 +80,16 @@ def _open_when_ready():
 
 
 def main():
-    sys.argv = ["nettail", *ARGS]
+    variant = sys.argv[1] if len(sys.argv) > 1 else None
+    args = list(ARGS)
+    if variant is not None:
+        try:
+            args += VARIANTS[variant]
+        except KeyError:
+            raise SystemExit(
+                f"debug_web: unknown variant {variant!r}, expected one of "
+                f"{sorted(VARIANTS)}") from None
+    sys.argv = ["nettail", *args]
     threading.Thread(target=_open_when_ready, daemon=True).start()
     return cli.main()
 
