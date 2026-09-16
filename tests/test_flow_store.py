@@ -99,6 +99,20 @@ check("a flushed row is visible to another connection", shown == 1, str(shown))
 check("rows since an id include buffered writes from this connection",
       [row["ingest_id"] for row in buffered.since(0)] == [1],
       str(buffered.since(0)))
+# Walking backwards for a tab scrolling up: newest first, only rows older
+# than the one named, no more than asked for, and buffered rows included
+# the way `since` includes them.
+for n in range(3):
+    buffered.write({"_received": base + n + 1, "_timestamp": base + n + 1,
+                    "_exporter": "10.0.0.4", "_version": 5})
+check("rows before an id come newest first and stop at the limit",
+      [row["ingest_id"] for row in buffered.before(4, 2)] == [3, 2],
+      str(buffered.before(4, 2)))
+check("and leave out the row named and everything after it",
+      [row["ingest_id"] for row in buffered.before(4, 10)] == [3, 2, 1],
+      str(buffered.before(4, 10)))
+check("and are none before the first", buffered.before(1, 10) == [],
+      str(buffered.before(1, 10)))
 buffered.close()
 
 # --- retention drops what is too old ----------------------------------------

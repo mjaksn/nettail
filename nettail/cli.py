@@ -82,9 +82,11 @@ from .web import (
     ASK_QUEUE_MAX,
     DEFAULT_DETAIL_REFRESH,
     DEFAULT_WEB_PORT,
+    HISTORY_ROWS,
+    HISTORY_SCAN,
     KEY_QUEUE_MAX,
+    LOOKUP_QUEUE_MAX,
     RESTORE_MAX,
-    RESTORE_QUEUE_MAX,
     WEB_ENDPOINT_WIDTH,
     WEB_TOKEN_ENV,
     WebInterface,
@@ -1810,12 +1812,14 @@ def main():
     # Bounded for the same reason and more tightly, since answering one is
     # real work rather than a dispatch; `web.ASK_QUEUE_MAX` says how much.
     ask_queue = queue.Queue(maxsize=ASK_QUEUE_MAX)
-    # And where a tab back from the background asks for the flows it missed.
-    # Answered on this thread too, and not for tidiness: the store's SQLite
-    # connection was opened here and refuses every other thread, and the
-    # request thread that used to read it was met with exactly that refusal,
-    # after the greeting had gone out, on every return from the background.
-    restore_queue = queue.Queue(maxsize=RESTORE_QUEUE_MAX)
+    # And where the questions answered out of the flow store wait: a tab back
+    # from the background asking for the flows it missed, and a tab scrolling
+    # up asking for older ones. Answered on this thread too, and not for
+    # tidiness: the store's SQLite connection was opened here and refuses
+    # every other thread, and the request thread that used to read it was met
+    # with exactly that refusal, after the greeting had gone out, on every
+    # return from the background.
+    lookup_queue = queue.Queue(maxsize=LOOKUP_QUEUE_MAX)
     # The flows a browser may still ask about, keyed by the serial `web_flow`
     # stamped on each and bounded per watcher; `detail.Ring` says why per
     # watcher is the bound that matters.
@@ -2029,6 +2033,67 @@ def main():
                     bus.restore(client, flows)
         finally:
             bus.release(client)
+
+    def history_flows(client, before, term):
+        """Answer a tab scrolling up with stored flows older than it holds.
+
+        Walks the store backwards from `before` in chunks, newest first, and
+        stops at `HISTORY_ROWS` matches or `HISTORY_SCAN` rows read, whichever
+        is first. The filter is applied here for the reason the live one is,
+        with the same terms `publish_flow` matches on: a service name and a
+        hostname are what this machine calls them and are not in the file.
+        The oldest row the walk reached goes back as the next cursor, so a
+        filtered walk that found nothing still makes progress, and `more`
+        says whether there is anything older to walk into at all.
+
+        The rows are numbered on from the serial the live ones are, in the
+        order the page will show them, and are not put in the details ring:
+        a click on one is answered from the addresses it carries, the way a
+        replayed row is.
+        """
+        folded = term.casefold() or None
+        found = []
+        cursor = before
+        more = True
+        scanned = 0
+        while more and len(found) < HISTORY_ROWS and scanned < HISTORY_SCAN:
+            chunk = flow_store.before(cursor, HISTORY_ROWS)
+            more = len(chunk) == HISTORY_ROWS
+            for row in chunk:
+                if len(found) >= HISTORY_ROWS:
+                    # Rows are left in this chunk, so there is more whatever
+                    # the chunk's own length said.
+                    more = True
+                    break
+                scanned += 1
+                cursor = row["ingest_id"]
+                record = json.loads(row["record_json"])
+                record["_ingest_id"] = row["ingest_id"]
+                if folded is not None and folded not in {
+                        t.casefold() for t in filter_terms(record, resolver)}:
+                    continue
+                found.append(record)
+        found.reverse()
+        number = flow_serial[0]
+        flows = []
+        for record in found:
+            number += 1
+            flows.append(stored_flow(record, number=number))
+        flow_serial[0] = number
+        bus.history(client, flows, asked=before, before=cursor, more=more)
+
+    def lookup(kind, client, ingest_id, term):
+        """One entry off the lookup queue, on this thread."""
+        if kind == "after":
+            restore_flows(client, ingest_id, term)
+            return
+        try:
+            history_flows(client, ingest_id, term)
+        except sqlite3.Error as exc:
+            print(f"{C.YELLOW}flow history could not be read for a browser "
+                  f"scrolling up: {exc}{C.RESET}", file=sys.stderr)
+            bus.history(client, [], asked=ingest_id, before=ingest_id,
+                        more=False)
     if args.web:
         web_keyset = set()
         if not args.web_readonly:
@@ -2039,7 +2104,7 @@ def main():
         web = WebInterface(bus, key_queue, web_keyset, bind=args.web_bind,
                            port=args.web_port, token=args.web_token,
                            readonly=args.web_readonly, hosts=args.web_host,
-                           asks=ask_queue, restores=restore_queue)
+                           asks=ask_queue, lookups=lookup_queue)
         try:
             # Bound but not yet answering. The greeting a browser is met with
             # has to be in place before the first one can arrive, and it cannot
@@ -2440,20 +2505,22 @@ def main():
                 if bus.active:
                     bus.detail(detail_for_web(
                         detail.report(asked, detail_ring, tally, resolver)))
-            # And the replays owed to tabs back from the background, for the
-            # reason `restore_flows` gives. Bounded by `RESTORE_MAX` rows each,
-            # and by how many tabs can be attached at once.
+            # And the questions answered out of the flow store, a replay for
+            # a tab back from the background or older rows for one scrolling
+            # up, for the reason `restore_flows` gives. Each is bounded by
+            # the rows it may read, and the queue by how many tabs can be
+            # attached at once.
             while True:
                 try:
-                    client, after_ingest, term = restore_queue.get_nowait()
+                    kind, client, ingest_id, term = lookup_queue.get_nowait()
                 except queue.Empty:
                     break
                 # A tab that asked and closed before the loop came round
-                # leaves nothing to send to, and reading up to `RESTORE_MAX`
-                # rows for it would be work done for nobody.
+                # leaves nothing to send to, and reading thousands of rows
+                # for it would be work done for nobody.
                 if client.closed:
                     continue
-                restore_flows(client, after_ingest, term)
+                lookup(kind, client, ingest_id, term)
             # A request refused because its Host named another port, reported
             # on this thread for the reason browser keys are answered on it:
             # a line written from a request thread lands inside the scroll

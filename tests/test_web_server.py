@@ -22,9 +22,10 @@ from nettail.feed import Feed
 from nettail.web import (
     ASK_QUEUE_MAX,
     FILTER_MAX,
+    HISTORY_ROWS,
+    LOOKUP_QUEUE_MAX,
     MAX_CLIENTS,
     RESTORE_MAX,
-    RESTORE_QUEUE_MAX,
     WebInterface,
     unpad,
 )
@@ -94,9 +95,9 @@ check("and a cell of nothing but padding empties",
 
 bus = Feed()
 asks = queue.Queue(maxsize=ASK_QUEUE_MAX)
-restores = queue.Queue(maxsize=RESTORE_QUEUE_MAX)
+lookups = queue.Queue(maxsize=LOOKUP_QUEUE_MAX)
 site = WebInterface(bus, queue.Queue(maxsize=8), {"e"}, bind="127.0.0.1",
-                    port=0, asks=asks, restores=restores)
+                    port=0, asks=asks, lookups=lookups)
 url = site.start()
 
 
@@ -323,6 +324,36 @@ try:
     # them land afterwards would answer the key with the rows it was pressed
     # to be rid of.
     check("a clear empties what is queued behind it", "pendingClear" in body)
+
+    # -- scrolling back in time --------------------------------------------
+    #
+    # Older rows go on at the other end of the table, and that is the one
+    # insertion that does not go through the frame queue: it reorders none
+    # of the appends the queue keeps in order. It has to stay the only one,
+    # for the reason the append has to, so it is grepped for the same way.
+    # And the page puts the scroll position back itself after a prepend, so
+    # the browser's own anchoring has to be off or the view moves twice.
+    start = body.find("function prependHistory(")
+    inside = body[start:body.find("\n  function ", start + 1)]
+    check("older rows are prepended in one place",
+          body.count("rows.insertBefore(") == 1 and "rows.insertBefore(" in inside)
+    check("with the browser's own scroll anchoring off",
+          "overflow-anchor: none" in body)
+    check("how many rows an answer carries comes from the greeting",
+          "hello.history_rows" in body)
+    check("and the page asks on the history route", '"/history"' in body)
+    # Rows dropped from the newest end while the reader is up in the history
+    # are fetched again through the replay a returning tab gets, which has to
+    # start after the newest row the page still holds rather than the newest
+    # it was sent. Both `resync` and `park` have to work that out.
+    start = body.find("function resync(")
+    inside = body[start:body.find("\n  function ", start + 1)]
+    check("coming back to the tail replays what was dropped meanwhile",
+          "lastIngestId = newest" in inside and "connect()" in inside)
+    start = body.find("function park(")
+    inside = body[start:body.find("\n  function ", start + 1)]
+    check("and so does a tab parked while up in the history",
+          "droppedNewest" in inside and "newestIngest()" in inside)
 
     # -- the flow details dialog ------------------------------------------
     #
@@ -727,15 +758,16 @@ try:
                   frames and frames[0][1].get("restore_max") == RESTORE_MAX,
                   repr(frames))
             try:
-                asked = restores.get(timeout=TIMEOUT)
+                asked = lookups.get(timeout=TIMEOUT)
             except queue.Empty:
                 asked = None
             check("the ask reaches the receive loop's queue", asked is not None)
             check("naming the client, the row to start after and the term",
-                  asked is not None and asked[1] == 7 and asked[2] == "53"
-                  and asked[0] is bus.client(frames[0][1]["client"]),
+                  asked is not None and asked[0] == "after" and asked[2] == 7
+                  and asked[3] == "53"
+                  and asked[1] is bus.client(frames[0][1]["client"]),
                   repr(asked))
-            client = asked[0] if asked else None
+            client = asked[1] if asked else None
             # Published before the release, so the tab must not be sent it
             # live: the replay is what carries it, and a flow that arrived
             # both ways would be on the page twice.
@@ -747,6 +779,53 @@ try:
             check("the replay arrives first and the live flows after it",
                   [(k, p.get("flows", p.get("n"))) for k, p in frames]
                   == [("restore", [{"n": 8}]), ("flow", 9)], repr(frames))
+
+            # -- scrolling up asks the same queue --------------------------
+            #
+            # Older rows are the other question the store answers, and they
+            # go by the same route for the same reason. The route takes the
+            # client and the row to look before, and nothing else, and what
+            # it puts on the queue names the filter the tab is under, so
+            # that the answer obeys the filter the page is showing.
+            tab = client.id
+            check("a scroll up is accepted",
+                  post("history", {"client": tab, "before": 7}) == 200)
+            try:
+                asked = lookups.get(timeout=TIMEOUT)
+            except queue.Empty:
+                asked = None
+            check("and reaches the receive loop's queue as a look before",
+                  asked == ("before", client, 7, "53"), repr(asked))
+            bus.history(client, [{"n": 5}, {"n": 6}], asked=7, before=5,
+                        more=True)
+            frames = read_frames(returning, 1)
+            check("the answer comes back on the tab's own stream",
+                  frames == [("history", {"flows": [{"n": 5}, {"n": 6}],
+                                          "asked": 7, "before": 5,
+                                          "more": True})], repr(frames))
+            check("and the greeting says how much one answer carries",
+                  hello.get("history_rows") == HISTORY_ROWS,
+                  repr(hello.get("history_rows")))
+            for name, payload, code in (
+                ("no client", {"before": 7}, 400),
+                ("no row", {"client": tab}, 400),
+                ("a row that is not a number", {"client": tab, "before": "7"},
+                 400),
+                ("a bool wearing a number", {"client": tab, "before": True},
+                 400),
+                ("row zero", {"client": tab, "before": 0}, 400),
+                ("a field it does not know",
+                 {"client": tab, "before": 7, "extra": 1}, 400),
+                ("a body that is not an object", [7], 400),
+                ("a watcher that is not there",
+                 {"client": "nobody", "before": 7}, 404),
+            ):
+                got = post("history", payload)
+                check("the history route refuses %s" % name, got == code,
+                      "got %r" % (got,))
+            check("and a foreign origin, as every control route does",
+                  post("history", {"client": tab, "before": 7},
+                       origin="http://evil.example.com") == 403)
         finally:
             returning.close()
         for bad in ("abc", "-1", "1e3", "9" * 17, "٢"):
@@ -774,13 +853,27 @@ try:
                 headers={"Host": plain_host}), timeout=TIMEOUT)
             try:
                 frames = read_frames(live, 1)
+                plain_hello = frames[0][1] if frames else {}
                 check("a collector with no store offers no replay",
-                      frames and frames[0][1].get("restore_max") == 0,
-                      repr(frames))
+                      plain_hello.get("restore_max") == 0, repr(frames))
+                check("and no older rows either",
+                      plain_hello.get("history_rows") == 0, repr(frames))
                 plain_bus.flow({"n": 1})
                 frames = read_frames(live, 1)
                 check("and puts the tab straight on the live feed",
                       frames == [("flow", {"n": 1})], repr(frames))
+                try:
+                    urllib.request.urlopen(urllib.request.Request(
+                        "http://%s/t/%s/history" % (plain_host, plain.token),
+                        data=json.dumps({"client": plain_hello.get("client"),
+                                         "before": 1}).encode("utf-8"),
+                        headers={"Host": plain_host,
+                                 "Content-Type": "application/json"},
+                        method="POST"), timeout=TIMEOUT)
+                    check("and refuses a scroll up outright", False)
+                except urllib.error.HTTPError as exc:
+                    check("and refuses a scroll up outright",
+                          exc.code == 404, str(exc.code))
             finally:
                 live.close()
         finally:

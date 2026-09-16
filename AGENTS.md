@@ -945,6 +945,91 @@ the rows above stay, click a row shown under the filter once a few thousand
 hidden flows have gone by, switch away from the tab for longer than the grace
 and back, and clear it.
 
+### Scrolling back in time
+
+With `--flow-store` on, a reader who scrolls to the top of the table is sent
+the flows that came before the oldest row the page holds, out of the store,
+and the page puts them on above. It is the other question the store answers,
+beside the replay a tab back from the background gets, and it goes by the
+same route for the same reason: the store's connection is the receive
+thread's. The page POSTs the row to look before to a `history` route, the
+handler validates it and puts a `("before", client, ingest_id, term)` entry
+on the same `lookups` queue a replay's `("after", ...)` entry goes on, and
+the receive loop walks the store backwards and publishes a `history` event
+to that one client. Under `--web-readonly` it is allowed, as the filter is:
+it changes what one browser is sent and nothing the collector is doing.
+
+Seven things about it are easy to break.
+
+- **The answer obeys the filter the tab is showing, and the collector does
+  the matching.** The term travels on the queue entry, read off the client
+  under the feed's lock when the ask is taken, and `history_flows` matches
+  it with the same `filter_terms` the live path uses. A filtered walk has to
+  read a row to know whether it counts, so it is bounded twice: `HISTORY_ROWS`
+  matches or `HISTORY_SCAN` rows read, whichever comes first. Rows above the
+  filter's line on the page are unfiltered live rows, and rows a scroll back
+  fetches above those are filtered; that is what was asked for and the
+  README says so.
+- **The answer carries a cursor, and is sent even when it carries no rows.**
+  `before` in the payload is the oldest row the walk reached, not the oldest
+  it matched, and the page's next ask starts there. Without it a filtered
+  walk that found nothing in four thousand rows would be asked for the same
+  four thousand rows for ever. `more` says whether there is anything older
+  at all, and the page writes the "start of the stored flows" line and stops
+  asking when it is false. `asked` echoes the cursor the page sent, which is
+  how an answer from before a clear is recognised and dropped, the way
+  `askId` does it for the dialog.
+- **The cursor is forgotten whenever `keep` takes rows from the top.** A
+  cursor is only right while the page's oldest row is the one the walk was
+  continued from. Rows trimmed from the top make the page's oldest newer, so
+  `keep`'s oldest-first branch puts `historyCursor` back to null and
+  `historyDone` back to false, and the next ask starts from what is actually
+  there. `clearTable` does the same and drops the ask in flight.
+- **While the reader is up in the history, the newest rows go, not the
+  oldest.** The bound is the same `MAX_ROWS`; what changes is which end
+  `keep` takes from. With Follow off the oldest rows are the ones being read,
+  so a prepend of five hundred rows to a full page would otherwise be trimmed
+  away in the same call that added it. The newest go from the queue first,
+  which nothing has painted, and from the bottom of the page only when the
+  page alone is over the bound, which only a prepend can bring about while the
+  reader is at the top of it; a reader a few hundred rows up from the tail
+  never sees a painted row vanish. They are counted in `droppedNewest` rather
+  than `trimmed`, because they are not lost the way the oldest are.
+- **Coming back to the tail fetches what was dropped, through the replay a
+  returning tab gets.** `resync` paints what is pending, so the newest row the
+  page holds is on it, sets `lastIngestId` to that row, and reconnects: the
+  greeting is followed by a `restore` of everything after it, up to
+  `RESTORE_MAX`, and the live stream carries on from there. It is the one
+  reconnect the page makes on purpose while the stream is fine, and
+  `resyncing` keeps the greeting from writing "reconnected to the collector",
+  which would read as the collector having gone. Both ways of turning Follow
+  on come through `followed`, because the scroll handler sets the box
+  without firing `change`. `park` has the same debt to settle: `noteIngest`
+  raised `lastIngestId` for every row sent whether or not it was kept, so a
+  tab parked while up in the history sets it back to the newest row on the
+  page before it closes the stream, or the replay on the way back starts past
+  the hole. `test_web_server` greps both.
+- **Prepending puts the scroll position back itself, and the browser must not
+  also do it.** `overflow-anchor: none` on `main` is what keeps Chrome from
+  adjusting for content inserted above the viewport on its own account; with
+  both, the view moves twice. One mechanism, in every browser.
+- **The trigger has to work where scrolling fires no event.** A table shorter
+  than the window has nowhere to scroll to, so the scroll handler never runs.
+  A wheel turned up at the top asks and clears Follow, and turning Follow off
+  by the box asks too, which is the way that works on a phone. The scroll
+  handler asks within `HISTORY_NEAR` screens of the top, and the answer's
+  handler asks again while the reader is still there, which is what walks a
+  filtered search on through rows that do not match.
+
+The rows a scroll back fetches are numbered on from the live serial and are
+not put in the details ring, so a click on one is answered from the addresses
+it carries, as a click on a replayed row is. Nothing in the suite runs the
+page, so the feature is a manual check: send traffic until the page is full,
+scroll to the top, watch older rows arrive and the view hold still, keep
+going until the start line appears, apply a filter and scroll up again, then
+scroll back to the tail and watch the rows that arrived meanwhile be sent
+again.
+
 ## There is a QR encoder in here
 
 `qr.py` encodes the `--web` URL as a QR code and draws it out of half block
@@ -1056,7 +1141,11 @@ Four things about the arrangement are easy to break.
   moment two land in one frame. `test_web_server` greps the page for
   `rows.appendChild(` outside `paint`, blunt in the way the `innerHTML` check
   is blunt and for the same reason: an append put back somewhere else fails
-  nothing until the link is busy.
+  nothing until the link is busy. The one exception is the other end of the
+  table: rows a scroll back in time fetches go on above everything, in
+  `prependHistory`, and reorder none of the appends the queue keeps in
+  order. That is grepped for too, as the only `rows.insertBefore(`. See
+  "Scrolling back in time".
 - **A clear takes the queue with it.** Rows already waiting were on their way
   to a table the reader has just emptied, so `clearTable` drops the fragment
   and starts another. A clear followed by flows inside one frame has to leave
@@ -1077,7 +1166,9 @@ Four things about the arrangement are easy to break.
   carries the fact to that note whichever of the two the rows went from, and
   the count restarts in `clearTable` rather than in `wipe`, a frame later, so
   that a trim between the two is still reported rather than forgotten with
-  everything the clear threw away.
+  everything the clear threw away. Which end goes depends on what the reader
+  is doing: with Follow off the oldest rows are the ones being read, and the
+  newest go instead. "Scrolling back in time" says why that is safe.
 
 There is no browser in the suite, so none of this can be pinned by a test that
 runs it. The manual check is to pause with `space`, let a few thousand flows be

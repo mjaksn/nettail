@@ -45,6 +45,8 @@ EVENTS = (
     ("hello", "the collector's settings, the key table, the columns, a status"),
     ("flow", "one flow's cells to draw, and the record --json prints"),
     ("restore", "flows replayed to fill what a backgrounded tab missed"),
+    ("history", "stored flows from before the oldest a tab holds, asked for "
+                "by scrolling up"),
     ("status", "the status bar snapshot, on a clock"),
     ("prose", "a block of text the terminal also printed, ANSI intact"),
     ("clear", "the x key: throw away what is on screen"),
@@ -369,6 +371,23 @@ class Feed:
         with self._lock:
             if client in self._clients and not client.closed:
                 self._put(client, ("restore", {"flows": flows}))
+
+    def history(self, client, flows, asked, before, more):
+        """Older stored flows for one client, which asked by scrolling up.
+
+        Per-client for the reason `restore` is. Sent even when `flows` is
+        empty, unlike a replay, because the answer carries two things the
+        page cannot do without: `before`, the oldest row the search reached,
+        which is where its next ask starts, and `more`, whether there is
+        anything older to ask for at all. A filtered search that found nothing
+        in the rows it read still moved the cursor. `asked` is the cursor the
+        page sent, so that an answer from before a clear is recognisable.
+        """
+        with self._lock:
+            if client in self._clients and not client.closed:
+                self._put(client, ("history", {
+                    "flows": flows, "asked": asked, "before": before,
+                    "more": more}))
 
     def release(self, client):
         """Let one blocked client start taking live events.

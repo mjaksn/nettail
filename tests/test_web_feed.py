@@ -80,6 +80,22 @@ check("and it is one of the documented events",
       "restore" in [name for name, _doc in EVENTS],
       str([name for name, _doc in EVENTS]))
 
+# Older rows for a tab scrolling up go the same way, and go even when there
+# are none: the cursor and whether there is more are the answer then.
+bus.history(client, [], asked=9, before=4, more=False)
+events, _dropped = bus.drain(client)
+check("a history answer publishes under its own name, even empty",
+      events == [("history", {"flows": [], "asked": 9, "before": 4,
+                              "more": False})], str(events))
+check("and it is one of the documented events",
+      "history" in [name for name, _doc in EVENTS],
+      str([name for name, _doc in EVENTS]))
+other = bus.subscribe()
+bus.history(client, [{"n": 1}], asked=4, before=1, more=False)
+check("and reaches only the tab that asked", bus.drain(other)[0] == [])
+bus.unsubscribe(other)
+bus.drain(client)
+
 # -- overflow drops the oldest and counts it -----------------------------
 
 small = Feed(backlog=4)
