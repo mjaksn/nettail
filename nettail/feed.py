@@ -148,7 +148,7 @@ class Feed:
 
     # -- subscribing --------------------------------------------------------
 
-    def subscribe(self, limit=None, term=None):
+    def subscribe(self, limit=None, term=None, blocked=False):
         """Hand back a Client, or None when it cannot have one.
 
         None means either that the collector is shutting down or that the
@@ -161,6 +161,9 @@ class Feed:
         gave its stream up in the background comes back still filtering.
         Setting it afterwards would let every flow published in between
         through, and the page would have nothing to tell them apart by.
+        `blocked` is set here for the same reason: marked after the lock had
+        gone, a publish in between could queue a live flow the replay was
+        also about to carry, and the page would show it twice.
         """
         with self._lock:
             if self._closed_down:
@@ -168,6 +171,7 @@ class Feed:
             if limit is not None and len(self._clients) >= limit:
                 return None
             client = Client(self.backlog, term)
+            client.blocked = blocked
             self._clients.append(client)
             self.active = True
             self._count_filters()
@@ -186,10 +190,7 @@ class Feed:
         writes the store and the one that skips this client, so nothing can land
         between its read and its release.
         """
-        client = self.subscribe(limit=limit, term=term)
-        if client is not None:
-            client.blocked = True
-        return client
+        return self.subscribe(limit=limit, term=term, blocked=True)
 
     def client(self, client_id):
         """One client by id, or None when it is gone."""

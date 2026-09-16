@@ -80,6 +80,19 @@ check("and it is one of the documented events",
       "restore" in [name for name, _doc in EVENTS],
       str([name for name, _doc in EVENTS]))
 
+# A returning tab is subscribed blocked, and is blocked from the moment it is
+# on the list: marked after the lock had gone, a flow published in between
+# would reach it live and again in the replay.
+held = bus.subscribe_blocked()
+check("a blocked subscription is blocked as it is made", held.blocked is True)
+bus.flow({"n": 7})
+check("and is sent nothing live while it is", bus.drain(held)[0] == [])
+bus.release(held)
+bus.flow({"n": 8})
+check("until it is released", bus.drain(held)[0] == [("flow", {"n": 8})])
+bus.unsubscribe(held)
+bus.drain(client)
+
 # Older rows for a tab scrolling up go the same way, and go even when there
 # are none: the cursor and whether there is more are the answer then.
 bus.history(client, [], asked=9, before=4, more=False)
