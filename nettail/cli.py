@@ -2106,7 +2106,15 @@ def main():
         web = WebInterface(bus, key_queue, web_keyset, bind=args.web_bind,
                            port=args.web_port, token=args.web_token,
                            readonly=args.web_readonly, hosts=args.web_host,
-                           asks=ask_queue, lookups=lookup_queue)
+                           asks=ask_queue,
+                           # Only with a store to answer from. The queue is
+                           # what tells the server there is one, and handed
+                           # over regardless it advertised a replay and a
+                           # scroll back on every run, which suppressed the
+                           # missed-flow note and let the wheel clear Follow
+                           # for nothing.
+                           lookups=(lookup_queue if args.flow_store is not None
+                                    else None))
         try:
             # Bound but not yet answering. The greeting a browser is met with
             # has to be in place before the first one can arrive, and it cannot

@@ -337,6 +337,11 @@ def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
 result = run([(2, "e", None)], [v5_packet(0)])
 check("the socket waits the short time when the web interface is up",
       result["timeout"] == 0.25)
+# The store lookup queue is what tells the server there is a store, so a run
+# without one hands over none: handed over regardless, every run advertised
+# a replay and a scroll back it could not make.
+check("a run with no store gives the server nothing to look things up on",
+      result["site"].lookups is None)
 check("a browser key is answered",
       "showing only flows with a public endpoint" in plain(result["err"]))
 check("and the server is stopped on the way out", result["site"].stopped is True)
