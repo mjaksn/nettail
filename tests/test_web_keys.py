@@ -188,11 +188,22 @@ def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
                     after = None
                     if restore_after is not None:
                         after = restore_after(seen)
-                    seen["client"] = bus.subscribe(term=term)
-                    if after is not None:
-                        seen["site"].restore(seen["client"], str(after), term or "")
+                    if after is None:
+                        seen["client"] = bus.subscribe(term=term)
+                    else:
+                        # As a stream asks: blocked until the receive loop has
+                        # read the store and released it, which it does on
+                        # its next pass. This poll ends empty so that pass
+                        # comes before the next packet; on a real run either
+                        # order can happen and neither loses a flow, but only
+                        # this one keeps the split the checks below count.
+                        seen["client"] = bus.subscribe_blocked(term=term)
+                        seen["site"].restores.put_nowait(
+                            (seen["client"], after, term or ""))
                     seen["hello_after_gap"] = bus.hello()
                     time.sleep(main.REPAINT_INTERVAL + 0.1)
+                    if after is not None:
+                        raise socket.timeout
             if FakeSocket.calls > rounds:
                 raise KeyboardInterrupt
             if waiting:
@@ -222,7 +233,12 @@ def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
             self.stopped = False
             self.serving = False
             self.port_notice = None
-            self.restore = kw.get("restore", lambda client, after, term: None)
+            # The third, where a tab back from the background asks for the
+            # flows it missed. The receive loop answers it from the store,
+            # which is that thread's, so a check puts the ask here the way a
+            # stream would.
+            self.restores = kw.get("restores")
+            self.restore_enabled = self.restores is not None
             seen["site"] = self
 
         # Bound and serving are two steps for a reason: the greeting has to be

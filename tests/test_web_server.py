@@ -13,12 +13,21 @@ import socket
 import struct
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 from harness import check, finish
 
 from nettail.feed import Feed
-from nettail.web import ASK_QUEUE_MAX, FILTER_MAX, MAX_CLIENTS, WebInterface, unpad
+from nettail.web import (
+    ASK_QUEUE_MAX,
+    FILTER_MAX,
+    MAX_CLIENTS,
+    RESTORE_MAX,
+    RESTORE_QUEUE_MAX,
+    WebInterface,
+    unpad,
+)
 
 TIMEOUT = 6.0
 
@@ -85,8 +94,9 @@ check("and a cell of nothing but padding empties",
 
 bus = Feed()
 asks = queue.Queue(maxsize=ASK_QUEUE_MAX)
+restores = queue.Queue(maxsize=RESTORE_QUEUE_MAX)
 site = WebInterface(bus, queue.Queue(maxsize=8), {"e"}, bind="127.0.0.1",
-                    port=0, asks=asks)
+                    port=0, asks=asks, restores=restores)
 url = site.start()
 
 
@@ -695,6 +705,91 @@ try:
         except urllib.error.HTTPError as exc:
             check("a stream asking for an impossible filter is refused",
                   exc.code == 400, str(exc.code))
+
+        # -- a replay is asked for on the request thread, not built there --
+        #
+        # A tab back from the background names the newest stored row it holds
+        # in `after`. The store that answers belongs to the receive thread, so
+        # the request thread puts the ask on a queue, holds the tab off the
+        # live feed until the loop releases it, and pumps whatever comes back.
+        # It used to read the store itself, which sqlite3 refuses from any
+        # thread but the one that opened it, and the refusal arrived after the
+        # 200 had gone out: the browser saw a stream that greeted and ended,
+        # retried it five times, and told the reader the collector had gone.
+        returning = urllib.request.urlopen(urllib.request.Request(
+            "http://%s/t/%s/events?after=7&filter=53" % (host, site.token),
+            headers={"Host": host}), timeout=TIMEOUT)
+        try:
+            frames = read_frames(returning, 1)
+            check("a stream asking for a replay is greeted at once",
+                  frames and frames[0][0] == "hello", repr(frames))
+            check("and told how much a replay can carry",
+                  frames and frames[0][1].get("restore_max") == RESTORE_MAX,
+                  repr(frames))
+            try:
+                asked = restores.get(timeout=TIMEOUT)
+            except queue.Empty:
+                asked = None
+            check("the ask reaches the receive loop's queue", asked is not None)
+            check("naming the client, the row to start after and the term",
+                  asked is not None and asked[1] == 7 and asked[2] == "53"
+                  and asked[0] is bus.client(frames[0][1]["client"]),
+                  repr(asked))
+            client = asked[0] if asked else None
+            # Published before the release, so the tab must not be sent it
+            # live: the replay is what carries it, and a flow that arrived
+            # both ways would be on the page twice.
+            bus.flow({"n": 8})
+            bus.restore(client, [{"n": 8}])
+            bus.release(client)
+            bus.flow({"n": 9})
+            frames = read_frames(returning, 2)
+            check("the replay arrives first and the live flows after it",
+                  [(k, p.get("flows", p.get("n"))) for k, p in frames]
+                  == [("restore", [{"n": 8}]), ("flow", 9)], repr(frames))
+        finally:
+            returning.close()
+        for bad in ("abc", "-1", "1e3", "9" * 17, "٢"):
+            try:
+                urllib.request.urlopen(urllib.request.Request(
+                    "http://%s/t/%s/events?after=%s" % (
+                        host, site.token, urllib.parse.quote(bad)),
+                    headers={"Host": host}), timeout=TIMEOUT)
+                check("a stream asking to start after %a is refused" % bad,
+                      False)
+            except urllib.error.HTTPError as exc:
+                check("a stream asking to start after %a is refused" % bad,
+                      exc.code == 400, str(exc.code))
+        # A server stood up with no queue to ask has nothing to replay from,
+        # and a tab that asks is put straight on the live feed rather than
+        # held for a release nothing would send.
+        plain_bus = Feed()
+        plain = WebInterface(plain_bus, queue.Queue(), set(), bind="127.0.0.1",
+                             port=0)
+        plain.start()
+        try:
+            plain_host = "127.0.0.1:%d" % plain.port
+            live = urllib.request.urlopen(urllib.request.Request(
+                "http://%s/t/%s/events?after=3" % (plain_host, plain.token),
+                headers={"Host": plain_host}), timeout=TIMEOUT)
+            try:
+                frames = read_frames(live, 1)
+                check("a collector with no store offers no replay",
+                      frames and frames[0][1].get("restore_max") == 0,
+                      repr(frames))
+                plain_bus.flow({"n": 1})
+                frames = read_frames(live, 1)
+                check("and puts the tab straight on the live feed",
+                      frames == [("flow", {"n": 1})], repr(frames))
+            finally:
+                live.close()
+        finally:
+            plain.stop()
+        # The returning stream's place comes back when the server looks, as
+        # above, and the cap is counted below.
+        deadline = time.time() + TIMEOUT
+        while bus.clients > 1 and time.time() < deadline:
+            time.sleep(0.05)
 
         # -- falling behind ----------------------------------------------
         #

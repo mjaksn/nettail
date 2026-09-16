@@ -178,8 +178,11 @@ class Feed:
         its replay must be queued before any new live flow for that tab, and the
         replay itself must still be whatever the store can see inside the writer's
         own transaction. This side answers the first half only: the client exists
-        now, under the feed's lock, but publish sites skip it until the request
-        thread has queued whatever catch-up it owes and calls `release()`.
+        now, under the feed's lock, but publish sites skip it until the receive
+        thread has queued whatever catch-up it owes and calls `release()`. The
+        receive thread and not the request thread, because it is the one that
+        writes the store and the one that skips this client, so nothing can land
+        between its read and its release.
         """
         client = self.subscribe(limit=limit, term=term)
         if client is not None:
@@ -355,10 +358,11 @@ class Feed:
         """Replay stored flows to one client, before live ones catch up.
 
         This is a per-client event for the same reason `detail` is not: the rows
-        are what one tab missed rather than part of the live stream. It therefore
-        does cross the thread boundary `detail` avoids, but only in the shape the
-        request thread is already allowed: adding to one client's own queue under
-        the feed's lock.
+        are what one tab missed rather than part of the live stream. The feed
+        therefore learns which client a replay is for, which `detail` avoids,
+        but only in the shape a filter change already takes: adding to one
+        client's own queue under the feed's lock. Called on the receive thread,
+        which is where the rows come from.
         """
         if not flows:
             return
@@ -369,9 +373,10 @@ class Feed:
     def release(self, client):
         """Let one blocked client start taking live events.
 
-        Called by the request thread once any replay it owes has been put on the
-        queue. The wake here covers the ordinary case of an empty replay: `_pump`
-        may already be waiting and has to re-check the queue and the live stream.
+        Called by the receive thread once any replay it owes has been put on the
+        queue, and by the request thread only when it could not ask for one. The
+        wake here covers the ordinary case of an empty replay: `_pump` may
+        already be waiting and has to re-check the queue and the live stream.
         """
         with self._lock:
             if client in self._clients and not client.closed:

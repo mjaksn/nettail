@@ -539,13 +539,18 @@ of `ps`. `NEVER_WRITTEN` is where that lives.
 
 `feed.py` is the bus and knows nothing about HTTP; `web.py` is the server and
 touches no collector state. Between them sits one rule that everything else is
-arranged around: **a request thread may read a feed queue and put a key or a
-question on a queue, and that is the whole of its authority.** Everything that
-changes what the collector is doing, and everything that reads what it has
-counted, happens on the receive thread, which drains both queues between
-datagrams: a key goes to the same `Controls.handle` the terminal uses, and a
-question about a flow goes to `detail.report`, which is written for being
-called there. See "Asking about a flow" below. The one addition is a tab's own
+arranged around: **a request thread may read a feed queue and put a key, a
+question or a replay request on a queue, and that is the whole of its
+authority.** Everything that changes what the collector is doing, and
+everything that reads what it has counted or stored, happens on the receive
+thread, which drains the queues between datagrams: a key goes to the same
+`Controls.handle` the terminal uses, a question about a flow goes to
+`detail.report`, which is written for being called there, and a replay is read
+out of the flow store, whose SQLite connection refuses every other thread.
+That last one was a request thread's job for a release, and it failed on every
+return from the background: the refusal came after the greeting, so the
+browser saw a stream that ended and retried it until it gave up. See "Asking
+about a flow" below. The one addition is a tab's own
 subscription: subscribing, leaving and setting that subscription's filter all
 happen on the request thread, under the feed's lock, because they change what
 one browser is sent rather than what the collector is doing. See "Filtering

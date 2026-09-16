@@ -84,6 +84,7 @@ from .web import (
     DEFAULT_WEB_PORT,
     KEY_QUEUE_MAX,
     RESTORE_MAX,
+    RESTORE_QUEUE_MAX,
     WEB_ENDPOINT_WIDTH,
     WEB_TOKEN_ENV,
     WebInterface,
@@ -1809,6 +1810,12 @@ def main():
     # Bounded for the same reason and more tightly, since answering one is
     # real work rather than a dispatch; `web.ASK_QUEUE_MAX` says how much.
     ask_queue = queue.Queue(maxsize=ASK_QUEUE_MAX)
+    # And where a tab back from the background asks for the flows it missed.
+    # Answered on this thread too, and not for tidiness: the store's SQLite
+    # connection was opened here and refuses every other thread, and the
+    # request thread that used to read it was met with exactly that refusal,
+    # after the greeting had gone out, on every return from the background.
+    restore_queue = queue.Queue(maxsize=RESTORE_QUEUE_MAX)
     # The flows a browser may still ask about, keyed by the serial `web_flow`
     # stamped on each and bounded per watcher; `detail.Ring` says why per
     # watcher is the bound that matters.
@@ -1965,21 +1972,24 @@ def main():
     web = None
     web_url = None
     web_warnings = []
-    def restore_flows(client, after_ingest, term):
-        """Send stored rows after this id to one returning client.
+    def stored_since(after_ingest, term):
+        """The stored rows after this id, as the browser needs them.
 
         The durable store is the long tail and the live queue is the edge. What
         a tab gets back is whatever the store still has plus whatever this
         process has accepted since, so there is no gap between restored rows and
-        new live ones while a commit is still buffered.
+        new live ones while a commit is still buffered: the read and the write
+        share a connection, and a transaction sees its own rows.
+
+        Only a filtered replay reads past `RESTORE_MAX` rows, since it has to
+        look at a row to know whether it counts. An unfiltered one is bounded
+        at the query, because this runs where datagrams wait.
         """
-        if args.flow_store is None:
-            return
-        after_ingest = int(after_ingest)
         folded = term.casefold() or None
         flows = []
         number = max(flow_serial[0], after_ingest)
-        for row in flow_store.since(after_ingest):
+        limit = None if folded else RESTORE_MAX
+        for row in flow_store.since(after_ingest, limit=limit):
             record = json.loads(row["record_json"])
             record["_ingest_id"] = row["ingest_id"]
             if folded is not None and folded not in {
@@ -1991,7 +2001,34 @@ def main():
                 break
         if number > flow_serial[0]:
             flow_serial[0] = number
-        bus.restore(client, flows)
+        return flows
+
+    def restore_flows(client, after_ingest, term):
+        """Replay what one returning client missed, then let it go live.
+
+        Called on this thread, from the loop below, because the store's
+        connection is this thread's and because only this thread can promise
+        the replay ends where the live flows begin: it writes every row and
+        skips a blocked client, so nothing lands between the read and the
+        release. The release is unconditional. A client left blocked is a
+        stream that greeted and then said nothing, which is what a reader
+        would take for a page that has stopped working.
+        """
+        try:
+            if args.flow_store is not None:
+                try:
+                    flows = stored_since(after_ingest, term)
+                except sqlite3.Error as exc:
+                    # A read that fails is worth a line, since the tab is
+                    # about to carry on as if nothing had been missed. Said
+                    # here rather than from the request thread, which may not
+                    # print.
+                    print(f"{C.YELLOW}flow history could not be read for a "
+                          f"returning browser: {exc}{C.RESET}", file=sys.stderr)
+                else:
+                    bus.restore(client, flows)
+        finally:
+            bus.release(client)
     if args.web:
         web_keyset = set()
         if not args.web_readonly:
@@ -2002,7 +2039,7 @@ def main():
         web = WebInterface(bus, key_queue, web_keyset, bind=args.web_bind,
                            port=args.web_port, token=args.web_token,
                            readonly=args.web_readonly, hosts=args.web_host,
-                           asks=ask_queue, restore=restore_flows)
+                           asks=ask_queue, restores=restore_queue)
         try:
             # Bound but not yet answering. The greeting a browser is met with
             # has to be in place before the first one can arrive, and it cannot
@@ -2403,6 +2440,15 @@ def main():
                 if bus.active:
                     bus.detail(detail_for_web(
                         detail.report(asked, detail_ring, tally, resolver)))
+            # And the replays owed to tabs back from the background, for the
+            # reason `restore_flows` gives. Bounded by `RESTORE_MAX` rows each,
+            # and by how many tabs can be attached at once.
+            while True:
+                try:
+                    client, after_ingest, term = restore_queue.get_nowait()
+                except queue.Empty:
+                    break
+                restore_flows(client, after_ingest, term)
             # A request refused because its Host named another port, reported
             # on this thread for the reason browser keys are answered on it:
             # a line written from a request thread lands inside the scroll
