@@ -1985,15 +1985,17 @@ def main():
         new live ones while a commit is still buffered: the read and the write
         share a connection, and a transaction sees its own rows.
 
-        Only a filtered replay reads past `RESTORE_MAX` rows, since it has to
-        look at a row to know whether it counts. An unfiltered one is bounded
-        at the query, because this runs where datagrams wait.
+        Bounded at the query, to `HISTORY_SCAN` rows, because this runs where
+        datagrams wait: a filtered replay has to look at a row to know whether
+        it counts, and left unbounded a sparse term over days of history was a
+        read of every row since the cursor while packets queued behind it.
+        Rows past the bound are not replayed, which is the cap `RESTORE_MAX`
+        already puts on an unfiltered one.
         """
         folded = term.casefold() or None
         flows = []
         number = max(flow_serial[0], after_ingest)
-        limit = None if folded else RESTORE_MAX
-        for row in flow_store.since(after_ingest, limit=limit):
+        for row in flow_store.since(after_ingest, limit=HISTORY_SCAN):
             record = json.loads(row["record_json"])
             record["_ingest_id"] = row["ingest_id"]
             if folded is not None and folded not in {
