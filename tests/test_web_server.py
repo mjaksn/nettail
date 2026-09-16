@@ -348,6 +348,10 @@ try:
     inside = body[start:body.find("\n  function ", start + 1)]
     check("a filter change starts the history walk again",
           "historyCursor = null" in inside and "historyDone = false" in inside)
+    # And a store the collector could not read is not the start of the
+    # history: the page has to tell the two apart.
+    check("and a failed answer is not taken for the start of the history",
+          "payload.failed" in body)
     check("and the page asks on the history route", '"/history"' in body)
     # Rows dropped from the newest end while the reader is up in the history
     # are fetched again through the replay a returning tab gets, which has to
@@ -814,7 +818,8 @@ try:
             check("the answer comes back on the tab's own stream",
                   frames == [("history", {"flows": [{"n": 5}, {"n": 6}],
                                           "asked": 7, "before": 5,
-                                          "more": True})], repr(frames))
+                                          "more": True, "failed": False})],
+                  repr(frames))
             check("and the greeting says how much one answer carries",
                   hello.get("history_rows") == HISTORY_ROWS,
                   repr(hello.get("history_rows")))

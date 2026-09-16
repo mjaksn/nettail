@@ -99,7 +99,14 @@ bus.history(client, [], asked=9, before=4, more=False)
 events, _dropped = bus.drain(client)
 check("a history answer publishes under its own name, even empty",
       events == [("history", {"flows": [], "asked": 9, "before": 4,
-                              "more": False})], str(events))
+                              "more": False, "failed": False})], str(events))
+# A store that could not be read says so, and does not say the start of the
+# history was reached, which is what an empty answer with `more` False means.
+bus.history(client, [], asked=9, before=9, more=True, failed=True)
+events, _dropped = bus.drain(client)
+check("and a failed one is marked as such with the cursor left alone",
+      events == [("history", {"flows": [], "asked": 9, "before": 9,
+                              "more": True, "failed": True})], str(events))
 check("and it is one of the documented events",
       "history" in [name for name, _doc in EVENTS],
       str([name for name, _doc in EVENTS]))

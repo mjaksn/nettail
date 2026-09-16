@@ -2194,6 +2194,13 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
       historyTimer = 0;
       // Rows on their way to a table that is about to be wiped go with it.
       if (pendingClear) { return; }
+      // A store that could not be read is not the start of the history:
+      // the cursor stays where it was and the next scroll asks again.
+      if (payload.failed) {
+        note("gap", "The collector could not read its flow history for " +
+             "older rows. Scroll up again to retry.");
+        return;
+      }
       historyCursor = payload.before;
       if (!payload.more) { historyDone = true; }
       prependHistory(payload);

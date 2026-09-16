@@ -979,12 +979,20 @@ Seven things about it are easy to break.
   asking when it is false. `asked` echoes the cursor the page sent, which is
   how an answer from before a clear is recognised and dropped, the way
   `askId` does it for the dialog.
-- **The cursor is forgotten whenever `keep` takes rows from the top.** A
-  cursor is only right while the page's oldest row is the one the walk was
-  continued from. Rows trimmed from the top make the page's oldest newer, so
-  `keep`'s oldest-first branch puts `historyCursor` back to null and
-  `historyDone` back to false, and the next ask starts from what is actually
-  there. `clearTable` does the same and drops the ask in flight.
+- **The cursor is forgotten whenever `keep` takes rows from the top, and
+  whenever the filter changes.** A cursor is only right while the page's
+  oldest row is the one the walk was continued from, and only under the term
+  the walk read rows for: a filtered walk passes over rows that do not match
+  its term, and a later term might have matched them. Rows trimmed from the
+  top make the page's oldest newer, so `keep`'s oldest-first branch puts
+  `historyCursor` back to null and `historyDone` back to false, and the next
+  ask starts from what is actually there. `filterTook` does the same on a
+  change of term and drops the ask in flight, whose answer was made under
+  the old one, and `clearTable` does both. A store that could not be read
+  answers with `failed` rather than an empty answer, because an empty answer
+  with `more` false is the start of the history and the page would write
+  the line saying so on an I/O error; the cursor stays and the next scroll
+  asks again.
 - **While the reader is up in the history, the newest rows go, not the
   oldest.** The bound is the same `MAX_ROWS`; what changes is which end
   `keep` takes from. With Follow off the oldest rows are the ones being read,

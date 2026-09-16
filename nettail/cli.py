@@ -2094,8 +2094,12 @@ def main():
         except sqlite3.Error as exc:
             print(f"{C.YELLOW}flow history could not be read for a browser "
                   f"scrolling up: {exc}{C.RESET}", file=sys.stderr)
+            # Said to be a failure and not the start of the history: the
+            # cursor stays where it was, `more` stays true, and the page
+            # asks again on the next scroll rather than writing the line
+            # that says there is nothing older.
             bus.history(client, [], asked=ingest_id, before=ingest_id,
-                        more=False)
+                        more=True, failed=True)
     if args.web:
         web_keyset = set()
         if not args.web_readonly:

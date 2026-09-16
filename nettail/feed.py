@@ -373,7 +373,7 @@ class Feed:
             if client in self._clients and not client.closed:
                 self._put(client, ("restore", {"flows": flows}))
 
-    def history(self, client, flows, asked, before, more):
+    def history(self, client, flows, asked, before, more, failed=False):
         """Older stored flows for one client, which asked by scrolling up.
 
         Per-client for the reason `restore` is. Sent even when `flows` is
@@ -383,12 +383,18 @@ class Feed:
         anything older to ask for at all. A filtered search that found nothing
         in the rows it read still moved the cursor. `asked` is the cursor the
         page sent, so that an answer from before a clear is recognisable.
+
+        `failed` says the store could not be read. It is its own flag rather
+        than an empty answer with `more` False, because that answer means the
+        start of the history has been reached, and a page told that on an I/O
+        error would write the line saying so and never ask again. A failed
+        answer leaves the cursor where it was, so the next scroll asks again.
         """
         with self._lock:
             if client in self._clients and not client.closed:
                 self._put(client, ("history", {
                     "flows": flows, "asked": asked, "before": before,
-                    "more": more}))
+                    "more": more, "failed": failed}))
 
     def release(self, client):
         """Let one blocked client start taking live events.
