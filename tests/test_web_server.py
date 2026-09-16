@@ -341,6 +341,13 @@ try:
           "overflow-anchor: none" in body)
     check("how many rows an answer carries comes from the greeting",
           "hello.history_rows" in body)
+    # A cursor is only right under the term it was produced under, and a
+    # walk that reached the start did so under that term too, so a filter
+    # change starts the walk again.
+    start = body.find("function filterTook(")
+    inside = body[start:body.find("\n  function ", start + 1)]
+    check("a filter change starts the history walk again",
+          "historyCursor = null" in inside and "historyDone = false" in inside)
     check("and the page asks on the history route", '"/history"' in body)
     # Rows dropped from the newest end while the reader is up in the history
     # are fetched again through the replay a returning tab gets, which has to

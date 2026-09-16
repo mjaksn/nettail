@@ -1077,6 +1077,15 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
     filterBox.setAttribute("data-on", term ? "1" : "0");
     if (term === filterTaken) { return; }
     filterTaken = term;
+    // A scroll back in time starts again under the new term. The cursor
+    // was the oldest row a walk under the old term had read, and rows
+    // between it and the page's oldest that the new term would match were
+    // passed over; the line saying the start was reached was reached under
+    // the old term too. An answer still in flight was asked under the old
+    // term, so it is dropped as well.
+    historyCursor = null;
+    historyDone = false;
+    historyAsked = null;
     note("filter", term
       ? "Filtering: new flows are shown only when an address, port, service " +
         "or hostname is exactly \"" + term + "\". Rows above are as they were."
