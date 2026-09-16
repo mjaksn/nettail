@@ -994,7 +994,14 @@ Seven things about it are easy to break.
   page alone is over the bound, which only a prepend can bring about while the
   reader is at the top of it; a reader a few hundred rows up from the tail
   never sees a painted row vanish. They are counted in `droppedNewest` rather
-  than `trimmed`, because they are not lost the way the oldest are.
+  than `trimmed`, because they are not lost the way the oldest are. And they
+  go down to the bound exactly, not to `TRIM_TO`: a trim of a thousand at a
+  time keeps the rows that arrive between one trim and the next and drops the
+  ones in between, which is a history full of holes, and a replay that starts
+  after the newest kept row cannot fill a hole in the middle. That was found
+  by driving the page in a headless browser, not by reading it. Stopping at
+  the bound means every newer row goes once it is reached, so what is kept is
+  one unbroken run ending where the replay begins.
 - **Coming back to the tail fetches what was dropped, through the replay a
   returning tab gets.** `resync` paints what is pending, so the newest row the
   page holds is on it, sets `lastIngestId` to that row, and reconnects: the

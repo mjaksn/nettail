@@ -766,7 +766,15 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
       // collector's store, and `resync` fetches it when the reader comes back
       // down to the tail. An extra line sits below its flow, so from this
       // end it goes first and can never be left on its own.
-      while (total > TRIM_TO) {
+      //
+      // Down to the bound and no further, unlike the trim below. Taking a
+      // thousand at a time here would keep the rows that arrive between one
+      // trim and the next and drop the ones in between, and what the page
+      // held would be a history full of holes that a replay starting after
+      // its newest row could never fill. Stopping at the bound means that
+      // once it is reached every newer row goes, and what is kept is one
+      // unbroken run ending where the replay will begin.
+      while (total > MAX_ROWS) {
         var end = pending.childElementCount ? pending : rows;
         end.removeChild(end.lastElementChild);
         droppedNewest += 1;
