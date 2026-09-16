@@ -15,7 +15,6 @@ import os
 import sys
 import threading
 import time
-import urllib.error
 import urllib.request
 import webbrowser
 
@@ -34,6 +33,12 @@ TOKEN = "DebugToken"
 URL = f"http://127.0.0.1:{DEFAULT_WEB_PORT}/t/{TOKEN}/"
 POLL_INTERVAL = 0.25
 POLL_TIMEOUT = 30
+# What the page this program serves looks like, and nothing else does. A
+# bind failure sends cli.main() on without a web server at all rather than
+# raising, so something could already be answering on this port before this
+# run ever gets there, and any response from it is not proof that this run's
+# own view is what is listening.
+PAGE_MARKER = b"<title>nettail</title>"
 
 ARGS = [
     "--port", "9000",
@@ -61,22 +66,22 @@ VARIANTS = {
 }
 
 
+def _is_this_run(url):
+    try:
+        with urllib.request.urlopen(url, timeout=1) as resp:
+            return resp.status == 200 and PAGE_MARKER in resp.read()
+    except OSError:
+        return False
+
+
 def _open_when_ready():
     deadline = time.monotonic() + POLL_TIMEOUT
     while time.monotonic() < deadline:
-        try:
-            urllib.request.urlopen(URL, timeout=1)
-        except urllib.error.HTTPError:
-            break
-        except OSError:
-            time.sleep(POLL_INTERVAL)
-            continue
-        else:
-            break
-    else:
-        print(f"debug_web: gave up waiting for {URL}", file=sys.stderr)
-        return
-    webbrowser.open(URL)
+        if _is_this_run(URL):
+            webbrowser.open(URL)
+            return
+        time.sleep(POLL_INTERVAL)
+    print(f"debug_web: gave up waiting for {URL}", file=sys.stderr)
 
 
 def main():
