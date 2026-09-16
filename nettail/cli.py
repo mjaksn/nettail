@@ -2448,6 +2448,11 @@ def main():
                     client, after_ingest, term = restore_queue.get_nowait()
                 except queue.Empty:
                     break
+                # A tab that asked and closed before the loop came round
+                # leaves nothing to send to, and reading up to `RESTORE_MAX`
+                # rows for it would be work done for nobody.
+                if client.closed:
+                    continue
                 restore_flows(client, after_ingest, term)
             # A request refused because its Host named another port, reported
             # on this thread for the reason browser keys are answered on it:
