@@ -680,12 +680,13 @@ try:
               and watching.filter == "53")
         # And a scroll up, which is the same kind of thing: older rows for
         # one tab, and nothing the collector is doing.
-        older = json.dumps({"client": watching.id,
-                            "before": 5}).encode("utf-8")
+        older = json.dumps({"client": watching.id, "before": 5,
+                            "ask": 1}).encode("utf-8")
         check("and still answering a scroll up",
               fetch(quiet_url + "history", host_header=quiet_host,
                     method="POST", body=older) == 200
-              and quiet.lookups.get_nowait() == ("before", watching, 5, "53"))
+              and quiet.lookups.get_nowait()
+              == ("before", watching, 5, "53", 1))
         quiet_bus.unsubscribe(watching)
     finally:
         quiet.stop(timeout=1.0)

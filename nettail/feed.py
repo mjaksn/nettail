@@ -381,8 +381,9 @@ class Feed:
         page cannot do without: `before`, the oldest row the search reached,
         which is where its next ask starts, and `more`, whether there is
         anything older to ask for at all. A filtered search that found nothing
-        in the rows it read still moved the cursor. `asked` is the cursor the
-        page sent, so that an answer from before a clear is recognisable.
+        in the rows it read still moved the cursor. `asked` is the id the
+        page gave the ask, so that an answer to one it has since given up on,
+        after a clear or a filter change, is recognisable.
 
         `failed` says the store could not be read. It is its own flag rather
         than an empty answer with `more` False, because that answer means the

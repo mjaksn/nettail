@@ -201,14 +201,15 @@ def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
                         # this one keeps the split the checks below count.
                         seen["client"] = bus.subscribe_blocked(term=term)
                         seen["site"].lookups.put_nowait(
-                            ("after", seen["client"], after, term or ""))
+                            ("after", seen["client"], after, term or "",
+                             None))
                     if history_before is not None:
                         # And a scroll up, asked the way the history route
                         # asks it, behind the replay so both are answered on
                         # the same pass.
                         seen["site"].lookups.put_nowait(
                             ("before", seen["client"], history_before,
-                             history_term or term or ""))
+                             history_term or term or "", 41))
                     seen["hello_after_gap"] = bus.hello()
                     time.sleep(main.REPAINT_INTERVAL + 0.1)
                     if after is not None:
@@ -647,8 +648,8 @@ older = [p for k, p in result["events"] if k == "history"]
 ids = [f["record"]["_ingest_id"] for f in older[0]["flows"]] if older else []
 check("a tab scrolling up is sent the stored rows before the one it named",
       len(older) == 1 and ids == [1, 2], repr(ids))
-check("with the cursor it asked from and the one to ask from next",
-      older and older[0]["asked"] == 3 and older[0]["before"] == 1,
+check("with the id it was asked under and the cursor to ask from next",
+      older and older[0]["asked"] == 41 and older[0]["before"] == 1,
       repr(older))
 check("and told there is nothing older", older and older[0]["more"] is False,
       repr(older))

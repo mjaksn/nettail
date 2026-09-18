@@ -358,6 +358,14 @@ try:
     check("and a failed answer is not taken for the start of the history",
           "payload.failed" in body)
     check("and the page asks on the history route", '"/history"' in body)
+    # An answer is matched to its ask by an id the page gave it, never by the
+    # row it named: after a filter change the next ask usually names the same
+    # row, and the old term's answer would pass for the new one's.
+    start = body.find("function askHistory(")
+    inside = body[start:body.find("\n  function ", start + 1)]
+    check("each scroll up is sent with an id of its own",
+          "historyAskId += 1" in inside and "ask: ask" in inside
+          and "historyAsked = before" not in inside)
     # Rows dropped from the newest end while the reader is up in the history
     # are fetched again through the replay a returning tab gets, which has to
     # start after the newest row the page still holds rather than the newest
@@ -785,7 +793,7 @@ try:
             check("the ask reaches the receive loop's queue", asked is not None)
             check("naming the client, the row to start after and the term",
                   asked is not None and asked[0] == "after" and asked[2] == 7
-                  and asked[3] == "53"
+                  and asked[3] == "53" and asked[4] is None
                   and asked[1] is bus.client(frames[0][1]["client"]),
                   repr(asked))
             client = asked[1] if asked else None
@@ -805,48 +813,59 @@ try:
             #
             # Older rows are the other question the store answers, and they
             # go by the same route for the same reason. The route takes the
-            # client and the row to look before, and nothing else, and what
-            # it puts on the queue names the filter the tab is under, so
-            # that the answer obeys the filter the page is showing.
+            # client, the row to look before and the ask's id, and nothing
+            # else, and what it puts on the queue names the filter the tab is
+            # under, so that the answer obeys the filter the page is showing.
+            # The id comes back on the answer: after a filter change the next
+            # ask usually names the same row, so the row cannot tell an old
+            # answer from the new one.
             tab = client.id
             check("a scroll up is accepted",
-                  post("history", {"client": tab, "before": 7}) == 200)
+                  post("history", {"client": tab, "before": 7, "ask": 3})
+                  == 200)
             try:
                 asked = lookups.get(timeout=TIMEOUT)
             except queue.Empty:
                 asked = None
             check("and reaches the receive loop's queue as a look before",
-                  asked == ("before", client, 7, "53"), repr(asked))
-            bus.history(client, [{"n": 5}, {"n": 6}], asked=7, before=5,
+                  asked == ("before", client, 7, "53", 3), repr(asked))
+            bus.history(client, [{"n": 5}, {"n": 6}], asked=3, before=5,
                         more=True)
             frames = read_frames(returning, 1)
             check("the answer comes back on the tab's own stream",
                   frames == [("history", {"flows": [{"n": 5}, {"n": 6}],
-                                          "asked": 7, "before": 5,
+                                          "asked": 3, "before": 5,
                                           "more": True, "failed": False})],
                   repr(frames))
             check("and the greeting says how much one answer carries",
                   hello.get("history_rows") == HISTORY_ROWS,
                   repr(hello.get("history_rows")))
             for name, payload, code in (
-                ("no client", {"before": 7}, 400),
-                ("no row", {"client": tab}, 400),
-                ("a row that is not a number", {"client": tab, "before": "7"},
-                 400),
-                ("a bool wearing a number", {"client": tab, "before": True},
-                 400),
-                ("row zero", {"client": tab, "before": 0}, 400),
+                ("no client", {"before": 7, "ask": 3}, 400),
+                ("no row", {"client": tab, "ask": 3}, 400),
+                ("no ask", {"client": tab, "before": 7}, 400),
+                ("a row that is not a number",
+                 {"client": tab, "before": "7", "ask": 3}, 400),
+                ("a bool wearing a number",
+                 {"client": tab, "before": True, "ask": 3}, 400),
+                ("an ask that is not a number",
+                 {"client": tab, "before": 7, "ask": "3"}, 400),
+                ("a bool wearing an ask",
+                 {"client": tab, "before": 7, "ask": True}, 400),
+                ("an ask past what a page can count to",
+                 {"client": tab, "before": 7, "ask": 2 ** 53 + 1}, 400),
+                ("row zero", {"client": tab, "before": 0, "ask": 3}, 400),
                 ("a field it does not know",
-                 {"client": tab, "before": 7, "extra": 1}, 400),
+                 {"client": tab, "before": 7, "ask": 3, "extra": 1}, 400),
                 ("a body that is not an object", [7], 400),
                 ("a watcher that is not there",
-                 {"client": "nobody", "before": 7}, 404),
+                 {"client": "nobody", "before": 7, "ask": 3}, 404),
             ):
                 got = post("history", payload)
                 check("the history route refuses %s" % name, got == code,
                       "got %r" % (got,))
             check("and a foreign origin, as every control route does",
-                  post("history", {"client": tab, "before": 7},
+                  post("history", {"client": tab, "before": 7, "ask": 3},
                        origin="http://evil.example.com") == 403)
         finally:
             returning.close()
@@ -856,7 +875,7 @@ try:
         # suppress its own note about the gap.
         while True:
             try:
-                lookups.put_nowait(("before", None, 1, ""))
+                lookups.put_nowait(("before", None, 1, "", 1))
             except queue.Full:
                 break
         crowded = urllib.request.urlopen(urllib.request.Request(
@@ -916,7 +935,7 @@ try:
                     urllib.request.urlopen(urllib.request.Request(
                         "http://%s/t/%s/history" % (plain_host, plain.token),
                         data=json.dumps({"client": plain_hello.get("client"),
-                                         "before": 1}).encode("utf-8"),
+                                         "before": 1, "ask": 1}).encode("utf-8"),
                         headers={"Host": plain_host,
                                  "Content-Type": "application/json"},
                         method="POST"), timeout=TIMEOUT)

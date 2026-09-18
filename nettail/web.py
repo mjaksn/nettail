@@ -892,7 +892,8 @@ class _Handler(BaseHTTPRequestHandler):
                 # without the line the page would suppress its own note
                 # about the gap and the rows would go missing silently.
                 try:
-                    site.lookups.put_nowait(("after", client, int(after), term))
+                    site.lookups.put_nowait(
+                        ("after", client, int(after), term, None))
                 except queue.Full:
                     site.bus.note(client, "The flows this tab missed while it "
                                   "was away were not replayed: the collector "
@@ -1178,6 +1179,12 @@ class _Handler(BaseHTTPRequestHandler):
         the one the subscription is under when the ask is taken, which is the
         one the page is showing, so it travels on the queue entry rather than
         being read again when the loop gets there.
+
+        The ask's own id rides with it and comes back on the answer, which is
+        how the page tells its answer from one to an ask it has given up on.
+        The cursor cannot do that: after a filter change the next ask usually
+        names the same row, and an answer made under the old term would pass
+        for the new one's.
         """
         try:
             payload = json.loads(raw.decode("utf-8"))
@@ -1185,15 +1192,20 @@ class _Handler(BaseHTTPRequestHandler):
                 raise TypeError
             client_id = payload["client"]
             before = payload["before"]
+            ask = payload["ask"]
         except (ValueError, KeyError, TypeError, UnicodeDecodeError):
-            self._refuse(400, "expected a client and a row to look before")
+            self._refuse(400, "expected a client, a row to look before and "
+                              "an ask")
             return
-        if set(payload) - {"client", "before"}:
+        if set(payload) - {"client", "before", "ask"}:
             self._refuse(400, "that is not a question this collector takes")
             return
         if not isinstance(client_id, str) or not _whole(before) or before < 1:
             self._refuse(400, "a client is a string and before is the number "
                               "of a stored row")
+            return
+        if not _whole(ask):
+            self._refuse(400, "an ask is a whole number")
             return
         if not self.site.store_enabled:
             self._refuse(404, "this collector keeps no flow history")
@@ -1203,7 +1215,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._refuse(404, "no such watcher")
             return
         try:
-            self.site.lookups.put_nowait(("before", client, before, client.term))
+            self.site.lookups.put_nowait(
+                ("before", client, before, client.term, ask))
         except queue.Full:
             self._refuse(503, "the collector is not keeping up with the "
                               "questions")

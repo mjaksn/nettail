@@ -2036,7 +2036,7 @@ def main():
         finally:
             bus.release(client)
 
-    def history_flows(client, before, term):
+    def history_flows(client, before, term, ask):
         """Answer a tab scrolling up with stored flows older than it holds.
 
         Walks the store backwards from `before` in chunks, newest first, and
@@ -2082,15 +2082,15 @@ def main():
             number += 1
             flows.append(stored_flow(record, number=number))
         flow_serial[0] = number
-        bus.history(client, flows, asked=before, before=cursor, more=more)
+        bus.history(client, flows, asked=ask, before=cursor, more=more)
 
-    def lookup(kind, client, ingest_id, term):
+    def lookup(kind, client, ingest_id, term, ask):
         """One entry off the lookup queue, on this thread."""
         if kind == "after":
             restore_flows(client, ingest_id, term)
             return
         try:
-            history_flows(client, ingest_id, term)
+            history_flows(client, ingest_id, term, ask)
         except sqlite3.Error as exc:
             print(f"{C.YELLOW}flow history could not be read for a browser "
                   f"scrolling up: {exc}{C.RESET}", file=sys.stderr)
@@ -2098,7 +2098,7 @@ def main():
             # cursor stays where it was, `more` stays true, and the page
             # asks again on the next scroll rather than writing the line
             # that says there is nothing older.
-            bus.history(client, [], asked=ingest_id, before=ingest_id,
+            bus.history(client, [], asked=ask, before=ingest_id,
                         more=True, failed=True)
     if args.web:
         web_keyset = set()
@@ -2526,7 +2526,8 @@ def main():
             # attached at once.
             while True:
                 try:
-                    kind, client, ingest_id, term = lookup_queue.get_nowait()
+                    kind, client, ingest_id, term, ask = (
+                        lookup_queue.get_nowait())
                 except queue.Empty:
                     break
                 # A tab that asked and closed before the loop came round
@@ -2534,7 +2535,7 @@ def main():
                 # for it would be work done for nobody.
                 if client.closed:
                     continue
-                lookup(kind, client, ingest_id, term)
+                lookup(kind, client, ingest_id, term, ask)
             # A request refused because its Host named another port, reported
             # on this thread for the reason browser keys are answered on it:
             # a line written from a request thread lands inside the scroll

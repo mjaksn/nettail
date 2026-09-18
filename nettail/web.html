@@ -1224,8 +1224,12 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
   // How many rows one answer carries, from the greeting, and 0 when the
   // collector keeps no store, which is when nothing here does anything.
   var historyRows = 0;
-  // The cursor of the ask in flight, or null when there is none.
+  // The id of the ask in flight, or null when there is none. Each ask gets a
+  // new one from `historyAskId` and the answer carries it back, so an answer
+  // to an ask given up on is told apart even when the next ask names the same
+  // row, which after a filter change it usually does.
   var historyAsked = null;
+  var historyAskId = 0;
   var historyTimer = 0;
   // Where the next ask looks before, when the last answer moved the search
   // past the oldest row on the page: a filtered search reads rows that do
@@ -1274,7 +1278,9 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
     // A page with no numbered row has nothing to look before: the rows it
     // holds were shown before there was a store to number them.
     if (before === null) { return; }
-    historyAsked = before;
+    historyAskId += 1;
+    var ask = historyAskId;
+    historyAsked = ask;
     if (historyTimer) { window.clearTimeout(historyTimer); }
     historyTimer = window.setTimeout(function () {
       historyTimer = 0;
@@ -1283,9 +1289,9 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
     fetch(BASE + "/history", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ client: clientId, before: before })
+      body: JSON.stringify({ client: clientId, before: before, ask: ask })
     }).then(function (response) {
-      if (response.ok) { return; }
+      if (response.ok || historyAsked !== ask) { return; }
       historyAsked = null;
       // A 404 is a subscription that has just gone, and the next scroll asks
       // again on the new one. Anything else is worth a line.
@@ -1294,7 +1300,7 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
              response.status + ")");
       }
     }).catch(function () {
-      historyAsked = null;
+      if (historyAsked === ask) { historyAsked = null; }
     });
   }
 
@@ -2206,8 +2212,10 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
     es.addEventListener("history", function (event) {
       if (!currentConnection(es)) { return; }
       var payload = JSON.parse(event.data);
-      // Only the answer to the ask in flight. One from before a clear, or
-      // from an ask this page has given up waiting for, is dropped.
+      // Only the answer to the ask in flight. One from before a clear or a
+      // filter change, or from an ask this page has given up waiting for, is
+      // dropped, by its id rather than its row: the ask that replaced it
+      // usually names the same row.
       if (payload.asked !== historyAsked) { return; }
       historyAsked = null;
       if (historyTimer) { window.clearTimeout(historyTimer); }

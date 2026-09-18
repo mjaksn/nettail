@@ -953,10 +953,10 @@ and the page puts them on above. It is the other question the store answers,
 beside the replay a tab back from the background gets, and it goes by the
 same route for the same reason: the store's connection is the receive
 thread's. The page POSTs the row to look before to a `history` route, the
-handler validates it and puts a `("before", client, ingest_id, term)` entry
-on the same `lookups` queue a replay's `("after", ...)` entry goes on, and
-the receive loop walks the store backwards and publishes a `history` event
-to that one client. Under `--web-readonly` it is allowed, as the filter is:
+handler validates it and puts a `("before", client, ingest_id, term, ask)`
+entry on the same `lookups` queue a replay's `("after", ...)` entry goes on,
+and the receive loop walks the store backwards and publishes a `history`
+event to that one client. Under `--web-readonly` it is allowed, as the filter is:
 it changes what one browser is sent and nothing the collector is doing.
 
 Seven things about it are easy to break.
@@ -976,9 +976,12 @@ Seven things about it are easy to break.
   walk that found nothing in four thousand rows would be asked for the same
   four thousand rows for ever. `more` says whether there is anything older
   at all, and the page writes the "start of the stored flows" line and stops
-  asking when it is false. `asked` echoes the cursor the page sent, which is
-  how an answer from before a clear is recognised and dropped, the way
-  `askId` does it for the dialog.
+  asking when it is false. `asked` echoes the id the page gave the ask, which
+  is how an answer from before a clear or a filter change is recognised and
+  dropped, the way `askId` does it for the dialog. It was the cursor once,
+  and that could not do it: the ask made after a filter change usually names
+  the same row as the one it replaced, so the old term's answer passed for
+  the new one's and the real answer was then dropped.
 - **The cursor is forgotten whenever `keep` takes rows from the top, and
   whenever the filter changes.** A cursor is only right while the page's
   oldest row is the one the walk was continued from, and only under the term
