@@ -987,8 +987,9 @@ Seven things about it are easy to break.
   top make the page's oldest newer, so `keep`'s oldest-first branch puts
   `historyCursor` back to null and `historyDone` back to false, and the next
   ask starts from what is actually there. `filterTook` does the same on a
-  change of term and drops the ask in flight, whose answer was made under
-  the old one, and `clearTable` does both. A store that could not be read
+  change of term, drops the ask in flight, whose answer was made under the
+  old one, and takes the start line off the page, since the new term's older
+  rows would otherwise go on above it; `clearTable` does both. A store that could not be read
   answers with `failed` rather than an empty answer, because an empty answer
   with `more` false is the start of the history and the page would write
   the line saying so on an I/O error; the cursor stays and the next scroll

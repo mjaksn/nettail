@@ -1081,11 +1081,12 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
     // was the oldest row a walk under the old term had read, and rows
     // between it and the page's oldest that the new term would match were
     // passed over; the line saying the start was reached was reached under
-    // the old term too. An answer still in flight was asked under the old
-    // term, so it is dropped as well.
+    // the old term too, so it comes off the page. An answer still in flight
+    // was asked under the old term, so it is dropped as well.
     historyCursor = null;
     historyDone = false;
     historyAsked = null;
+    dropHistoryStart();
     note("filter", term
       ? "Filtering: new flows are shown only when an address, port, service " +
         "or hostname is exactly \"" + term + "\". Rows above are as they were."
@@ -1236,6 +1237,11 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
   // Whether the store's beginning has been reached, so there is nothing
   // older to ask for.
   var historyDone = false;
+  // The line saying that beginning was reached, while it is on the page. It
+  // is true only under the term the walk read rows for, so a filter change
+  // takes it off along with `historyDone`: rows the new term matches may lie
+  // before it, and a walk under that term would put them on above the line.
+  var historyStart = null;
   // Live rows dropped from the newest end while the reader was up in the
   // history, owed to them when they come back down.
   var droppedNewest = 0;
@@ -1303,8 +1309,9 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
     var flows = payload.flows || [];
     var frag = document.createDocumentFragment();
     if (!payload.more) {
-      frag.appendChild(noteRow("notice", "This is the start of the flows the " +
-                                         "collector has stored."));
+      historyStart = noteRow("notice", "This is the start of the flows the " +
+                                       "collector has stored.");
+      frag.appendChild(historyStart);
     }
     flows.forEach(function (flow) {
       flowRows(flow).forEach(function (tr) { frag.appendChild(tr); });
@@ -1314,6 +1321,19 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
     rows.insertBefore(frag, rows.firstChild);
     scroller.scrollTop = top + (scroller.scrollHeight - height);
     keep();
+  }
+
+  // Takes the start line off, keeping the rows below it where the reader
+  // sees them, as `prependHistory` does for rows put on. A trim from the top
+  // or a clear may have taken it already.
+  function dropHistoryStart() {
+    var tr = historyStart;
+    historyStart = null;
+    if (!tr || tr.parentNode !== rows) { return; }
+    var height = scroller.scrollHeight;
+    var top = scroller.scrollTop;
+    rows.removeChild(tr);
+    scroller.scrollTop = Math.max(0, top - (height - scroller.scrollHeight));
   }
 
   // The reader is back at the tail, by scrolling there or by ticking the

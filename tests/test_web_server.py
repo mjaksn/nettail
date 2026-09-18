@@ -348,6 +348,11 @@ try:
     inside = body[start:body.find("\n  function ", start + 1)]
     check("a filter change starts the history walk again",
           "historyCursor = null" in inside and "historyDone = false" in inside)
+    # The line saying the start was reached is only true under the term that
+    # reached it, and left on the page it would end up mid-history once the
+    # new term's older rows were put on above it.
+    check("and takes the line saying the start was reached off the page",
+          "dropHistoryStart()" in inside)
     # And a store the collector could not read is not the start of the
     # history: the page has to tell the two apart.
     check("and a failed answer is not taken for the start of the history",
