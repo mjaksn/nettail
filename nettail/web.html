@@ -222,7 +222,12 @@ button:disabled { opacity: .45; cursor: default; }
   margin: 0;
   cursor: pointer;
 }
-main { flex: 1 1 auto; overflow: auto; }
+/* Rows prepended by a scroll back in time would move the view under the
+   reader, and the page puts the scroll position back itself, by the height
+   they added. Chrome would also do that on its own account, and the two
+   together move the view twice, so its own anchoring is turned off here and
+   one mechanism does the job in every browser. */
+main { flex: 1 1 auto; overflow: auto; overflow-anchor: none; }
 table { border-collapse: collapse; width: 100%; }
 /* Fixed layout, sized by the colgroup the greeting's widths build.
    Under `table-layout: auto` a column is as wide as the widest cell
@@ -750,6 +755,51 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
     var held = pendingClear ? 0 : rows.childElementCount;
     var total = held + pending.childElementCount;
     if (total <= MAX_ROWS) { return; }
+    if (!following() && !pendingClear) {
+      // The reader has scrolled up, and the oldest rows are what they are
+      // reading, so the newest go instead: from the queue first, which
+      // nothing has painted, and from the bottom of the page only when the
+      // page alone is over the bound, which happens only after a scroll back
+      // in time has prepended rows and the reader is at the top of them. A
+      // reader a few hundred rows up from the tail never sees a painted row
+      // go. What goes here is not lost the way the oldest are: it is in the
+      // collector's store, and `resync` fetches it when the reader comes back
+      // down to the tail. An extra line sits below its flow, so from this
+      // end it goes first and can never be left on its own.
+      //
+      // Down to the bound and no further, unlike the trim below. Taking a
+      // thousand at a time here would keep the rows that arrive between one
+      // trim and the next and drop the ones in between, and what the page
+      // held would be a history full of holes that a replay starting after
+      // its newest row could never fill. Stopping at the bound means that
+      // once it is reached every newer row goes, and what is kept is one
+      // unbroken run ending where the replay will begin.
+      //
+      // Flows and their extra lines only. A key's reply, a filter's note or
+      // the summary is prose nothing replays, so it stays, and the newest
+      // flow above it goes instead; the flows kept are still one unbroken
+      // run, since it is always the newest of them that goes.
+      var cut = function (list) {
+        var tr = list.lastElementChild;
+        while (tr && total > MAX_ROWS) {
+          var above = tr.previousElementSibling;
+          if (tr.className !== "prose") {
+            list.removeChild(tr);
+            if (tr.className !== "extra") { droppedNewest += 1; }
+            total -= 1;
+          }
+          tr = above;
+        }
+      };
+      cut(pending);
+      cut(rows);
+      return;
+    }
+    // Rows taken from the top move the beginning of what the page holds, so
+    // a cursor a scroll back in time left behind, and the note that said the
+    // start of the store had been reached, both stop being true.
+    historyCursor = null;
+    historyDone = false;
     while (total > TRIM_TO) {
       var list = held ? rows : pending;
       list.removeChild(list.firstElementChild);
@@ -818,6 +868,13 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
     // nothing about them.
     trimmed = 0;
     untold = false;
+    // A scroll back in time starts again from whatever the page holds next.
+    // Rows dropped from the newest end were on their way to a table that is
+    // going, so they are not owed either.
+    historyCursor = null;
+    historyDone = false;
+    historyAsked = null;
+    droppedNewest = 0;
     schedule();
   }
 
@@ -912,9 +969,10 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
 
   // Give up the current stream and open another under `reconnectTerm` after
   // about the pause a browser leaves before its own retry. Used wherever the
-  // browser's retry would reuse an address carrying a term no longer wanted.
-  // `failures` is left as it is, so five of these still give up the way five
-  // of the browser's retries do.
+  // browser's retry would reuse an address carrying a term no longer wanted,
+  // and by `resync`, which wants a fresh subscription for the replay it
+  // carries. `failures` is left as it is, so five of these still give up the
+  // way five of the browser's retries do.
   function reconnectSoon() {
     if (stream) { stream.close(); }
     stream = null;
@@ -1019,6 +1077,16 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
     filterBox.setAttribute("data-on", term ? "1" : "0");
     if (term === filterTaken) { return; }
     filterTaken = term;
+    // A scroll back in time starts again under the new term. The cursor
+    // was the oldest row a walk under the old term had read, and rows
+    // between it and the page's oldest that the new term would match were
+    // passed over; the line saying the start was reached was reached under
+    // the old term too, so it comes off the page. An answer still in flight
+    // was asked under the old term, so it is dropped as well.
+    historyCursor = null;
+    historyDone = false;
+    historyAsked = null;
+    dropHistoryStart();
     note("filter", term
       ? "Filtering: new flows are shown only when an address, port, service " +
         "or hostname is exactly \"" + term + "\". Rows above are as they were."
@@ -1040,7 +1108,10 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
     if (!filterBox.value.trim()) { applyFilter(); }
   });
 
-  function addFlow(payload) {
+  // One flow's rows: the row itself, and what the p and v keys put under it.
+  // Built here for both the live path and a scroll back in time, which puts
+  // them at the other end of the table.
+  function flowRows(payload) {
     var cells = payload.cells || [];
     var tr = document.createElement("tr");
     tr.className = "flow";
@@ -1051,6 +1122,13 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
     if (typeof payload.n === "number") {
       tr.detail = { n: payload.n, ends: payload.ends || [null, null] };
       tr.className = "flow ask";
+    }
+    // And the row's number in the collector's store, when it has one, which
+    // is what a scroll back in time asks to look before and what a return
+    // from the background asks to look after.
+    var record = payload.record;
+    if (record && typeof record._ingest_id === "number") {
+      tr.ingest = record._ingest_id;
     }
     for (var i = 0; i < columns.length; i++) {
       var td = document.createElement("td");
@@ -1064,10 +1142,10 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
       td.appendChild(ansi(String(cells[i] === undefined ? "" : cells[i])));
       tr.appendChild(td);
     }
-    queue(tr);
+    var built = [tr];
     // What the p and v keys put under the row, one row each, spanning the
-    // table the way prose does. Queued after the flow and never before it, so
-    // a trim taking the oldest from the front can separate the two but can
+    // table the way prose does. After the flow and never before it, so a
+    // trim taking the oldest from the front can separate the two but can
     // never reorder them. `keep` is what puts the front back together.
     (payload.extra || []).forEach(function (line) {
       var extra = document.createElement("tr");
@@ -1076,8 +1154,13 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
       cell.colSpan = Math.max(columns.length, 1);
       cell.appendChild(ansi(String(line)));
       extra.appendChild(cell);
-      queue(extra);
+      built.push(extra);
     });
+    return built;
+  }
+
+  function addFlow(payload) {
+    flowRows(payload).forEach(function (tr) { queue(tr); });
   }
 
   function addProse(kind, text) {
@@ -1106,6 +1189,185 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
 
   function note(kind, text) {
     queue(noteRow(kind, text));
+  }
+
+  // ---- scrolling back in time ------------------------------------------
+  //
+  // Scroll up to the top of the table and the page asks the collector for
+  // the flows that came before the oldest row it holds, out of the store
+  // `--flow-store` keeps, and puts them on above. The collector does the
+  // reading and the matching, under the filter this tab is showing, and the
+  // page prepends what it is sent: it names no column, no field and no term,
+  // for the reason it names none anywhere else.
+  //
+  // Prepending is the one thing that does not go through the frame queue.
+  // The queue keeps appends in the order they arrived, and a row put on at
+  // the other end of the table reorders none of them; what it does need is
+  // the scroll position put back by the height it added, which is done here
+  // and not by the browser, see `overflow-anchor` above.
+  //
+  // While the reader is up in the history, `keep` drops the newest rows
+  // rather than the ones being read, and counts them in `droppedNewest`.
+  // They are not lost: they are in the store, so when the reader comes back
+  // to the tail the page reconnects after the newest row it still holds and
+  // the collector replays them, the way it replays what a tab in the
+  // background missed. That is `resync`, and it is the one reconnect the page
+  // makes on purpose while the stream is fine.
+
+  // How close to the top the reader has to be, in screens, before older rows
+  // are asked for: soon enough that they are usually there by the time the
+  // reader reaches the top.
+  var HISTORY_NEAR = 2;
+  // How long an ask may go unanswered before another may be made. An answer
+  // comes back on the stream, so one lost with the stream is never coming.
+  var HISTORY_WAIT = 10000;
+  // How many rows one answer carries, from the greeting, and 0 when the
+  // collector keeps no store, which is when nothing here does anything.
+  var historyRows = 0;
+  // The cursor of the ask in flight, or null when there is none.
+  var historyAsked = null;
+  var historyTimer = 0;
+  // Where the next ask looks before, when the last answer moved the search
+  // past the oldest row on the page: a filtered search reads rows that do
+  // not match and hands back the oldest it reached, so starting again from
+  // the page's oldest row would read them again. Null when the page's oldest
+  // row is the place to start, which `keep` puts it back to whenever it
+  // takes rows from the top.
+  var historyCursor = null;
+  // Whether the store's beginning has been reached, so there is nothing
+  // older to ask for.
+  var historyDone = false;
+  // The line saying that beginning was reached, while it is on the page. It
+  // is true only under the term the walk read rows for, so a filter change
+  // takes it off along with `historyDone`: rows the new term matches may lie
+  // before it, and a walk under that term would put them on above the line.
+  var historyStart = null;
+  // Live rows dropped from the newest end while the reader was up in the
+  // history, owed to them when they come back down.
+  var droppedNewest = 0;
+  // Set across a `resync` reconnect so the greeting does not say
+  // "reconnected", which would read as the collector having gone.
+  var resyncing = false;
+
+  function oldestIngest() {
+    for (var tr = rows.firstElementChild; tr; tr = tr.nextElementSibling) {
+      if (tr.ingest) { return tr.ingest; }
+    }
+    return null;
+  }
+
+  function newestIngest() {
+    for (var tr = rows.lastElementChild; tr; tr = tr.previousElementSibling) {
+      if (tr.ingest) { return tr.ingest; }
+    }
+    return null;
+  }
+
+  function nearTop() {
+    return scroller.scrollTop < scroller.clientHeight * HISTORY_NEAR;
+  }
+
+  function askHistory() {
+    if (!historyRows || historyDone || historyAsked !== null) { return; }
+    if (following() || !stream || !clientId) { return; }
+    var before = historyCursor !== null ? historyCursor : oldestIngest();
+    // A page with no numbered row has nothing to look before: the rows it
+    // holds were shown before there was a store to number them.
+    if (before === null) { return; }
+    historyAsked = before;
+    if (historyTimer) { window.clearTimeout(historyTimer); }
+    historyTimer = window.setTimeout(function () {
+      historyTimer = 0;
+      historyAsked = null;
+    }, HISTORY_WAIT);
+    fetch(BASE + "/history", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ client: clientId, before: before })
+    }).then(function (response) {
+      if (response.ok) { return; }
+      historyAsked = null;
+      // A 404 is a subscription that has just gone, and the next scroll asks
+      // again on the new one. Anything else is worth a line.
+      if (response.status !== 404) {
+        note("gap", "the collector would not look for older flows (" +
+             response.status + ")");
+      }
+    }).catch(function () {
+      historyAsked = null;
+    });
+  }
+
+  // Older rows are asked for when the reader is near the top and not
+  // following, and again after each answer while that is still so: an
+  // answer under a filter may carry nothing and only move the cursor.
+  function maybeHistory() {
+    if (nearTop()) { askHistory(); }
+  }
+
+  function prependHistory(payload) {
+    var flows = payload.flows || [];
+    var frag = document.createDocumentFragment();
+    if (!payload.more) {
+      historyStart = noteRow("notice", "This is the start of the flows the " +
+                                       "collector has stored.");
+      frag.appendChild(historyStart);
+    }
+    flows.forEach(function (flow) {
+      flowRows(flow).forEach(function (tr) { frag.appendChild(tr); });
+    });
+    var height = scroller.scrollHeight;
+    var top = scroller.scrollTop;
+    rows.insertBefore(frag, rows.firstChild);
+    scroller.scrollTop = top + (scroller.scrollHeight - height);
+    keep();
+  }
+
+  // Takes the start line off, keeping the rows below it where the reader
+  // sees them, as `prependHistory` does for rows put on. A trim from the top
+  // or a clear may have taken it already.
+  function dropHistoryStart() {
+    var tr = historyStart;
+    historyStart = null;
+    if (!tr || tr.parentNode !== rows) { return; }
+    var height = scroller.scrollHeight;
+    var top = scroller.scrollTop;
+    rows.removeChild(tr);
+    scroller.scrollTop = Math.max(0, top - (height - scroller.scrollHeight));
+  }
+
+  // The reader is back at the tail, by scrolling there or by ticking the
+  // box. Rows dropped from the newest end meanwhile are fetched now, through
+  // the replay a returning tab gets: what is pending is painted first so the
+  // newest row the page holds is on it, the replay is asked to start after
+  // that row, and the live stream carries on from wherever the replay ends.
+  function resync() {
+    if (!droppedNewest || !stream) { return; }
+    var count = droppedNewest;
+    droppedNewest = 0;
+    if (frame) { window.cancelAnimationFrame(frame); }
+    paint();
+    var newest = newestIngest();
+    if (newest === null) { return; }
+    lastIngestId = newest;
+    note("gap", count.toLocaleString() + " flow" + (count === 1 ? "" : "s") +
+         " arrived while you were reading earlier flows and were not kept. " +
+         "The collector is sending them again.");
+    resyncing = true;
+    // After the pause the page leaves before any reconnect of its own, and
+    // not at once: the collector frees a watcher's place when its pump next
+    // looks, so with every place taken a new connection made in the same
+    // breath as the close is a fifth, is refused, and the refusal ends the
+    // tab with a note telling the reader to reload.
+    reconnectSoon();
+  }
+
+  // What both ways of turning Follow on come through. The scroll handler
+  // sets the box without firing `change`, so a change listener alone would
+  // miss a reader who scrolled back to the bottom.
+  function followed() {
+    resync();
+    toTail();
   }
 
   // ---- the footer ------------------------------------------------------
@@ -1710,6 +1972,17 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
     // over a parked one would sit on "asking the collector" until the tab
     // came back. Closing it stops its timer through the close listener.
     if (detail.open) { detail.close(); }
+    // Rows dropped from the newest end while the reader was up in the
+    // history are still owed, and the replay on the way back starts after
+    // the newest row the page holds rather than the newest it was sent,
+    // which `noteIngest` counted whether or not the row was kept.
+    if (droppedNewest) {
+      droppedNewest = 0;
+      if (frame) { window.cancelAnimationFrame(frame); }
+      paint();
+      var newest = newestIngest();
+      if (newest !== null) { lastIngestId = newest; }
+    }
     stream.close();
     stream = null;
     // The clock watcher can reach a tab that is plainly in front of somebody,
@@ -1869,6 +2142,9 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
         if (typeof hello.restore_max === "number") {
           restoreMax = Math.max(hello.restore_max, 0);
         }
+        if (typeof hello.history_rows === "number") {
+          historyRows = Math.max(hello.history_rows, 0);
+        }
         buildHead(hello.columns || []);
         buildKeys(hello.keys || []);
         pressable = hello.pressable || [];
@@ -1882,9 +2158,10 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
           note("notice", "This collector is serving the display only. " +
                "Keys are not taken from the browser.");
         }
-      } else if (parkedAt === null) {
+      } else if (parkedAt === null && !resyncing) {
         note("notice", "reconnected to the collector");
       }
+      resyncing = false;
       if (status) { showStatus(status); }
       // Every greeting, not only the first: each connection is a subscription
       // of its own, with an id of its own, and the filter it arrived under.
@@ -1924,6 +2201,30 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
         noteIngest(flows[i]);
         addFlow(flows[i]);
       }
+    });
+
+    es.addEventListener("history", function (event) {
+      if (!currentConnection(es)) { return; }
+      var payload = JSON.parse(event.data);
+      // Only the answer to the ask in flight. One from before a clear, or
+      // from an ask this page has given up waiting for, is dropped.
+      if (payload.asked !== historyAsked) { return; }
+      historyAsked = null;
+      if (historyTimer) { window.clearTimeout(historyTimer); }
+      historyTimer = 0;
+      // Rows on their way to a table that is about to be wiped go with it.
+      if (pendingClear) { return; }
+      // A store that could not be read is not the start of the history:
+      // the cursor stays where it was and the next scroll asks again.
+      if (payload.failed) {
+        note("gap", "The collector could not read its flow history for " +
+             "older rows. Scroll up again to retry.");
+        return;
+      }
+      historyCursor = payload.before;
+      if (!payload.more) { historyDone = true; }
+      prependHistory(payload);
+      maybeHistory();
     });
 
     es.addEventListener("status", function (event) {
@@ -2020,11 +2321,32 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
   // programmatic scroll above fires this too, and lands at the tail, so it
   // leaves the box exactly as it found it.
   scroller.addEventListener("scroll", function () {
+    var was = followBox.checked;
     followBox.checked = atTail();
+    if (followBox.checked) {
+      if (!was) { followed(); }
+    } else {
+      maybeHistory();
+    }
   });
 
+  // A wheel turned up at the top asks as well, and clears the box on the
+  // way. Scrolling fires no event when there is nowhere to scroll to, which
+  // is a table shorter than the window, and a reader turning the wheel up
+  // there has said what they want as plainly as one scrolling up does.
+  scroller.addEventListener("wheel", function (event) {
+    // Only where there is something to ask for. On a run with no store the
+    // wheel would otherwise clear the box with nothing visible happening,
+    // and the page would quietly stop following.
+    if (!historyRows) { return; }
+    if (event.deltaY < 0 && scroller.scrollTop === 0) {
+      followBox.checked = false;
+      askHistory();
+    }
+  }, { passive: true });
+
   followBox.addEventListener("change", function () {
-    if (following()) { toTail(); }
+    if (following()) { followed(); } else { maybeHistory(); }
   });
   connect();
 }());

@@ -13,12 +13,22 @@ import socket
 import struct
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 from harness import check, finish
 
 from nettail.feed import Feed
-from nettail.web import ASK_QUEUE_MAX, FILTER_MAX, MAX_CLIENTS, WebInterface, unpad
+from nettail.web import (
+    ASK_QUEUE_MAX,
+    FILTER_MAX,
+    HISTORY_ROWS,
+    LOOKUP_QUEUE_MAX,
+    MAX_CLIENTS,
+    RESTORE_MAX,
+    WebInterface,
+    unpad,
+)
 
 TIMEOUT = 6.0
 
@@ -85,8 +95,9 @@ check("and a cell of nothing but padding empties",
 
 bus = Feed()
 asks = queue.Queue(maxsize=ASK_QUEUE_MAX)
+lookups = queue.Queue(maxsize=LOOKUP_QUEUE_MAX)
 site = WebInterface(bus, queue.Queue(maxsize=8), {"e"}, bind="127.0.0.1",
-                    port=0, asks=asks)
+                    port=0, asks=asks, lookups=lookups)
 url = site.start()
 
 
@@ -313,6 +324,57 @@ try:
     # them land afterwards would answer the key with the rows it was pressed
     # to be rid of.
     check("a clear empties what is queued behind it", "pendingClear" in body)
+
+    # -- scrolling back in time --------------------------------------------
+    #
+    # Older rows go on at the other end of the table, and that is the one
+    # insertion that does not go through the frame queue: it reorders none
+    # of the appends the queue keeps in order. It has to stay the only one,
+    # for the reason the append has to, so it is grepped for the same way.
+    # And the page puts the scroll position back itself after a prepend, so
+    # the browser's own anchoring has to be off or the view moves twice.
+    start = body.find("function prependHistory(")
+    inside = body[start:body.find("\n  function ", start + 1)]
+    check("older rows are prepended in one place",
+          body.count("rows.insertBefore(") == 1 and "rows.insertBefore(" in inside)
+    check("with the browser's own scroll anchoring off",
+          "overflow-anchor: none" in body)
+    check("how many rows an answer carries comes from the greeting",
+          "hello.history_rows" in body)
+    # A cursor is only right under the term it was produced under, and a
+    # walk that reached the start did so under that term too, so a filter
+    # change starts the walk again.
+    start = body.find("function filterTook(")
+    inside = body[start:body.find("\n  function ", start + 1)]
+    check("a filter change starts the history walk again",
+          "historyCursor = null" in inside and "historyDone = false" in inside)
+    # The line saying the start was reached is only true under the term that
+    # reached it, and left on the page it would end up mid-history once the
+    # new term's older rows were put on above it.
+    check("and takes the line saying the start was reached off the page",
+          "dropHistoryStart()" in inside)
+    # And a store the collector could not read is not the start of the
+    # history: the page has to tell the two apart.
+    check("and a failed answer is not taken for the start of the history",
+          "payload.failed" in body)
+    check("and the page asks on the history route", '"/history"' in body)
+    # Rows dropped from the newest end while the reader is up in the history
+    # are fetched again through the replay a returning tab gets, which has to
+    # start after the newest row the page still holds rather than the newest
+    # it was sent. Both `resync` and `park` have to work that out.
+    start = body.find("function resync(")
+    inside = body[start:body.find("\n  function ", start + 1)]
+    # Through the delayed reconnect and not a fresh `connect()` in the same
+    # breath as the close: the collector frees a watcher's place when its
+    # pump next looks, so at the cap an immediate reconnect is a fifth
+    # connection, refused, and the refusal ends the tab.
+    check("coming back to the tail replays what was dropped meanwhile",
+          "lastIngestId = newest" in inside and "reconnectSoon()" in inside
+          and "connect()" not in inside.replace("reconnectSoon()", ""))
+    start = body.find("function park(")
+    inside = body[start:body.find("\n  function ", start + 1)]
+    check("and so does a tab parked while up in the history",
+          "droppedNewest" in inside and "newestIngest()" in inside)
 
     # -- the flow details dialog ------------------------------------------
     #
@@ -695,6 +757,182 @@ try:
         except urllib.error.HTTPError as exc:
             check("a stream asking for an impossible filter is refused",
                   exc.code == 400, str(exc.code))
+
+        # -- a replay is asked for on the request thread, not built there --
+        #
+        # A tab back from the background names the newest stored row it holds
+        # in `after`. The store that answers belongs to the receive thread, so
+        # the request thread puts the ask on a queue, holds the tab off the
+        # live feed until the loop releases it, and pumps whatever comes back.
+        # It used to read the store itself, which sqlite3 refuses from any
+        # thread but the one that opened it, and the refusal arrived after the
+        # 200 had gone out: the browser saw a stream that greeted and ended,
+        # retried it five times, and told the reader the collector had gone.
+        returning = urllib.request.urlopen(urllib.request.Request(
+            "http://%s/t/%s/events?after=7&filter=53" % (host, site.token),
+            headers={"Host": host}), timeout=TIMEOUT)
+        try:
+            frames = read_frames(returning, 1)
+            check("a stream asking for a replay is greeted at once",
+                  frames and frames[0][0] == "hello", repr(frames))
+            check("and told how much a replay can carry",
+                  frames and frames[0][1].get("restore_max") == RESTORE_MAX,
+                  repr(frames))
+            try:
+                asked = lookups.get(timeout=TIMEOUT)
+            except queue.Empty:
+                asked = None
+            check("the ask reaches the receive loop's queue", asked is not None)
+            check("naming the client, the row to start after and the term",
+                  asked is not None and asked[0] == "after" and asked[2] == 7
+                  and asked[3] == "53"
+                  and asked[1] is bus.client(frames[0][1]["client"]),
+                  repr(asked))
+            client = asked[1] if asked else None
+            # Published before the release, so the tab must not be sent it
+            # live: the replay is what carries it, and a flow that arrived
+            # both ways would be on the page twice.
+            bus.flow({"n": 8})
+            bus.restore(client, [{"n": 8}])
+            bus.release(client)
+            bus.flow({"n": 9})
+            frames = read_frames(returning, 2)
+            check("the replay arrives first and the live flows after it",
+                  [(k, p.get("flows", p.get("n"))) for k, p in frames]
+                  == [("restore", [{"n": 8}]), ("flow", 9)], repr(frames))
+
+            # -- scrolling up asks the same queue --------------------------
+            #
+            # Older rows are the other question the store answers, and they
+            # go by the same route for the same reason. The route takes the
+            # client and the row to look before, and nothing else, and what
+            # it puts on the queue names the filter the tab is under, so
+            # that the answer obeys the filter the page is showing.
+            tab = client.id
+            check("a scroll up is accepted",
+                  post("history", {"client": tab, "before": 7}) == 200)
+            try:
+                asked = lookups.get(timeout=TIMEOUT)
+            except queue.Empty:
+                asked = None
+            check("and reaches the receive loop's queue as a look before",
+                  asked == ("before", client, 7, "53"), repr(asked))
+            bus.history(client, [{"n": 5}, {"n": 6}], asked=7, before=5,
+                        more=True)
+            frames = read_frames(returning, 1)
+            check("the answer comes back on the tab's own stream",
+                  frames == [("history", {"flows": [{"n": 5}, {"n": 6}],
+                                          "asked": 7, "before": 5,
+                                          "more": True, "failed": False})],
+                  repr(frames))
+            check("and the greeting says how much one answer carries",
+                  hello.get("history_rows") == HISTORY_ROWS,
+                  repr(hello.get("history_rows")))
+            for name, payload, code in (
+                ("no client", {"before": 7}, 400),
+                ("no row", {"client": tab}, 400),
+                ("a row that is not a number", {"client": tab, "before": "7"},
+                 400),
+                ("a bool wearing a number", {"client": tab, "before": True},
+                 400),
+                ("row zero", {"client": tab, "before": 0}, 400),
+                ("a field it does not know",
+                 {"client": tab, "before": 7, "extra": 1}, 400),
+                ("a body that is not an object", [7], 400),
+                ("a watcher that is not there",
+                 {"client": "nobody", "before": 7}, 404),
+            ):
+                got = post("history", payload)
+                check("the history route refuses %s" % name, got == code,
+                      "got %r" % (got,))
+            check("and a foreign origin, as every control route does",
+                  post("history", {"client": tab, "before": 7},
+                       origin="http://evil.example.com") == 403)
+        finally:
+            returning.close()
+        # A queue with no room means no replay, and the tab is told so on
+        # its own stream before the live flows start, since the greeting
+        # still says a replay is on offer and the page would otherwise
+        # suppress its own note about the gap.
+        while True:
+            try:
+                lookups.put_nowait(("before", None, 1, ""))
+            except queue.Full:
+                break
+        crowded = urllib.request.urlopen(urllib.request.Request(
+            "http://%s/t/%s/events?after=7" % (host, site.token),
+            headers={"Host": host}), timeout=TIMEOUT)
+        try:
+            frames = read_frames(crowded, 1)
+            told = bus.client(frames[0][1]["client"]) if frames else None
+            bus.flow({"n": 10})
+            frames = read_frames(crowded, 2)
+            check("a tab whose replay could not be queued is told, then goes live",
+                  [k for k, _p in frames] == ["prose", "flow"]
+                  and "not replayed" in frames[0][1]["text"]
+                  and told is not None and told.blocked is False, repr(frames))
+        finally:
+            crowded.close()
+            while True:
+                try:
+                    lookups.get_nowait()
+                except queue.Empty:
+                    break
+        for bad in ("abc", "-1", "1e3", "9" * 17, "٢"):
+            try:
+                urllib.request.urlopen(urllib.request.Request(
+                    "http://%s/t/%s/events?after=%s" % (
+                        host, site.token, urllib.parse.quote(bad)),
+                    headers={"Host": host}), timeout=TIMEOUT)
+                check("a stream asking to start after %a is refused" % bad,
+                      False)
+            except urllib.error.HTTPError as exc:
+                check("a stream asking to start after %a is refused" % bad,
+                      exc.code == 400, str(exc.code))
+        # A server stood up with no queue to ask has nothing to replay from,
+        # and a tab that asks is put straight on the live feed rather than
+        # held for a release nothing would send.
+        plain_bus = Feed()
+        plain = WebInterface(plain_bus, queue.Queue(), set(), bind="127.0.0.1",
+                             port=0)
+        plain.start()
+        try:
+            plain_host = "127.0.0.1:%d" % plain.port
+            live = urllib.request.urlopen(urllib.request.Request(
+                "http://%s/t/%s/events?after=3" % (plain_host, plain.token),
+                headers={"Host": plain_host}), timeout=TIMEOUT)
+            try:
+                frames = read_frames(live, 1)
+                plain_hello = frames[0][1] if frames else {}
+                check("a collector with no store offers no replay",
+                      plain_hello.get("restore_max") == 0, repr(frames))
+                check("and no older rows either",
+                      plain_hello.get("history_rows") == 0, repr(frames))
+                plain_bus.flow({"n": 1})
+                frames = read_frames(live, 1)
+                check("and puts the tab straight on the live feed",
+                      frames == [("flow", {"n": 1})], repr(frames))
+                try:
+                    urllib.request.urlopen(urllib.request.Request(
+                        "http://%s/t/%s/history" % (plain_host, plain.token),
+                        data=json.dumps({"client": plain_hello.get("client"),
+                                         "before": 1}).encode("utf-8"),
+                        headers={"Host": plain_host,
+                                 "Content-Type": "application/json"},
+                        method="POST"), timeout=TIMEOUT)
+                    check("and refuses a scroll up outright", False)
+                except urllib.error.HTTPError as exc:
+                    check("and refuses a scroll up outright",
+                          exc.code == 404, str(exc.code))
+            finally:
+                live.close()
+        finally:
+            plain.stop()
+        # The returning stream's place comes back when the server looks, as
+        # above, and the cap is counted below.
+        deadline = time.time() + TIMEOUT
+        while bus.clients > 1 and time.time() < deadline:
+            time.sleep(0.05)
 
         # -- falling behind ----------------------------------------------
         #

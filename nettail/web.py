@@ -5,13 +5,15 @@ and the queues; this turns one of those queues into a stream a browser can read
 and turns a browser's key press into something the receive loop will act on.
 
 Nothing here touches collector state. A request thread may read from a feed
-queue and it may put a key or an ask on a queue, and beyond its own tab's
-subscription, which it takes, gives back and sets the filter of under the
-feed's lock, that is the whole of its authority. Everything that changes what
-the collector is doing, and everything that reads what it has counted, happens
-on the receive thread, which drains both queues between datagrams: the
-existing dispatch in `Controls` stays the one place a key means anything, and
-`detail.report` is called where the tally is safe to read.
+queue and it may put a key, an ask or a flow store lookup on a queue, and
+beyond its own tab's subscription, which it takes, gives back and sets the
+filter of under the feed's lock, that is the whole of its authority.
+Everything that changes what the collector is doing, and everything that
+reads what it has counted or stored, happens on the receive thread, which
+drains the queues between datagrams: the existing dispatch in `Controls`
+stays the one place a key means anything, `detail.report` is called where the
+tally is safe to read, and the flow store is read where its connection was
+opened.
 
 Nothing here prints, either, and that rule is stricter than it sounds.
 `sticky.py` and `statusbar.py` manage a scroll region on the terminal, and a
@@ -110,6 +112,26 @@ KEY_QUEUE_MAX = 64
 # a long way short of a way to keep the collector busy.
 ASK_QUEUE_MAX = 16
 RESTORE_MAX = 4000
+
+# How many stored flows one answer to a scroll up carries, and how many rows
+# the search for them may read. The first is a screenful or so several times
+# over, enough that a reader scrolling up sees the page grow rather than
+# stutter, and small enough that building the rows holds the receive loop
+# for milliseconds. The second bounds a filtered search, which has to read a
+# row to know whether it counts and could otherwise walk the whole file for a
+# term that matches nothing; where it runs out the page is handed the cursor
+# and asks again.
+HISTORY_ROWS = 500
+HISTORY_SCAN = RESTORE_MAX
+
+# Lookups in the flow store a request thread may have waiting for the receive
+# loop: a replay for a tab back from the background, or older rows for one
+# scrolling up. Two per watcher, since a tab can have one of each in flight,
+# and the rest is room for a tab that asked and went away before the loop came
+# round, whose entry then names a client nothing will ever send to. Past this
+# a replay is skipped and the tab put straight on the live stream, and a
+# scroll up is refused and tried again by the page.
+LOOKUP_QUEUE_MAX = 3 * MAX_CLIENTS
 
 # How often the details dialog asks the collector for its figures again, in
 # seconds, and 0 for not at all. Five is short enough that a dialog left open
@@ -811,8 +833,22 @@ class _Handler(BaseHTTPRequestHandler):
         if len(term) > FILTER_MAX:
             self._refuse(400, "a filter term is at most %d characters" % FILTER_MAX)
             return
+        # And the newest stored row it already holds, so that the replay can
+        # start after it. Refused when it is not a row number, for the reason
+        # the term is: the page never sends one that is not, and a bad one
+        # dropped later would end the stream with a 200 already sent, which a
+        # browser retries for ever.
         after = query.get("after", [""])[-1]
-        subscriber = site.bus.subscribe_blocked if after else site.bus.subscribe
+        if after and not (after.isascii() and after.isdigit()
+                          and len(after) <= 16 and _whole(int(after))):
+            self._refuse(400, "after is the number of a stored row")
+            return
+        # A replay is owed only where there is a loop to build it. Without one
+        # the tab goes straight onto the live stream, since a client blocked
+        # for a release that nothing would ever send is a stream that greets
+        # and then says nothing at all.
+        replaying = bool(after) and site.store_enabled
+        subscriber = site.bus.subscribe_blocked if replaying else site.bus.subscribe
         client = subscriber(limit=MAX_CLIENTS, term=term)
         if client is None:
             # Either the cap is reached or the collector is going away. Both are
@@ -842,9 +878,27 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_header("X-Accel-Buffering", "no")
             self.send_header("Connection", "close")
             self.end_headers()
-            if after:
-                self.site.restore(client, after, term)
-                site.bus.release(client)
+            if replaying:
+                # Asked for rather than built here. The store's connection
+                # belongs to the receive thread, which is also the only thread
+                # that can promise the replay stops exactly where the live
+                # flows start: it writes every row and skips this client
+                # while it is blocked, so nothing lands between its read and
+                # its release. Reading the store from here was the defect
+                # that ended every returning tab's stream after the greeting.
+                # A full queue means no replay rather than no stream, and
+                # the tab is told so on its own queue, ahead of the live
+                # flows: the greeting still says a replay is on offer, so
+                # without the line the page would suppress its own note
+                # about the gap and the rows would go missing silently.
+                try:
+                    site.lookups.put_nowait(("after", client, int(after), term))
+                except queue.Full:
+                    site.bus.note(client, "The flows this tab missed while it "
+                                  "was away were not replayed: the collector "
+                                  "had too many lookups waiting. Switch away "
+                                  "and back to ask again.")
+                    site.bus.release(client)
             # No content length, so the body runs until the connection closes,
             # which is what a stream is.
             self.close_connection = True
@@ -867,7 +921,8 @@ class _Handler(BaseHTTPRequestHandler):
         greeting["client"] = client.id
         greeting["filter"] = client.term
         greeting["filter_max"] = FILTER_MAX
-        greeting["restore_max"] = RESTORE_MAX if self.site.restore_enabled else 0
+        greeting["restore_max"] = RESTORE_MAX if self.site.store_enabled else 0
+        greeting["history_rows"] = HISTORY_ROWS if self.site.store_enabled else 0
         self._send(_frame("hello", greeting))
         idle_since = time.time()
         while True:
@@ -954,7 +1009,7 @@ class _Handler(BaseHTTPRequestHandler):
         route = self._checked()
         if route is None:
             return
-        if route not in ("key", "detail", "filter"):
+        if route not in ("key", "detail", "filter", "history"):
             self._refuse(404, "not found")
             return
 
@@ -973,6 +1028,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._detail(raw)
         elif route == "filter":
             self._filter(raw)
+        elif route == "history":
+            self._history(raw)
         else:
             self._key(raw)
 
@@ -1111,6 +1168,48 @@ class _Handler(BaseHTTPRequestHandler):
             return
         self._queued()
 
+    def _history(self, raw):
+        """One tab's ask for stored flows older than the ones it holds.
+
+        Allowed under --web-readonly for the reason the filter route is: it
+        changes what one browser is sent and nothing the collector is doing.
+        Queued for the receive loop rather than answered here, for the reason
+        a replay is: the store is that thread's. The filter the answer obeys is
+        the one the subscription is under when the ask is taken, which is the
+        one the page is showing, so it travels on the queue entry rather than
+        being read again when the loop gets there.
+        """
+        try:
+            payload = json.loads(raw.decode("utf-8"))
+            if not isinstance(payload, dict):
+                raise TypeError
+            client_id = payload["client"]
+            before = payload["before"]
+        except (ValueError, KeyError, TypeError, UnicodeDecodeError):
+            self._refuse(400, "expected a client and a row to look before")
+            return
+        if set(payload) - {"client", "before"}:
+            self._refuse(400, "that is not a question this collector takes")
+            return
+        if not isinstance(client_id, str) or not _whole(before) or before < 1:
+            self._refuse(400, "a client is a string and before is the number "
+                              "of a stored row")
+            return
+        if not self.site.store_enabled:
+            self._refuse(404, "this collector keeps no flow history")
+            return
+        client = self.site.bus.client(client_id)
+        if client is None:
+            self._refuse(404, "no such watcher")
+            return
+        try:
+            self.site.lookups.put_nowait(("before", client, before, client.term))
+        except queue.Full:
+            self._refuse(503, "the collector is not keeping up with the "
+                              "questions")
+            return
+        self._queued()
+
     def _queued(self):
         """The one answer the control routes give: it was accepted.
 
@@ -1167,7 +1266,7 @@ class WebInterface:
 
     def __init__(self, bus, keys, allowed, bind="127.0.0.1",
                  port=DEFAULT_WEB_PORT, token=None, readonly=False,
-                 hosts=(), asks=None, restore=None):
+                 hosts=(), asks=None, lookups=None):
         self.bus = bus
         self.keys = keys
         # Where a browser's questions about a flow wait for the receive loop,
@@ -1177,8 +1276,17 @@ class WebInterface:
         # it; a real run hands over the queue its loop drains.
         self.asks = asks if asks is not None else queue.Queue(
             maxsize=ASK_QUEUE_MAX)
-        self.restore = restore or (lambda client, after, term: None)
-        self.restore_enabled = restore is not None
+        # And where the two questions answered out of the flow store wait for
+        # the same loop, for the same reason: the store is that thread's. A
+        # tab back from the background asks for the flows it missed, as
+        # ("after", client, ingest_id, term), and one scrolling up asks for
+        # older ones, as ("before", client, ingest_id, term). Unlike the asks
+        # there is no queue made here when a caller brings none, because
+        # nothing would drain it: a stream that asks is put on the live feed
+        # at once, a scroll up is refused, and the greeting says neither is
+        # on offer.
+        self.lookups = lookups
+        self.store_enabled = lookups is not None
         self.allowed = frozenset(allowed)
         self.bind_addr = bind
         self.port = port

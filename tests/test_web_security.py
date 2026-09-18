@@ -647,7 +647,7 @@ try:
 
     quiet_bus = Feed()
     quiet = WebInterface(quiet_bus, queue.Queue(), set(), bind="127.0.0.1",
-                         port=0, readonly=True)
+                         port=0, readonly=True, lookups=queue.Queue())
     quiet.start()
     quiet_host = "127.0.0.1:%d" % quiet.port
     quiet_url = "http://%s/t/%s/" % (quiet_host, quiet.token)
@@ -678,6 +678,14 @@ try:
               fetch(quiet_url + "filter", host_header=quiet_host,
                     method="POST", body=narrowing) == 200
               and watching.filter == "53")
+        # And a scroll up, which is the same kind of thing: older rows for
+        # one tab, and nothing the collector is doing.
+        older = json.dumps({"client": watching.id,
+                            "before": 5}).encode("utf-8")
+        check("and still answering a scroll up",
+              fetch(quiet_url + "history", host_header=quiet_host,
+                    method="POST", body=older) == 200
+              and quiet.lookups.get_nowait() == ("before", watching, 5, "53"))
         quiet_bus.unsubscribe(watching)
     finally:
         quiet.stop(timeout=1.0)
