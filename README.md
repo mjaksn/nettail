@@ -1171,6 +1171,37 @@ The store is kept for a limited time. `--flow-retention-days` sets the window,
 That means a tab that went to the background can still ask for the rows it
 missed, without the process having to keep every flow it ever saw in memory.
 
+### Scrolling back in time
+
+With `--flow-store` on, the page does not end where its history begins. Scroll
+to the top of the table and it asks the collector for the flows that came
+before the oldest row it holds, and puts them on above, five hundred at a time,
+with the view held still while they arrive. Keep scrolling and it keeps asking,
+until a line says you have reached the start of what the collector has stored.
+
+A [filter](#filtering-new-flows) applies to what is fetched: with one in force,
+only the older flows that match it are sent, the collector doing the matching
+exactly as it does for new ones. The rows already on the page are left as they
+were, so above the filter's line there may be unfiltered rows from before it
+and, above those, filtered rows from the store.
+
+Scrolling fires nothing when the table is shorter than the window, so a wheel
+turned up at the top asks as well, and so does unticking **Follow**, which is
+the way that works on a phone.
+
+While you are up in the history, new flows still arrive at the bottom, and the
+page still keeps at most a few thousand rows. It keeps the ones you are reading
+and drops the newest instead, and when you come back to the tail, by scrolling
+there or by ticking **Follow**, a line says how many arrived meanwhile and the
+collector sends them again, in the same way it sends a tab what it missed while
+in the background, and with the same cap of four thousand.
+
+An older row opens the [details dialog](#clicking-a-flow) like any other. The
+collector keeps the record and the datagram only for the last few thousand
+flows it sent live, so a row fetched from the store is answered with the
+statistics for its two ends and for the pair, which are what the dialog shows
+for any flow the collector no longer holds.
+
 ### Following the tail
 
 **Follow**, beside the connection indicator, decides whether new flows pull the
@@ -1246,6 +1277,8 @@ never sent the flows it would have thrown away. That is what keeps the
 [details dialog](#clicking-a-flow) working under a filter: the collector keeps
 the last four thousand flows each tab was sent, not the last four thousand it
 published, so flows a filter hid cannot push out the ones still on the page.
+The same matching decides what a [scroll back in time](#scrolling-back-in-time)
+fetches from the store.
 
 ### What it is safe to do with
 

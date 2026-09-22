@@ -45,6 +45,8 @@ EVENTS = (
     ("hello", "the collector's settings, the key table, the columns, a status"),
     ("flow", "one flow's cells to draw, and the record --json prints"),
     ("restore", "flows replayed to fill what a backgrounded tab missed"),
+    ("history", "stored flows from before the oldest a tab holds, asked for "
+                "by scrolling up"),
     ("status", "the status bar snapshot, on a clock"),
     ("prose", "a block of text the terminal also printed, ANSI intact"),
     ("clear", "the x key: throw away what is on screen"),
@@ -146,7 +148,7 @@ class Feed:
 
     # -- subscribing --------------------------------------------------------
 
-    def subscribe(self, limit=None, term=None):
+    def subscribe(self, limit=None, term=None, blocked=False):
         """Hand back a Client, or None when it cannot have one.
 
         None means either that the collector is shutting down or that the
@@ -159,6 +161,9 @@ class Feed:
         gave its stream up in the background comes back still filtering.
         Setting it afterwards would let every flow published in between
         through, and the page would have nothing to tell them apart by.
+        `blocked` is set here for the same reason: marked after the lock had
+        gone, a publish in between could queue a live flow the replay was
+        also about to carry, and the page would show it twice.
         """
         with self._lock:
             if self._closed_down:
@@ -166,6 +171,7 @@ class Feed:
             if limit is not None and len(self._clients) >= limit:
                 return None
             client = Client(self.backlog, term)
+            client.blocked = blocked
             self._clients.append(client)
             self.active = True
             self._count_filters()
@@ -178,13 +184,13 @@ class Feed:
         its replay must be queued before any new live flow for that tab, and the
         replay itself must still be whatever the store can see inside the writer's
         own transaction. This side answers the first half only: the client exists
-        now, under the feed's lock, but publish sites skip it until the request
-        thread has queued whatever catch-up it owes and calls `release()`.
+        now, under the feed's lock, but publish sites skip it until the receive
+        thread has queued whatever catch-up it owes and calls `release()`. The
+        receive thread and not the request thread, because it is the one that
+        writes the store and the one that skips this client, so nothing can land
+        between its read and its release.
         """
-        client = self.subscribe(limit=limit, term=term)
-        if client is not None:
-            client.blocked = True
-        return client
+        return self.subscribe(limit=limit, term=term, blocked=True)
 
     def client(self, client_id):
         """One client by id, or None when it is gone."""
@@ -355,10 +361,11 @@ class Feed:
         """Replay stored flows to one client, before live ones catch up.
 
         This is a per-client event for the same reason `detail` is not: the rows
-        are what one tab missed rather than part of the live stream. It therefore
-        does cross the thread boundary `detail` avoids, but only in the shape the
-        request thread is already allowed: adding to one client's own queue under
-        the feed's lock.
+        are what one tab missed rather than part of the live stream. The feed
+        therefore learns which client a replay is for, which `detail` avoids,
+        but only in the shape a filter change already takes: adding to one
+        client's own queue under the feed's lock. Called on the receive thread,
+        which is where the rows come from.
         """
         if not flows:
             return
@@ -366,12 +373,48 @@ class Feed:
             if client in self._clients and not client.closed:
                 self._put(client, ("restore", {"flows": flows}))
 
+    def history(self, client, flows, asked, before, more, failed=False):
+        """Older stored flows for one client, which asked by scrolling up.
+
+        Per-client for the reason `restore` is. Sent even when `flows` is
+        empty, unlike a replay, because the answer carries two things the
+        page cannot do without: `before`, the oldest row the search reached,
+        which is where its next ask starts, and `more`, whether there is
+        anything older to ask for at all. A filtered search that found nothing
+        in the rows it read still moved the cursor. `asked` is the id the
+        page gave the ask, so that an answer to one it has since given up on,
+        after a clear or a filter change, is recognisable.
+
+        `failed` says the store could not be read. It is its own flag rather
+        than an empty answer with `more` False, because that answer means the
+        start of the history has been reached, and a page told that on an I/O
+        error would write the line saying so and never ask again. A failed
+        answer leaves the cursor where it was, so the next scroll asks again.
+        """
+        with self._lock:
+            if client in self._clients and not client.closed:
+                self._put(client, ("history", {
+                    "flows": flows, "asked": asked, "before": before,
+                    "more": more, "failed": failed}))
+
+    def note(self, client, text):
+        """A notice for one client alone, on its own queue.
+
+        Prose is published to everybody, since it is what the terminal also
+        printed. This is for the one case that is one tab's business and
+        nobody else's: a replay that could not be made for it.
+        """
+        with self._lock:
+            if client in self._clients and not client.closed:
+                self._put(client, ("prose", {"kind": "notice", "text": text}))
+
     def release(self, client):
         """Let one blocked client start taking live events.
 
-        Called by the request thread once any replay it owes has been put on the
-        queue. The wake here covers the ordinary case of an empty replay: `_pump`
-        may already be waiting and has to re-check the queue and the live stream.
+        Called by the receive thread once any replay it owes has been put on the
+        queue, and by the request thread only when it could not ask for one. The
+        wake here covers the ordinary case of an empty replay: `_pump` may
+        already be waiting and has to re-check the queue and the live stream.
         """
         with self._lock:
             if client in self._clients and not client.closed:
