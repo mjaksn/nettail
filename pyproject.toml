@@ -54,7 +54,7 @@ classifiers = [
 # spelling every call site here now uses.
 dependencies = [
     "lanname>=0.5.0,<0.6",
-    "netflume>=0.5.2,<0.6",
+    "netflume>=0.5.2,<0.7",
 ]
 
 [project.scripts]
