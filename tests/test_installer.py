@@ -434,6 +434,17 @@ with tempfile.TemporaryDirectory() as where:
     check("and the command still names loopback for the view",
           "--web-bind" in argv and "127.0.0.1" in argv, shown(argv))
 
+    # The flow store is on by default and lives in the directory the image
+    # makes for it. Without a volume there it goes with the container, and
+    # every update the installer's compose file is used for would throw it
+    # away without a word, so the volume is held here rather than trusted.
+    compose_lines = [ln.strip() for ln in compose.splitlines()]
+    check("the compose file keeps the flow history in a named volume",
+          "- history:/var/lib/nettail" in compose_lines
+          and "history:" in compose_lines, shown(compose_lines[-8:]))
+    check("without the command turning the store off",
+          "--flow-store" not in argv, shown(argv))
+
 
 # --- every resolver mode the program has, and nothing else ------------------
 #

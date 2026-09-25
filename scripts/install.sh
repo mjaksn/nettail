@@ -469,6 +469,16 @@ services:
       - --resolve
       - $RESOLVE$extra
 $web_lines
+
+    # The flow history, which is kept unless the command says --flow-store off.
+    # The image puts it in /var/lib/nettail, and a named volume there is what
+    # keeps it across a pull and recreate; without one it goes with the
+    # container, as every update would then throw it away.
+    volumes:
+      - history:/var/lib/nettail
+
+volumes:
+  history:
 COMPOSE
 
     chmod 0640 "$COMPOSE_FILE"
