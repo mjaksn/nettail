@@ -232,6 +232,20 @@ class FlowStore:
         rows = self._db.execute(sql, params).fetchall()
         return [dict(row) for row in rows]
 
+    def before(self, ingest_id, limit):
+        """Up to `limit` rows older than this ingest id, newest first.
+
+        Newest first because the caller is walking backwards from what a
+        browser already holds, in chunks, and the last row of one chunk is
+        where the next one starts. A chunk shorter than `limit` is the start
+        of the history, which the caller reads as there being no more.
+        """
+        rows = self._db.execute(
+            "SELECT ingest_id, record_json FROM flows "
+            "WHERE ingest_id < ? ORDER BY ingest_id DESC LIMIT ?",
+            (int(ingest_id), int(limit))).fetchall()
+        return [dict(row) for row in rows]
+
     def close(self):
         if self._db is not None:
             self.flush()
@@ -269,6 +283,9 @@ class DisabledStore:
         return None
 
     def since(self, ingest_id, limit=None):
+        return []
+
+    def before(self, ingest_id, limit):
         return []
 
     def close(self):

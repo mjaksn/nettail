@@ -16,6 +16,7 @@ import os
 import socket
 import struct
 import sys
+import tempfile
 import time
 
 from harness import FakeTTY, check, finish, plain
@@ -71,7 +72,8 @@ check("the terminal listing still shows every key, browser or not",
 
 def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
         keyboard=None, presses=(), window=None, port_notices=(), asks=(),
-        filters=(), restore_after=None):
+        filters=(), restore_after=None, history_before=None,
+        history_term=""):
     """Drive main() with keys arriving as if from a browser.
 
     `web_presses` is a list of (after_n_polls, key, value). The queue is filled
@@ -188,11 +190,30 @@ def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
                     after = None
                     if restore_after is not None:
                         after = restore_after(seen)
-                    seen["client"] = bus.subscribe(term=term)
-                    if after is not None:
-                        seen["site"].restore(seen["client"], str(after), term or "")
+                    if after is None:
+                        seen["client"] = bus.subscribe(term=term)
+                    else:
+                        # As a stream asks: blocked until the receive loop has
+                        # read the store and released it, which it does on
+                        # its next pass. This poll ends empty so that pass
+                        # comes before the next packet; on a real run either
+                        # order can happen and neither loses a flow, but only
+                        # this one keeps the split the checks below count.
+                        seen["client"] = bus.subscribe_blocked(term=term)
+                        seen["site"].lookups.put_nowait(
+                            ("after", seen["client"], after, term or "",
+                             None))
+                    if history_before is not None:
+                        # And a scroll up, asked the way the history route
+                        # asks it, behind the replay so both are answered on
+                        # the same pass.
+                        seen["site"].lookups.put_nowait(
+                            ("before", seen["client"], history_before,
+                             history_term or term or "", 41))
                     seen["hello_after_gap"] = bus.hello()
                     time.sleep(main.REPAINT_INTERVAL + 0.1)
+                    if after is not None:
+                        raise socket.timeout
             if FakeSocket.calls > rounds:
                 raise KeyboardInterrupt
             if waiting:
@@ -222,7 +243,12 @@ def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
             self.stopped = False
             self.serving = False
             self.port_notice = None
-            self.restore = kw.get("restore", lambda client, after, term: None)
+            # The third, where a tab back from the background asks for the
+            # flows it missed and a tab scrolling up asks for older ones. The
+            # receive loop answers both from the store, which is that
+            # thread's, so a check puts the ask here the way a request would.
+            self.lookups = kw.get("lookups")
+            self.store_enabled = self.lookups is not None
             seen["site"] = self
 
         # Bound and serving are two steps for a reason: the greeting has to be
@@ -312,6 +338,11 @@ def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
 result = run([(2, "e", None)], [v5_packet(0)])
 check("the socket waits the short time when the web interface is up",
       result["timeout"] == 0.25)
+# The store lookup queue is what tells the server there is a store, so a run
+# without one hands over none: handed over regardless, every run advertised
+# a replay and a scroll back it could not make.
+check("a run with no store gives the server nothing to look things up on",
+      result["site"].lookups is None)
 check("a browser key is answered",
       "showing only flows with a public endpoint" in plain(result["err"]))
 check("and the server is stopped on the way out", result["site"].stopped is True)
@@ -599,6 +630,55 @@ check("a tab back from the background is sent stored rows it missed",
 check("and the live rows after it still arrive only once",
       [f["n"] for f in result["flows"]] == [7, 8],
       repr([f["n"] for f in result["flows"]]))
+
+# A scroll up asks for what is older than the page holds, and is answered on
+# the same pass from the same store. Everything before row 3 is rows 1 and 2,
+# handed back oldest first, and the walk reached row 1 with nothing older, so
+# the cursor says so and `more` says not to ask again.
+#
+# In a store of its own: the harness gives this process one home, so a bare
+# --flow-store here would open the file the run above filled, and the rows
+# before 3 would be that run's.
+own_store = os.path.join(tempfile.mkdtemp(prefix="nettail-history-"),
+                         "flows.sqlite3")
+result = run([], [v5_packet(n) for n in (0, 2, 4, 6)], gap=(2, 4), settle=0.6,
+             argv=["--flow-store", own_store], restore_after=lambda seen: 2,
+             history_before=3)
+older = [p for k, p in result["events"] if k == "history"]
+ids = [f["record"]["_ingest_id"] for f in older[0]["flows"]] if older else []
+check("a tab scrolling up is sent the stored rows before the one it named",
+      len(older) == 1 and ids == [1, 2], repr(ids))
+check("with the id it was asked under and the cursor to ask from next",
+      older and older[0]["asked"] == 41 and older[0]["before"] == 1,
+      repr(older))
+check("and told there is nothing older", older and older[0]["more"] is False,
+      repr(older))
+# Numbered on from the replay's serials, and the live rows that follow are
+# numbered on from them: one counter, never reset, whichever path a row took.
+check("the older rows are numbered on from the rows before them",
+      older and [f["n"] for f in older[0]["flows"]] == [7, 8],
+      repr([f["n"] for f in older[0]["flows"]] if older else None))
+check("and the live rows after them carry on counting",
+      [f["n"] for f in result["flows"]] == [9, 10],
+      repr([f["n"] for f in result["flows"]]))
+
+# Under a filter the walk reads every row and keeps the ones the term
+# matches, the way the live path matches: each packet's second flow has
+# source port 51001 and its first does not. The cursor is the oldest row
+# read, not the oldest kept, so the rows that did not match are not read
+# again by the next ask.
+own_store = os.path.join(tempfile.mkdtemp(prefix="nettail-history-"),
+                         "flows.sqlite3")
+result = run([], [v5_packet(n) for n in (0, 2, 4, 6)], gap=(2, 4), settle=0.6,
+             argv=["--flow-store", own_store], restore_after=lambda seen: 2,
+             history_before=7, history_term="51001")
+older = [p for k, p in result["events"] if k == "history"]
+ids = [f["record"]["_ingest_id"] for f in older[0]["flows"]] if older else []
+check("a filtered scroll up is sent only the older rows the term matches",
+      len(older) == 1 and ids == [2, 4, 6], repr(ids))
+check("with the cursor at the oldest row read rather than the oldest kept",
+      older and older[0]["before"] == 1 and older[0]["more"] is False,
+      repr(older))
 
 # The figure has to be flows *shown*, not flows decoded. Under --external-only
 # the two differ by a lot, and a count of everything decoded would tell a

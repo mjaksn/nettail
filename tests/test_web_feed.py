@@ -80,6 +80,52 @@ check("and it is one of the documented events",
       "restore" in [name for name, _doc in EVENTS],
       str([name for name, _doc in EVENTS]))
 
+# A returning tab is subscribed blocked, and is blocked from the moment it is
+# on the list: marked after the lock had gone, a flow published in between
+# would reach it live and again in the replay.
+held = bus.subscribe_blocked()
+check("a blocked subscription is blocked as it is made", held.blocked is True)
+bus.flow({"n": 7})
+check("and is sent nothing live while it is", bus.drain(held)[0] == [])
+bus.release(held)
+bus.flow({"n": 8})
+check("until it is released", bus.drain(held)[0] == [("flow", {"n": 8})])
+bus.unsubscribe(held)
+bus.drain(client)
+
+# Older rows for a tab scrolling up go the same way, and go even when there
+# are none: the cursor and whether there is more are the answer then.
+bus.history(client, [], asked=9, before=4, more=False)
+events, _dropped = bus.drain(client)
+check("a history answer publishes under its own name, even empty",
+      events == [("history", {"flows": [], "asked": 9, "before": 4,
+                              "more": False, "failed": False})], str(events))
+# A store that could not be read says so, and does not say the start of the
+# history was reached, which is what an empty answer with `more` False means.
+bus.history(client, [], asked=9, before=9, more=True, failed=True)
+events, _dropped = bus.drain(client)
+check("and a failed one is marked as such with the cursor left alone",
+      events == [("history", {"flows": [], "asked": 9, "before": 9,
+                              "more": True, "failed": True})], str(events))
+# And a note for one client alone, which a replay that could not be made
+# leaves on the tab's own queue.
+bus.note(client, "not replayed")
+other_note = bus.subscribe()
+bus.note(client, "still not")
+check("a note for one client reaches it as prose",
+      bus.drain(client)[0] == [("prose", {"kind": "notice", "text": "not replayed"}),
+                               ("prose", {"kind": "notice", "text": "still not"})])
+check("and nobody else", bus.drain(other_note)[0] == [])
+bus.unsubscribe(other_note)
+check("and it is one of the documented events",
+      "history" in [name for name, _doc in EVENTS],
+      str([name for name, _doc in EVENTS]))
+other = bus.subscribe()
+bus.history(client, [{"n": 1}], asked=4, before=1, more=False)
+check("and reaches only the tab that asked", bus.drain(other)[0] == [])
+bus.unsubscribe(other)
+bus.drain(client)
+
 # -- overflow drops the oldest and counts it -----------------------------
 
 small = Feed(backlog=4)
