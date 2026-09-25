@@ -11,7 +11,7 @@ but it is a program rather than a library, and the names inside it may move
 without that being a breaking change. `--json` output is the part meant to be
 parsed, and it is treated as public.
 
-## [0.18.0] - 2026-09-14
+## [0.18.0] - 2026-09-24
 
 ### Added
 
@@ -37,6 +37,20 @@ parsed, and it is treated as public.
   gap of flows "arrived while this tab was in the background... they were not
   kept for the page" is no longer shown once there is a store to answer from,
   since the rows it used to report as gone are sent instead.
+
+- **Scrolling to the top of the browser's table fetches older flows from the
+  store, when `--flow-store` is on.** They are put on above the oldest row the
+  page holds, five hundred at a time and with the view held still, until a
+  line marks the start of what is stored. A filter in force applies to what is
+  fetched, matched by the collector exactly as it matches new flows. A wheel
+  turned up at the top asks as well, for a table shorter than the window, and
+  so does unticking Follow. While the reader is up in the history the page
+  drops the newest rows rather than the ones being read, and on the way back
+  to the tail the collector replays what arrived meanwhile, under the same cap
+  of four thousand. It works under `--web-readonly`, as the filter does. A row
+  fetched this way opens the details dialog with the statistics for its two
+  ends and for the pair, since the collector keeps a flow's full record only
+  for the last few thousand it sent live.
 
 ### Changed
 
