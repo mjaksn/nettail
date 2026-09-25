@@ -81,18 +81,26 @@ services:
     #env_file:
     #  - ./nettail.env        # NETTAIL_WEB_TOKEN=the-token-you-want-to-keep
 
-    # Nothing is mounted by default. The collector keeps no state: it holds
-    # what it is showing in memory and writes nothing, so there is no volume to
-    # lose and a restart simply starts counting again.
+    # The flow history, which the browser view scrolls back into and replays a
+    # returning tab from. It is kept in /var/lib/nettail inside the container,
+    # and a named volume there is what keeps it across a recreate: without one
+    # it goes with the container, and every `docker compose pull` starts it
+    # again from nothing. The totals and the tables are still held in memory
+    # and start again on a restart, as they always have. Put `--flow-store off`
+    # in the command above to keep no history at all.
     #
-    # Two things are worth mounting, both read-only because both are only ever
-    # read. Your own static name mappings, if you keep any, paired with
+    # Two more things are worth mounting, both read-only because both are only
+    # ever read. Your own static name mappings, if you keep any, paired with
     # `--hosts /etc/nettail/lan-hosts` in the command above. And a country
     # database for `--country`, which is a file you fetch rather than one this
     # image could ship; /etc/nettail/country.mmdb is the first place nettail
     # looks, so nothing has to name it twice. A run at a terminal is offered
     # one and this is not that: a detached container has nobody to ask, so it
     # goes without a database rather than fetching one unasked.
-    #volumes:
-    #  - ./lan-hosts:/etc/nettail/lan-hosts:ro
-    #  - ./dbip-country-lite.mmdb:/etc/nettail/country.mmdb:ro
+    volumes:
+      - history:/var/lib/nettail
+      #- ./lan-hosts:/etc/nettail/lan-hosts:ro
+      #- ./dbip-country-lite.mmdb:/etc/nettail/country.mmdb:ro
+
+volumes:
+  history:

@@ -535,6 +535,49 @@ the file people edit, copy between machines and paste into an issue, and the
 token is the one thing here this program already goes to trouble to keep out
 of `ps`. `NEVER_WRITTEN` is where that lives.
 
+## The flow store is on by default
+
+`--flow-store` was something to ask for through 0.18.0 and is on unless a run
+turns it off after that, writing to `store.default_path()`. Work that only
+makes a run without a store better is out of scope from here. What a storeless
+run keeps is what stops it breaking: `DisabledStore`, the zero `restore_max`
+and `history_rows` the greeting sends without one, and the page's guards on
+those zeros.
+
+Four things about it are easy to break.
+
+- **Off is a word, not None.** `config.render` writes a value of None as the
+  default, commented out, and the default is on, so a `--flow-store off` saved
+  with `--save-config` would come back on. `store.OFF` is the word and
+  `store.enabled` the one comparison, as `jsonout.to_stdout` is for `--json`.
+  In a file, `off`, `false` and `no` are configparser's false words and
+  `BOOLEAN_DEFAULTS` maps them to it; typed, only `off` is, and the other
+  switch words are refused rather than opened as a file of that name.
+  `test_config` holds both spellings and the saved file.
+- **A store that will not open stops the run, default path or not.** That was
+  chosen over warning and carrying on, because a run without its history
+  leaves the page unable to scroll back or replay, with one line in the
+  scrollback saying why. The error names both ways out, since whoever reads it
+  may never have asked for a store.
+- **That makes every deployment's home directory load-bearing.** The service
+  user and the image's user are both made with `--no-create-home`, and the
+  unit sets `ProtectHome`, so the default under `~/.local/share` cannot be
+  written in either. The unit has `StateDirectory=nettail` and
+  `Environment=XDG_DATA_HOME=/var/lib`; the image makes `/var/lib/nettail` for
+  its user and sets the same variable; the compose file mounts a named volume
+  there, which takes the directory's owner the first time it is used. The
+  variable rather than a path on the command line, because `docker run image
+  --json` replaces `CMD` and would drop a path written there, where the
+  environment survives. `test_installer` holds the unit's two lines to each
+  other through `default_path`, and CI greps the probe container's startup
+  line for the path. A unit written before this has neither line, so after an
+  upgrade it stops at startup until the installer is run again or the unit
+  says `--flow-store off`, and the release notes have to say so.
+- **The harness points `XDG_DATA_HOME` at its temporary home** with the other
+  variables, so every run in one suite process that names no store shares one
+  file there. A run that counts rows gives itself a file with `tempfile`, as
+  the replay and scroll-back runs in `test_web_keys` do.
+
 ## The web interface
 
 `feed.py` is the bus and knows nothing about HTTP; `web.py` is the server and
@@ -947,17 +990,17 @@ and back, and clear it.
 
 ### Scrolling back in time
 
-With `--flow-store` on, a reader who scrolls to the top of the table is sent
-the flows that came before the oldest row the page holds, out of the store,
-and the page puts them on above. It is the other question the store answers,
-beside the replay a tab back from the background gets, and it goes by the
-same route for the same reason: the store's connection is the receive
+With a store, which is the default, a reader who scrolls to the top of the
+table is sent the flows that came before the oldest row the page holds, out of
+the store, and the page puts them on above. It is the other question the store
+answers, beside the replay a tab back from the background gets, and it goes by
+the same route for the same reason: the store's connection is the receive
 thread's. The page POSTs the row to look before to a `history` route, the
 handler validates it and puts a `("before", client, ingest_id, term, ask)`
 entry on the same `lookups` queue a replay's `("after", ...)` entry goes on,
-and the receive loop walks the store backwards and publishes a `history`
-event to that one client. Under `--web-readonly` it is allowed, as the filter is:
-it changes what one browser is sent and nothing the collector is doing.
+and the receive loop walks the store backwards and publishes a `history` event
+to that one client. Under `--web-readonly` it is allowed, as the filter is: it
+changes what one browser is sent and nothing the collector is doing.
 
 Seven things about it are easy to break.
 
@@ -1437,7 +1480,7 @@ the flows keep the rows they should and that nothing is drawn over.
 ## The installer
 
 `scripts/install.sh` covers both deployments, systemd and Docker, and asks
-which. Four things in it are deliberate:
+which. Five things in it are deliberate:
 
 - **The web token lives in `/etc/nettail/nettail.env` and is never
   regenerated.** Re-running the installer to pick up a new version must not
@@ -1469,6 +1512,9 @@ which. Four things in it are deliberate:
   whole script into a temporary directory and read back what it wrote, rather
   than testing an intermediate. An install that sets none of them is byte for
   byte the install it always was.
+- **The unit gives the flow store a state directory.** The service user has no
+  home, and a store that cannot be opened stops the run. See "The flow store
+  is on by default" above.
 
 It is safe to run twice, and that is worth keeping: an existing user, virtual
 environment and token are all reused rather than replaced.
@@ -1506,7 +1552,7 @@ detached container has none, so the browser view is the only mode that works
 properly there. That is why `CMD` is `--web --web-bind 0.0.0.0` and not a bare
 collector.
 
-Three things about it are easy to get wrong later:
+Four things about it are easy to get wrong later:
 
 - **`--web-bind 0.0.0.0` is not a lowered guard.** Loopback inside a container
   belongs to the container's namespace, so the program's own default would
@@ -1521,6 +1567,9 @@ Three things about it are easy to get wrong later:
   `172.17.0.1` and the EXPORTER column stops distinguishing anything. That is
   measured, not feared. `docker-compose.yml` uses `network_mode: host` for it,
   and the README says why.
+- **`/var/lib/nettail` and `XDG_DATA_HOME` are what let it start.** The user
+  has no home, the flow store is on by default, and a store that cannot be
+  opened stops the run. See "The flow store is on by default" above.
 
 Everything the image installs is pinned by version and by hash in
 `requirements.lock`, with `requirements-build.lock` doing the same for the one

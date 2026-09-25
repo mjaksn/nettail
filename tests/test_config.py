@@ -32,6 +32,7 @@ The rest is the arrangement around it:
   have used, and the file it writes is put back through the reader and has to
   produce the same run.
 """
+import contextlib
 import io
 import os
 import subprocess
@@ -40,7 +41,7 @@ import tempfile
 
 from harness import SCRIPT, check, finish
 
-from nettail import config
+from nettail import config, store
 from nettail.cli import build_parser
 
 # Spelled rather than escaped, because this file is written and rewritten by
@@ -476,6 +477,46 @@ with io.open(headless, "w", encoding="utf-8-sig") as handle:
 values, complaints, opened = config.read(ap, headless)
 check("even with no section header in front of it",
       values.get("port") == 3333 and complaints == [], str(complaints))
+
+# --- the flow store is on unless something turns it off ----------------------
+#
+# Its off is a word rather than None because a value of None is saved as the
+# default, commented out, and the default is on: a run with the store off would
+# save a file that turned it back on. So each spelling of off is checked for
+# what it reads as, and the saved file for what it says.
+
+check("a run that names no store keeps one at the default path",
+      typed([]).flow_store == store.default_path()
+      and store.enabled(typed([])), repr(typed([]).flow_store))
+check("--flow-store on its own is that same default",
+      typed(["--flow-store"]).flow_store == store.default_path())
+check("--flow-store off keeps no history",
+      not store.enabled(typed(["--flow-store", "off"])))
+check("and so does OFF, in any case",
+      not store.enabled(typed(["--flow-store", "OFF"])))
+for word in ("false", "true", "no"):
+    try:
+        with contextlib.redirect_stderr(io.StringIO()):
+            typed(["--flow-store", word])
+        taken = True
+    except SystemExit:
+        taken = False
+    check("a typed %r is refused rather than opened as a file" % word,
+          taken is False)
+for word in ("off", "false", "no"):
+    read, complaints = from_file("[nettail]\nflow-store = %s\n" % word)
+    check("flow-store = %s in a file keeps no history" % word,
+          not store.enabled(read) and complaints == [], str(complaints))
+read, _ = from_file("[nettail]\nflow-store = true\n")
+check("flow-store = true in a file is the default path",
+      read.flow_store == store.default_path(), repr(read.flow_store))
+ap = build_parser()
+off = ap.parse_args(["--flow-store", "off"])
+saved = config.render(ap, off, config.defaults(ap))
+check("a run with the store off saves the word off, live",
+      "\nflow-store = off\n" in saved)
+check("and the file it saves reads back as off", not store.enabled(
+    from_file(saved)[0]))
 
 # --- what is saved can be read back -----------------------------------------
 

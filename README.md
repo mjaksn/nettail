@@ -106,9 +106,12 @@ nettail --json > flows.jsonl
 # Or to a file of its own, with the table still on the screen
 nettail --json flows.jsonl
 
-# Keep a durable history of which rows were shown, and replay the ones a
-# browser tab missed when it comes back from the background
-nettail --flow-store --flow-retention-days 30
+# Keep thirty days of flow history rather than fourteen, for the browser to
+# scroll back into and to replay a tab that was in the background
+nettail --flow-retention-days 30
+
+# Or keep no flow history at all
+nettail --flow-store off
 ```
 
 Press `Ctrl-C` to stop. A summary prints on exit with datagram counts, template
@@ -263,7 +266,7 @@ usage: nettail [-h] [--version] [--config FILE | --save-config [FILE]]
 | `--verbose` | off | Print every decoded field on an indented line under each flow, and report datagrams that could not be decoded. The `v` key moves the same setting mid-run |
 | `--templates` | off | Spell out each template the first time an exporter sends it, and note in one line each time a template is sent again. v9 and IPFIX only; v5 carries no templates. The `t` key moves the same setting mid-run |
 | `--json [FILE]` | off | Emit one JSON object per flow. On its own, or given `-`, the objects go to stdout in place of the table. Given a path they are appended to that file instead, and the table, the keys and the browser view carry on as if the flag were not there |
-| `--flow-store [FILE]` | off | Append each shown flow to a local SQLite history file. On its own it writes under a per-user data directory (such as `%LOCALAPPDATA%\nettail` on Windows or `$XDG_DATA_HOME/nettail` elsewhere), and given a path it writes there instead. Turning it on lets a backgrounded browser tab ask for the flows it missed when it comes back |
+| `--flow-store [FILE]` | on | Where to keep the local SQLite history of shown flows. By default, and on its own, it writes under a per-user data directory (such as `%APPDATA%\nettail` on Windows or `$XDG_DATA_HOME/nettail` elsewhere); given a path it writes there instead, and `off` keeps no history. The history is what a browser scrolls back into and what a backgrounded tab is replayed from when it comes back. A store that cannot be opened stops the run and says so |
 | `--flow-retention-days DAYS` | `14` | How long to keep rows in the durable flow store. At least one day, and a value of 14 keeps the last two weeks unless you change it |
 | `--flow-prune-every SECONDS` | `43200` | How often old rows are pruned from the SQLite store. This is 12 hours by default, and it is a background maintenance pass rather than a freeze on the collector |
 | `--flow-commit-every SECONDS` | `1` | How often buffered writes are committed to the file. Lower values make the history more current, while higher values allow a little more batching |
@@ -372,7 +375,6 @@ port = 2055
 external-only = true
 web = true
 web-bind = 127.0.0.1
-flow-store = true
 flow-retention-days = 30
 resolve = dns
 hosts =
@@ -402,12 +404,15 @@ The one exception is an option that may be repeated, `--hosts` and
 replacing it, because that is what repeatable means everywhere else here. A run
 that wants none of them wants `--config` pointed at a file that lists none.
 
-The durable flow store is a different shape of option. In a file it accepts the
-same bare true value as the command line does, so `flow-store = true` turns it
-on, and `flow-store = /var/lib/nettail/flows.sqlite3` writes there instead of in
-its default per-user path. The retention and cadence settings are ordinary
-values, so `flow-retention-days = 30`, `flow-prune-every = 3600`, and
-`flow-commit-every = 2.5` all work exactly as the flags do.
+The durable flow store is a different shape of option. It is on unless
+something turns it off, so a file needs to say nothing to have one;
+`flow-store = /var/lib/nettail/flows.sqlite3` writes there instead of in the
+default per-user path, and `flow-store = off` keeps no history at all. `false`
+and `no` mean off too, since a file reads them as switches, and `true` means
+the default path, as `--flow-store` on its own does. The retention and cadence
+settings are ordinary values, so `flow-retention-days = 30`,
+`flow-prune-every = 3600`, and `flow-commit-every = 2.5` all work exactly as
+the flags do.
 
 Options that are alternatives win the same way, and it is worth saying because
 they are the one place where winning means the file's setting is dropped
@@ -1139,10 +1144,10 @@ and when its own clock shows it has not been run for ten seconds. Any of the
 three is enough on its own, and whichever noticed, coming back works the same
 way and reports the same count.
 
-On return the page asks the collector for whatever it missed, and a store is
-what makes that possible. When `--flow-store` is on, the browser is replayed the
-rows it still has in the durable history, plus everything accepted since, capped
-at four thousand flows. The page appends them before the live stream resumes, so
+On return the page asks the collector for whatever it missed, and the flow
+store is what makes that possible. The browser is replayed the rows the durable
+history still has, plus everything accepted since, capped at four thousand
+flows. The page appends them before the live stream resumes, so
 it does not look like the tail jumped forward and then dropped back to the live
 feed.
 
@@ -1158,12 +1163,20 @@ summary are unaffected: nothing was missed by the collector, only by the view.
 
 ### Durable flow history
 
-`--flow-store` keeps a local SQLite file of the flows a browser was shown, one
-row per flow with its ingest ID and enough facts to answer a later replay. It
-lives in a per-user data directory rather than in the working tree, so a restart
-still has the history it had before, and it is created readable only by the
-current user. The file is opened in WAL mode so a reader elsewhere is never
-blocked by the writer.
+nettail keeps a local SQLite file of the flows a browser was shown, one row per
+flow with its ingest ID and enough facts to answer a later replay. It is on
+unless `--flow-store off` says otherwise. It lives in a per-user data directory
+rather than in the working tree, so a restart still has the history it had
+before, and it is created readable only by the current user. The file is opened
+in WAL mode so a reader elsewhere is never blocked by the writer.
+
+A store that cannot be opened stops the run before anything is bound, with a
+line naming the file and the two ways out: give `--flow-store` a path that can
+be written, or turn it off. That applies to the default path as much as to one
+you typed, so an account with no home directory needs somewhere to put it. The
+unit and the image both arrange that, in `/var/lib/nettail`; see
+[Running as a service](#running-as-a-service) and
+[Running in Docker](#running-in-docker).
 
 The store is kept for a limited time. `--flow-retention-days` sets the window,
 `--flow-prune-every` decides how often old rows are dropped, and
@@ -1173,7 +1186,7 @@ missed, without the process having to keep every flow it ever saw in memory.
 
 ### Scrolling back in time
 
-With `--flow-store` on, the page does not end where its history begins. Scroll
+With a flow store, the page does not end where its history begins. Scroll
 to the top of the table and it asks the collector for the flows that came
 before the oldest row it holds, and puts them on above, five hundred at a time,
 with the view held still while they arrive. Keep scrolling and it keeps asking,
@@ -2369,6 +2382,11 @@ After=network-online.target
 [Service]
 Type=simple
 User=netflow
+# Somewhere for the flow history, which is on by default: a system user
+# usually has no home to keep it in, and a store that cannot be opened
+# stops the run.
+StateDirectory=nettail
+Environment=XDG_DATA_HOME=/var/lib
 ExecStart=/opt/netflow/venv/bin/nettail \
     --port 2055 \
     --resolve dns \
@@ -2574,11 +2592,20 @@ browser will actually name.
 
 ### What it does and does not carry
 
-The collector keeps no state. It holds what it is showing in memory and writes
-nothing, so there is no volume to mount and nothing to lose. A restart starts
-counting again, which is the same thing `Ctrl-C` and a fresh run do.
+The one thing the collector writes is its flow history, in
+`/var/lib/nettail` inside the container. Without a volume there it goes with
+the container, and a pull and recreate starts it again from nothing, so mount
+one if the history should outlast the container:
 
-Two things are worth mounting. Your own static name mappings:
+```
+-v nettail-history:/var/lib/nettail
+```
+
+The compose file does this already. The totals and the tables are held in
+memory either way, and a restart starts counting again, which is the same
+thing `Ctrl-C` and a fresh run do. `--flow-store off` keeps no history at all.
+
+Two more things are worth mounting. Your own static name mappings:
 
 ```
 -v ./lan-hosts:/etc/nettail/lan-hosts:ro
@@ -2916,9 +2943,10 @@ too.
   `--web` adds threads, but none of them go near the socket or change any
   collector state: they read a queue and serve it, which is what keeps this
   claim true of the part that matters.
-- **Persistence is optional.** `--flow-store` writes every shown flow to a local
-  SQLite file and replays any rows a backgrounded tab missed when it comes back,
-  so a web reader is not forced to live entirely in the moment. A browser
+- **Persistence is on by default.** Every shown flow is written to a local
+  SQLite file, which a backgrounded tab is replayed from when it comes back and
+  which the page scrolls back into, so a web reader is not forced to live
+  entirely in the moment. `--flow-store off` turns it off. A browser
   opened late is still shown the banner, the current figures, and whatever
   retained rows the store can answer from.
 - **The web interface has no TLS and no login.** A token in the URL over plain

@@ -1313,11 +1313,14 @@ def build_parser():
                          "the browser view carry on as if the flag were not "
                          "there")
     ap.add_argument("--flow-store", nargs="?", const=store.default_path(),
-                    type=jsonout.dest_arg, metavar="FILE", default=None,
-                    help="append each shown flow to a local SQLite history file. "
-                         "On its own, or in a config file as true, writes to %s; "
-                         "given a path, writes there instead"
-                         % store.default_path())
+                    type=store.store_arg, metavar="FILE",
+                    default=store.default_path(),
+                    help="where to keep the local SQLite history of shown "
+                         "flows, which the browser view scrolls back into and "
+                         "replays a returning tab from. On by default, "
+                         "writing to %s; given a path, writes there instead, "
+                         "and %s keeps no history at all"
+                         % (store.default_path(), store.OFF))
     ap.add_argument("--flow-retention-days", type=store.retention_arg,
                     default=14, metavar="DAYS",
                     help="how many days of flow history to keep in the SQLite "
@@ -1778,7 +1781,7 @@ def main():
             print("appending JSON records to %s" % args.json, file=sys.stderr)
 
     flow_store = store.DisabledStore()
-    if args.flow_store is not None:
+    if store.enabled(args):
         try:
             flow_store = store.FlowStore(
                 args.flow_store,
@@ -1787,8 +1790,15 @@ def main():
                 commit_every=args.flow_commit_every,
             )
         except (OSError, sqlite3.Error, RuntimeError) as exc:
-            ap.error("cannot write flow history to %s: %s"
-                     % (args.flow_store, exc))
+            # Fatal whether the path was typed or is the default. Carrying on
+            # without a history would leave the browser unable to scroll back
+            # or replay, with only a line in the scrollback saying why, so the
+            # run stops and says what to do instead. Since the store is on by
+            # default, somebody who never asked for one can arrive here, which
+            # is what the second half of the message is for.
+            ap.error("cannot write flow history to %s: %s. Give --flow-store "
+                     "a path that can be written, or --flow-store %s to run "
+                     "without one" % (args.flow_store, exc, store.OFF))
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -2021,7 +2031,7 @@ def main():
         would take for a page that has stopped working.
         """
         try:
-            if args.flow_store is not None:
+            if store.enabled(args):
                 try:
                     flows = stored_since(after_ingest, term)
                 except sqlite3.Error as exc:
@@ -2117,7 +2127,7 @@ def main():
                            # scroll back on every run, which suppressed the
                            # missed-flow note and let the wheel clear Follow
                            # for nothing.
-                           lookups=(lookup_queue if args.flow_store is not None
+                           lookups=(lookup_queue if store.enabled(args)
                                     else None))
         try:
             # Bound but not yet answering. The greeting a browser is met with
@@ -2179,7 +2189,7 @@ def main():
                       f"taken from it.{C.RESET}", file=out)
         if keys_on:
             print(f"{C.GREY}{KEY_HELP}{C.RESET}", file=out)
-        if args.flow_store is not None:
+        if store.enabled(args):
             note = store.describe(
                 args.flow_store,
                 args.flow_retention_days,
@@ -2681,10 +2691,10 @@ def main():
                 if records is not None:
                     out = flow_record(rec, hdr, resolver)
                     records.write(out)
-                elif args.flow_store is not None:
+                elif store.enabled(args):
                     out = flow_record(rec, hdr, resolver)
 
-                if args.flow_store is not None:
+                if store.enabled(args):
                     ingest_id = flow_store.write(out)
                     out["_ingest_id"] = ingest_id
 

@@ -51,15 +51,18 @@ os.environ["PYTHONPATH"] = os.pathsep.join(
 # and can do nothing about the home directory, so the home directory is
 # replaced here instead.
 #
-# Every variable an expanduser or a config search consults is pointed at one
-# empty directory, and a child process inherits it. The machine-wide places,
+# Every variable an expanduser, a config search or the flow store's default
+# path consults is pointed at one empty directory, and a child process
+# inherits it. The store is on unless a run says otherwise, so without the
+# last of those every suite that starts a collector would be writing flows
+# into the history of whoever ran it. The machine-wide places,
 # /etc/nettail and %PROGRAMDATA%, are left alone deliberately: a suite that
 # ignored those would not be testing the search this program really does, and
 # a machine with a file in /etc has said something about every program on it.
 _HOME = tempfile.mkdtemp(prefix="nettail-tests-home-")
 atexit.register(shutil.rmtree, _HOME, True)
-for _variable in ("HOME", "USERPROFILE", "XDG_CONFIG_HOME", "APPDATA",
-                  "LOCALAPPDATA"):
+for _variable in ("HOME", "USERPROFILE", "XDG_CONFIG_HOME", "XDG_DATA_HOME",
+                  "APPDATA", "LOCALAPPDATA"):
     os.environ[_variable] = _HOME
 
 _ESCAPES = re.compile(r"\033\[[0-9;]*m")

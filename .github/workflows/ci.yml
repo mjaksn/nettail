@@ -193,6 +193,15 @@ jobs:
             echo "::error::the container never served its page"
             exit 1
           }
+          # The flow store is on by default and one that cannot be opened stops
+          # the run, so a page served says it opened. Where it opened is the
+          # other half: the image's user has no home, and the store has to be
+          # in the directory the image made for it, which a volume can keep.
+          docker logs probe 2>&1 \
+            | grep -q "recording shown flows in /var/lib/nettail/flows.sqlite3" || {
+            echo "::error::the flow history is not in /var/lib/nettail"
+            exit 1
+          }
       - name: a routable bind must say the container thing, not the host warning
         # The default CMD binds 0.0.0.0, which on a host would print the loud
         # warning about putting the network on a reachable address. In a

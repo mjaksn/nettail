@@ -8,6 +8,8 @@ module owns the file, the schema and the retention pass and answers ordinary
 Python methods rather than exposing SQL around the program.
 """
 
+import argparse
+import configparser
 import io
 import json
 import os
@@ -65,6 +67,43 @@ def cadence_arg(text):
     if not 0 < seconds < float("inf"):
         raise ValueError("expected more than 0 seconds, not %r" % (text,))
     return seconds
+
+
+# The word that turns the store off. A run keeps a history unless it says
+# otherwise, so the option needs a value meaning no file at all, and it is this
+# string rather than None for `--save-config`'s sake: `config.render` writes a
+# value of None as the default, commented out, so a run with the store off
+# would save a file that turned it back on. `enabled` is the one place it is
+# compared against, as `jsonout.to_stdout` is for `--json`.
+OFF = "off"
+
+
+def store_arg(text):
+    """One `--flow-store` value: a path to write, or `off` for none at all.
+
+    The rest of the words a settings file spells a switch with are refused
+    rather than opened as a file of that name. A file's switches never reach
+    here, since `config` reads them as the flag itself or as off first, so one
+    arriving here was typed, and a history written to a file called `false` is
+    not what it was typed for. An empty value is refused for the reason an
+    empty `--config` is: it came from a shell variable nobody set.
+    """
+    text = text.strip()
+    if not text:
+        raise argparse.ArgumentTypeError(
+            "needs a path to write, or %r for no flow history" % (OFF,))
+    if text.lower() == OFF:
+        return OFF
+    if text.lower() in configparser.ConfigParser.BOOLEAN_STATES:
+        raise argparse.ArgumentTypeError(
+            "%r is not a path: give a path to write, or %r for no flow history"
+            % (text, OFF))
+    return text
+
+
+def enabled(args):
+    """Whether this run keeps a flow history at all."""
+    return getattr(args, "flow_store", OFF) != OFF
 
 
 class FlowStore:

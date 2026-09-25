@@ -348,6 +348,14 @@ Type=simple
 User=$SERVICE_USER
 Group=$SERVICE_USER
 EnvironmentFile=$ENV_FILE
+# The flow history is kept unless a run turns it off, at a default path under
+# the user's XDG data directory. This user has no home and ProtectHome hides
+# the rest, so nowhere that default would land can be written, and a store
+# that cannot be opened stops the run. StateDirectory makes /var/lib/nettail,
+# owned by this user and writable under ProtectSystem=strict, and pointing the
+# data directory at /var/lib puts the default inside it.
+Environment=XDG_DATA_HOME=/var/lib
+StateDirectory=nettail
 ExecStart=$INSTALL_DIR/venv/bin/nettail$exec_args
 Restart=always
 RestartSec=5
@@ -360,7 +368,8 @@ StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=nettail
 
-# Hardening. It binds two ports, reads one file, and writes nothing.
+# Hardening. It binds two ports, reads one file, and writes nothing but its
+# flow history in the state directory above.
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true

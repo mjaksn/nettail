@@ -60,6 +60,7 @@ import tempfile
 from harness import ROOT, check, finish
 from lanname import Resolver
 
+from nettail import store
 from nettail.cli import build_parser
 from nettail.web import WEB_TOKEN_ENV
 
@@ -340,6 +341,26 @@ with tempfile.TemporaryDirectory() as where:
           "EnvironmentFile=" + flat(env_path) in flat(unit),
           shown([ln for ln in unit.splitlines()
                  if ln.startswith("EnvironmentFile")]))
+
+    # The flow store is on by default and a store that cannot be opened stops
+    # the run. This user has no home and ProtectHome hides the rest, so the
+    # unit has to give the default somewhere to land, or the service fails
+    # to start on the first boot after an upgrade. What is held is that the
+    # default path under the unit's environment is inside its state
+    # directory, which is the one thing that makes the two lines agree.
+    lines = unit.splitlines()
+    check("the unit keeps a state directory for the flow history",
+          "StateDirectory=nettail" in lines,
+          shown([ln for ln in lines if ln.startswith("StateDirectory")]))
+    data = [ln.split("=", 2)[2] for ln in lines
+            if ln.startswith("Environment=XDG_DATA_HOME=")]
+    landed = store.default_path(platform="linux",
+                                env={"XDG_DATA_HOME": data[0] if data else ""},
+                                home="/nonexistent").replace(os.sep, "/")
+    check("and points the store's default path inside it",
+          landed.startswith("/var/lib/nettail/"), landed)
+    check("without the command line turning the store off or elsewhere",
+          "--flow-store" not in argv, shown(argv))
 
     # AGENTS.md says the token is kept out of ps. That is only true while
     # nothing puts it on the command line, which is what this holds.
