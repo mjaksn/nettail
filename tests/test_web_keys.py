@@ -335,13 +335,13 @@ def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
 
 # -- a key from a browser reaches the dispatch --------------------------
 
-result = run([(2, "e", None)], [v5_packet(0)])
+result = run([(2, "e", None)], [v5_packet(0)], argv=["--flow-store", "off"])
 check("the socket waits the short time when the web interface is up",
       result["timeout"] == 0.25)
 # The store lookup queue is what tells the server there is a store, so a run
-# without one hands over none: handed over regardless, every run advertised
-# a replay and a scroll back it could not make.
-check("a run with no store gives the server nothing to look things up on",
+# that turned it off hands over none: handed over regardless, every such run
+# advertised a replay and a scroll back it could not make.
+check("a run with the store off gives the server nothing to look things up on",
       result["site"].lookups is None)
 check("a browser key is answered",
       "showing only flows with a public endpoint" in plain(result["err"]))
@@ -608,8 +608,13 @@ check("the greeting carries it too, for a tab that reconnects",
 # status spliced into a greeting is the one from before the gap: the very
 # figure the page noted on its way out. It has to wait for a status frame.
 
+# Every run in this process that names no store writes the default one, which
+# the harness puts in this process's temporary home, so a run that counts rows
+# has a file of its own or it counts theirs too.
+own_store = os.path.join(tempfile.mkdtemp(prefix="nettail-history-"),
+                         "flows.sqlite3")
 result = run([], [v5_packet(n) for n in (0, 2, 4, 6)], gap=(2, 4), settle=0.6,
-             argv=["--flow-store"], restore_after=lambda seen: 2)
+             argv=["--flow-store", own_store], restore_after=lambda seen: 2)
 before = (result.get("hello_before_gap") or {}).get("status") or {}
 after = (result.get("hello_after_gap") or {}).get("status") or {}
 check("a figure exists before the gap", before.get("flows_shown", 0) > 0,
@@ -636,9 +641,8 @@ check("and the live rows after it still arrive only once",
 # handed back oldest first, and the walk reached row 1 with nothing older, so
 # the cursor says so and `more` says not to ask again.
 #
-# In a store of its own: the harness gives this process one home, so a bare
-# --flow-store here would open the file the run above filled, and the rows
-# before 3 would be that run's.
+# In a store of its own, for the same reason: the rows before 3 would
+# otherwise be whatever the runs above left there.
 own_store = os.path.join(tempfile.mkdtemp(prefix="nettail-history-"),
                          "flows.sqlite3")
 result = run([], [v5_packet(n) for n in (0, 2, 4, 6)], gap=(2, 4), settle=0.6,

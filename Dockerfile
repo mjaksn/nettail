@@ -77,13 +77,23 @@ LABEL org.opencontainers.image.title="nettail" \
 #
 # The collector needs no privilege. Its default port, 2055, is above 1024, so
 # binding it does not want root and the README already says so.
+#
+# The flow history is kept unless a run turns it off, at a default path under
+# the user's XDG data directory, and a store that cannot be opened stops the
+# run. This user has no home, so the image makes /var/lib/nettail for it and
+# points the data directory at /var/lib, which puts the default inside it. A
+# named volume mounted there takes this directory's owner the first time it is
+# used, which is what lets the compose file keep the history across a
+# recreate without anybody having to chown anything.
 RUN groupadd --gid 10001 nettail \
-    && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin nettail
+    && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin nettail \
+    && install --directory --owner nettail --group nettail --mode 0700 /var/lib/nettail
 
 COPY --from=builder /opt/nettail/venv /opt/nettail/venv
 
 ENV PATH="/opt/nettail/venv/bin:$PATH" \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    XDG_DATA_HOME=/var/lib
 
 # The collector listens here, and the browser view is served here. Both UDP and
 # TCP are named explicitly because the two are easy to confuse and the flow port

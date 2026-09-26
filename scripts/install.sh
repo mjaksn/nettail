@@ -348,6 +348,14 @@ Type=simple
 User=$SERVICE_USER
 Group=$SERVICE_USER
 EnvironmentFile=$ENV_FILE
+# The flow history is kept unless a run turns it off, at a default path under
+# the user's XDG data directory. This user has no home and ProtectHome hides
+# the rest, so nowhere that default would land can be written, and a store
+# that cannot be opened stops the run. StateDirectory makes /var/lib/nettail,
+# owned by this user and writable under ProtectSystem=strict, and pointing the
+# data directory at /var/lib puts the default inside it.
+Environment=XDG_DATA_HOME=/var/lib
+StateDirectory=nettail
 ExecStart=$INSTALL_DIR/venv/bin/nettail$exec_args
 Restart=always
 RestartSec=5
@@ -360,7 +368,8 @@ StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=nettail
 
-# Hardening. It binds two ports, reads one file, and writes nothing.
+# Hardening. It binds two ports, reads one file, and writes nothing but its
+# flow history in the state directory above.
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
@@ -460,6 +469,16 @@ services:
       - --resolve
       - $RESOLVE$extra
 $web_lines
+
+    # The flow history, which is kept unless the command says --flow-store off.
+    # The image puts it in /var/lib/nettail, and a named volume there is what
+    # keeps it across a pull and recreate; without one it goes with the
+    # container, as every update would then throw it away.
+    volumes:
+      - history:/var/lib/nettail
+
+volumes:
+  history:
 COMPOSE
 
     chmod 0640 "$COMPOSE_FILE"

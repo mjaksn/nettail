@@ -57,6 +57,8 @@ import io
 import os
 import sys
 
+from . import store
+
 CONFIG_NAME = "nettail.conf"
 
 # The section a setting lives in, and the only one there is.
@@ -85,10 +87,12 @@ UNSETTABLE = ("help", "version", "config", "save_config", "update_country_db")
 # so on purpose.
 NEVER_WRITTEN = ("web_token",)
 
-# Options that take an optional argument and still accept the old true spelling
-# in a config file need the destination that bare flag means.
+# Options that take an optional argument and still accept the switch words in a
+# config file: true means what the bare flag means, and false means the value
+# named here. The flow store is on by default, so its false is the word that
+# turns it off, and `off` is one of configparser's false words already.
 BOOLEAN_DEFAULTS = {
-    "flow_store": None,
+    "flow_store": store.OFF,
 }
 
 
