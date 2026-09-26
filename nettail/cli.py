@@ -1151,7 +1151,7 @@ def offer_country_db(note, stream=None, stdin=None, fetch=None, probe=None):
     return country.load(where)
 
 
-def update_country_db(named=None, stream=None, fetch=None):
+def update_country_db(named=None, stream=None, fetch=None, when=None, ask=None):
     """Fetch a country database because somebody asked outright, and report.
 
     Hands back an exit status, since this is a thing to do rather than a
@@ -1165,9 +1165,14 @@ def update_country_db(named=None, stream=None, fetch=None):
     cron that types it meant it, and refusing to act on it for want of a
     keyboard would be refusing to do the only thing it was asked to do.
 
-    Nor is there a probe. It exists so that nobody is put a question whose yes
-    could not have been carried out, and there is no question; `download`
-    tries both months by itself, which is what the probe was standing in for.
+    The probe that guards the offer's question has no question to guard here;
+    `download` tries both months by itself, which is what it was standing in
+    for. It is asked one other thing instead, and only about a DB-IP file
+    built before this month: whether a newer build is up yet. A file that is
+    already the newest is left where it is, which is what makes this cheap to
+    run at every start, as the compose file's country-db service does. See
+    `country.newest`. `when` and `ask` are the clock and the probe, for the
+    suite.
 
     What is being replaced is named before it goes. A database at the
     destination need not be DB-IP's, since anybody may put a GeoLite2 file
@@ -1191,13 +1196,25 @@ def update_country_db(named=None, stream=None, fetch=None):
     # Opened to read them and closed again straight away, and the closing is
     # not tidiness. On Windows a mapped file cannot be replaced, and a replace
     # is how the download below ends.
+    #
+    # Asked while it is open whether it is already the newest, too, and left
+    # alone when it is: a run at every start of a container would otherwise
+    # fetch the same file again each time, for nothing.
     replacing = None
+    current, latest = False, None
     if os.path.exists(where):
         if country.load(where) is None:
             replacing = "%s at %s%s" % (
                 country.kind() or "database", where,
                 ", built %s" % country.built() if country.built() else "")
+            current, latest = country.newest(when, ask)
         country.close()
+    if current:
+        # The comma closes the clause `replacing` ends with, which always
+        # names a build date here: `newest` answers yes only when there is one.
+        print(f"{C.GREY}the {replacing}, is the newest DB-IP has published, "
+              f"so it is left as it is{C.RESET}", file=stream)
+        return 0
     if replacing is not None:
         print(f"{C.GREY}replacing the {replacing}{C.RESET}", file=stream)
     print(f"{C.GREY}DB-IP publish a free country database, IP to Country "
@@ -1206,7 +1223,13 @@ def update_country_db(named=None, stream=None, fetch=None):
           f"out of the file on this machine, then and afterwards.{C.RESET}",
           file=stream)
 
-    trouble = (country.download if fetch is None else fetch)(where)
+    # Straight to the newest build when the question above found it, rather
+    # than asking for this month's first and being told 404 a second time.
+    urls = (latest,) if latest else None
+    if fetch is None:
+        trouble = country.download(where, when=when, urls=urls)
+    else:
+        trouble = fetch(where, urls=urls)
     if trouble:
         print(f"{C.YELLOW}could not fetch a country database: {trouble}. "
               f"{country.find_online()}{C.RESET}", file=stream)
@@ -1445,7 +1468,9 @@ def build_parser():
                                   "it where the next run will read it, and "
                                   "exit without collecting anything. Replaces "
                                   "the database that is there, or fetches a "
-                                  "first one where there is none. With "
+                                  "first one where there is none, and leaves "
+                                  "a DB-IP file alone when it is already the "
+                                  "newest build. With "
                                   "--country-db it refreshes that file "
                                   "instead of searching")
     # The choices are shown rather than hidden behind a metavar, which is the

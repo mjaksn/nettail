@@ -342,7 +342,7 @@ See [Size colour scale](#size-colour-scale) for what the colours mean.
 | --- | --- | --- |
 | `--country` | off | Mark every public address with the country it is in. Implied by `--country-db` |
 | `--country-db FILE` | searched | The database to read. Without it, the first of `/etc/nettail/country.mmdb`, `/usr/share/GeoIP/GeoLite2-Country.mmdb` and `/var/lib/GeoIP/GeoLite2-Country.mmdb` that exists, and a few more besides |
-| `--update-country-db` | off | Fetch DB-IP's free country database, put it where the next run will read it, and exit without collecting anything. Replaces the database that is there, or fetches a first one where there is none. With `--country-db` it refreshes that file instead of searching |
+| `--update-country-db` | off | Fetch DB-IP's free country database, put it where the next run will read it, and exit without collecting anything. Replaces the database that is there, or fetches a first one where there is none, and leaves a DB-IP file alone when it is already the newest build. With `--country-db` it refreshes that file instead of searching |
 | `--country-style {auto,flag,code}` | `auto` | How **this terminal** is shown a country: `flag` for the emoji, `code` for the two letters, `auto` for the letters wherever a flag is known not to be drawn. The browser is sent the flag whatever this says, and draws it or not by its own fonts |
 
 See [Country marking](#country-marking) for where the database comes from and
@@ -2140,6 +2140,20 @@ that swapping a GeoLite2 file you put there by hand for a DB-IP one is
 something you are told about rather than something you find out later. What
 lands is opened and read as a database before any of this reports success.
 
+A DB-IP file that is already the newest build is left where it is, and the run
+says so and exits with success, so it is cheap to run at every start:
+
+```
+$ nettail --update-country-db
+the DBIP-Country-Lite at /home/you/.local/share/nettail/country.mmdb, built 2026-09-01, is the newest DB-IP has published, so it is left as it is
+```
+
+A file built this month is the newest without asking anybody. One built last
+month may still be, for the first few days of a month before DB-IP puts the new
+build up, and there the run asks db-ip.com which build is the newest before
+deciding, with the same HEAD request the offer above makes. A file from anybody
+else is replaced however new it is, after being named.
+
 No question is put and no terminal is looked for. Every guard on the offer
 above is there to avoid mistaking an empty pipe for a yes, and typing the flag
 is the yes: a run from cron that types it meant it. That is also why it is the
@@ -2174,11 +2188,12 @@ history, and `--update-country-db` fetches into it:
 docker compose run --rm nettail --update-country-db
 ```
 
-Run it again to refresh the file, and restart the service to read the new one.
-Mounting a file of your own at `/etc/nettail/country.mmdb` works too, and then
-that file is the one to keep current, since it is read first. The unit and the
-compose file do not pass `--country` themselves, so adding the flag to either
-is what turns it on, the same decision `--web-bind` leaves to you.
+Run it again to refresh the file, which fetches only when DB-IP has published a
+newer build, and restart the service to read the new one. Mounting a file of
+your own at `/etc/nettail/country.mmdb` works too, and then that file is the one
+to keep current, since it is read first. The unit and the compose file do not
+pass `--country` themselves, so adding the flag to either is what turns it on,
+the same decision `--web-bind` leaves to you.
 
 Reading the format is about two hundred lines in `country.py` rather than a
 dependency, for the same reasons the QR encoder is not one: this program
@@ -2642,11 +2657,11 @@ volume:
 docker run --rm -v nettail-history:/var/lib/nettail ghcr.io/mjaksn/nettail:latest --update-country-db
 ```
 
-Either fetches, says where the file went and exits, and running it again
-replaces the file with the current month's; restart the collector to read the
-new one. A detached container is never offered a
-database, since it has nobody to ask, so this command is how one arrives. Or
-mount a file you keep yourself:
+Either fetches, says where the file went and exits. Running it again replaces
+the file once DB-IP has published a newer one and otherwise leaves it alone, so
+it costs nothing to run often; restart the collector to read a new one. A
+detached container is never offered a database, since it has nobody to ask, so
+this command is how one arrives. Or mount a file you keep yourself:
 
 ```
 -v ./dbip-country-lite.mmdb:/etc/nettail/country.mmdb:ro

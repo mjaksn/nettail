@@ -74,8 +74,9 @@ services:
       # want a newer one:
       #   docker compose run --rm nettail --update-country-db
       # or uncomment the depends_on block below and the country-db service at
-      # the foot of this file, which fetch a current one at every start. With
-      # nothing to read this says so once at startup and marks nothing.
+      # the foot of this file, which fetch a newer one at every start when there
+      # is one. With nothing to read this says so once at startup and marks
+      # nothing.
       #- --country
 
     # Wait for country-db to fetch the country database before starting. Only
@@ -120,13 +121,13 @@ services:
 
   # Fetches DB-IP's free country database into the history volume and exits,
   # so that the collector above finds a current one when it starts. It runs
-  # whenever `docker compose up` starts the collector, and each run downloads
-  # the whole file again, since the update does not check whether the one
-  # already there is this month's. Docker restarting the collector on its own,
-  # after a crash or a reboot, does not run it again.
+  # whenever `docker compose up` starts the collector, and downloads only when
+  # DB-IP has published a newer build than the one already there; otherwise it
+  # says the file is current and leaves it. Docker restarting the collector on
+  # its own, after a crash or a reboot, does not run it again.
   #
   # Off unless uncommented, together with the depends_on block above and
-  # `--country`. It reaches out to db-ip.com every time it runs, and nettail
+  # `--country`. It can reach out to db-ip.com every time it runs, and nettail
   # fetches nothing from there unless somebody asked, so this file does not ask
   # on anybody's behalf.
   #
