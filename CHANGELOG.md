@@ -11,6 +11,56 @@ but it is a program rather than a library, and the names inside it may move
 without that being a breaking change. `--json` output is the part meant to be
 parsed, and it is treated as public.
 
+## [0.19.0] - 2026-09-26
+
+### Changed
+
+- **The flow store is on by default.** A run keeps its history of shown flows
+  at the per-user default path unless it says otherwise, so the browser can
+  scroll back and replay a returning tab without anybody having asked for it.
+  `--flow-store off`, or `flow-store = off` in a config file, keeps no history
+  at all. In a file `false` and the other switch words mean the same, and on
+  the command line they are refused rather than opened as a file of that name.
+  A store that cannot be opened still stops the run, whether its path was
+  typed or is the default, and the message now names both ways out.
+
+- **The image and the installer keep the history in `/var/lib/nettail`.**
+  Neither service user has a home, so both set `XDG_DATA_HOME=/var/lib`. The
+  image makes the directory, and both compose files, the shipped one and the
+  one the installer writes, mount a named volume there so that an update does
+  not throw the history away. The systemd unit gets the directory from
+  `StateDirectory`.
+
+- **netflume may be anything from 0.5.2 up to 0.7**, up from `<0.6`, and the
+  image ships 0.6.0. None of its breaking changes reach this program, which
+  binds its own IPv4 socket rather than using netflume's `Collector` and
+  already calls `flow_duration` with one argument.
+
+### Added
+
+- **A port of zero picks a free one, and the run says which.** `--port 0` and
+  `--web-port 0` both have the system choose, and the startup line and the
+  printed URL name the port that was bound. The startup line used to repeat
+  the number asked for, so a collector on port zero said it was listening on
+  `:0`.
+
+### Fixed
+
+- **`--json` records carry `_ingest_id` while the flow store is on**, as 0.18.0
+  said they did. The record was written before the store had numbered the row,
+  so the field was missing from every line.
+
+### Upgrading a systemd install
+
+Re-running `scripts/install.sh` rewrites the unit with the two lines the store
+needs, and that is the way to upgrade. A unit left from an earlier installer
+with only the package upgraded underneath it has neither: its user has no home
+and `ProtectSystem=strict` leaves nowhere else writable, so the default store
+cannot be opened, the run stops at startup, and `Restart=always` starts it
+again every five seconds. Re-run the installer, add
+`Environment=XDG_DATA_HOME=/var/lib` and `StateDirectory=nettail` to the unit
+yourself, or put `--flow-store off` on its `ExecStart` line.
+
 ## [0.18.0] - 2026-09-24
 
 ### Added
@@ -1145,6 +1195,7 @@ console: the part that decides what a flow should look like on a terminal.
   reminder line under the startup banner can be a pointer rather than a
   two-hundred-character list that wrapped and then scrolled away.
 
+[0.19.0]: https://github.com/mjaksn/nettail/releases/tag/v0.19.0
 [0.18.0]: https://github.com/mjaksn/nettail/releases/tag/v0.18.0
 [0.17.0]: https://github.com/mjaksn/nettail/releases/tag/v0.17.0
 [0.16.0]: https://github.com/mjaksn/nettail/releases/tag/v0.16.0
