@@ -2164,12 +2164,21 @@ That is the machine whose `geoipupdate` already keeps a copy current. Fetching
 underneath it would have left you with a new file, an old answer, and nothing
 on screen to say which of the two you were being shown.
 
-Running as a service or in a container, `/etc/nettail/country.mmdb` is the path
-to use: it is first in the list above, the installer already owns that
-directory, and mounting a single file into a container is one line in the
-compose file. The unit and the compose file do not pass `--country` themselves,
-so adding the flag to either is what turns it on, the same decision `--web-bind`
-leaves to you.
+Running as a service, `/etc/nettail/country.mmdb` is the path to use: it is
+first in the list above and the installer already owns that directory. In a
+container the image points `XDG_DATA_HOME` at `/var/lib`, so the last path in
+the list is `/var/lib/nettail/country.mmdb`, on the volume that keeps the flow
+history, and `--update-country-db` fetches into it:
+
+```
+docker compose run --rm nettail --update-country-db
+```
+
+Run it again to refresh the file, and restart the service to read the new one.
+Mounting a file of your own at `/etc/nettail/country.mmdb` works too, and then
+that file is the one to keep current, since it is read first. The unit and the
+compose file do not pass `--country` themselves, so adding the flag to either
+is what turns it on, the same decision `--web-bind` leaves to you.
 
 Reading the format is about two hundred lines in `country.py` rather than a
 dependency, for the same reasons the QR encoder is not one: this program
@@ -2612,14 +2621,29 @@ Two more things are worth mounting. Your own static name mappings:
 ```
 
 and then `--hosts /etc/nettail/lan-hosts`. And a country database, if you want
-`--country`, which is a file you fetch rather than one this image could ship:
+`--country`, which is a file you fetch rather than one this image could ship.
+The image can fetch it into the history volume, where it is found without
+being named:
+
+```
+docker compose run --rm nettail --update-country-db
+docker run --rm -v nettail-history:/var/lib/nettail ghcr.io/mjaksn/nettail:latest --update-country-db
+```
+
+The first is for the compose file, the second for a plain `docker run` with
+the volume above. Either fetches, says where the file went and exits, and
+running it again replaces the file with the current month's; restart the
+collector to read the new one. A detached container is never offered a
+database, since it has nobody to ask, so this command is how one arrives. Or
+mount a file you keep yourself:
 
 ```
 -v ./dbip-country-lite.mmdb:/etc/nettail/country.mmdb:ro
 ```
 
-and then `--country`, which needs no path since that is the first place it
-looks. See [Country marking](#country-marking).
+That is the first place nettail looks, so it needs no path either, and while it
+is there `--update-country-db` refuses to fetch a copy that would only be read
+after it. Then add `--country`. See [Country marking](#country-marking).
 
 It runs as an unprivileged user, UID and GID 10001. The default port is 2055,
 which is above 1024 and so needs no privilege to bind.

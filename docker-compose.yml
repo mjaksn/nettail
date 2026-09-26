@@ -69,9 +69,11 @@ services:
       # Only flows that touch the internet, which is usually what is wanted.
       #- --external-only
       # Mark public addresses with the country a database says they are in.
-      # No country data is in the image, so this wants the mount at the foot
-      # of this file as well; with nothing to read it says so once at startup
-      # and marks nothing.
+      # No country data is in the image, so fetch one first with
+      #   docker compose run --rm nettail --update-country-db
+      # which puts it in the history volume below, and run the same command
+      # again whenever you want a newer one. With nothing to read this says so
+      # once at startup and marks nothing.
       #- --country
 
     # Pin the token so a bookmark survives a restart. Leave it out and a
@@ -89,14 +91,18 @@ services:
     # and start again on a restart, as they always have. Put `--flow-store off`
     # in the command above to keep no history at all.
     #
+    # The same volume holds a country database fetched with
+    # `--update-country-db`, as the note on `--country` above says. A run at a
+    # terminal is offered one and a detached container is not, since it has
+    # nobody to ask, so it goes without until the command fetches one.
+    #
     # Two more things are worth mounting, both read-only because both are only
     # ever read. Your own static name mappings, if you keep any, paired with
     # `--hosts /etc/nettail/lan-hosts` in the command above. And a country
-    # database for `--country`, which is a file you fetch rather than one this
-    # image could ship; /etc/nettail/country.mmdb is the first place nettail
-    # looks, so nothing has to name it twice. A run at a terminal is offered
-    # one and this is not that: a detached container has nobody to ask, so it
-    # goes without a database rather than fetching one unasked.
+    # database you keep on the host yourself, in place of the fetched one:
+    # /etc/nettail/country.mmdb is the first place nettail looks, so nothing
+    # has to name it, and while it is mounted `--update-country-db` refuses to
+    # fetch a copy that would be read after it and so never at all.
     volumes:
       - history:/var/lib/nettail
       #- ./lan-hosts:/etc/nettail/lan-hosts:ro
