@@ -15,6 +15,7 @@ to suppress, and no exception would be raised anywhere. So the checks below
 ask for the table and the records together rather than for either alone.
 """
 import io
+import json
 import os
 import socket
 import struct
@@ -119,6 +120,19 @@ saved = store.FlowStore(history, retention_days=14)
 check("the flow history file got one row", saved.count() == 1, str(saved.count()))
 check("and it stored the flow record",
       '"dst_port": 443' in saved.latest()["record_json"], saved.latest()["record_json"])
+saved.close()
+
+# The record carries the row's number in that history, which is the one thing
+# the two sinks share, so the store has to have answered before the record goes
+# out. Written the other way round the line is complete in every other respect
+# and simply lacks the field, which nothing else here would notice.
+both = os.path.join(work, "both.jsonl")
+run(["--json", both, "--flow-store", history], [v5_packet(seq=2)])
+record = json.loads(lines_of(both)[-1]) if lines_of(both) else {}
+saved = store.FlowStore(history, retention_days=14)
+check("a record written beside the history carries its ingest id",
+      record.get("_ingest_id") == saved.latest()["ingest_id"],
+      "%r against %r" % (record.get("_ingest_id"), saved.latest()["ingest_id"]))
 saved.close()
 
 # --- the bare flag is the run it always was ---------------------------------

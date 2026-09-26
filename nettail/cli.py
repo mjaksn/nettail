@@ -2687,16 +2687,18 @@ def main():
                 # into it would break the very consumers it exists for. Built
                 # once and handed on, so that a browser watching the same run
                 # does not have an identical second one made underneath it.
+                # The history is written first because the record carries the
+                # row's number in it, which only the store can answer.
                 out = None
-                if records is not None:
-                    out = flow_record(rec, hdr, resolver)
-                    records.write(out)
-                elif store.enabled(args):
+                if records is not None or store.enabled(args):
                     out = flow_record(rec, hdr, resolver)
 
                 if store.enabled(args):
                     ingest_id = flow_store.write(out)
                     out["_ingest_id"] = ingest_id
+
+                if records is not None:
+                    records.write(out)
 
                 if json_stdout:
                     # stdout is carrying the records, so there is no table
