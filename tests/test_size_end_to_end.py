@@ -11,7 +11,6 @@ from harness import SCRIPT, FakeTTY, check, finish
 
 import nettail as main
 
-PORT = 29956
 V5_HDR = struct.Struct("!HHIIIIBBH")
 V5_REC = struct.Struct("!4s4s4sHHIIIIHHBBBBHHBBH")
 SIZES = [40, 900, 12_000, 400_000]
@@ -30,8 +29,10 @@ def v5_packet():
 
 
 # --- subprocess over a pipe: no escapes, columns aligned --------------------
+# Port zero, so the system picks a free one and the startup line says which.
+# A number written in here was one some other program could already hold.
 proc = subprocess.Popen(
-    [sys.executable, "-u", *SCRIPT, "--bind", "127.0.0.1", "--port", str(PORT),
+    [sys.executable, "-u", *SCRIPT, "--bind", "127.0.0.1", "--port", "0",
      "--resolve", "off"],
     stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
@@ -48,8 +49,14 @@ while True:
     if "Listening for NetFlow" in line:
         break
 
+bound = re.search(r"Listening for NetFlow/IPFIX on 127\.0\.0\.1:(\d+)",
+                  ESC.sub("", "".join(banner)))
+port = int(bound.group(1)) if bound else 0
+check("the startup line names the port the system picked, not zero", port > 0,
+      "".join(banner))
+
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-sock.sendto(v5_packet(), ("127.0.0.1", PORT))
+sock.sendto(v5_packet(), ("127.0.0.1", port or 9))
 time.sleep(1.0)
 proc.terminate()
 out, err = proc.communicate(timeout=15)

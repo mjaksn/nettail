@@ -1278,7 +1278,9 @@ def build_parser():
                            % config.default_save_path())
     ap.add_argument("--bind", default="0.0.0.0",
                     help="address to bind (default 0.0.0.0)")
-    ap.add_argument("--port", type=int, default=2055, help="UDP port (default 2055)")
+    ap.add_argument("--port", type=int, default=2055,
+                    help="UDP port (default 2055; 0 picks a free one, which "
+                         "the startup line names)")
     ap.add_argument("--external-only", action="store_true",
                     help="only show flows involving a public IP")
     # The n and p keys, asked for at the start rather than pressed. Every
@@ -1365,7 +1367,8 @@ def build_parser():
     web_grp.add_argument("--web-port", type=int, default=DEFAULT_WEB_PORT,
                          metavar="PORT",
                          help=f"port for the web interface (default "
-                              f"{DEFAULT_WEB_PORT})")
+                              f"{DEFAULT_WEB_PORT}; 0 picks a free one, which "
+                              f"the printed URL names)")
     web_grp.add_argument("--web-bind", default="127.0.0.1", metavar="ADDR",
                          help="address for the web interface (default "
                               "127.0.0.1, and anything else exposes this "
@@ -1807,6 +1810,11 @@ def main():
     except OSError:
         pass
     sock.bind((args.bind, args.port))
+    # The port as bound rather than as asked for. They differ only for a port
+    # of zero, which has the system pick a free one, and then the banner is the
+    # only place anybody can learn which it picked. The socket is asked only in
+    # that case, since any other answer would be the number already in hand.
+    listen_port = sock.getsockname()[1] if args.port == 0 else args.port
 
     # The bus everything a browser sees goes through. Created whatever the
     # flags say, because every publish site guards on whether anything is
@@ -2168,7 +2176,7 @@ def main():
         before the first datagram and nothing in it reads live state.
         """
         print(f"{C.BOLD}Listening for NetFlow/IPFIX on "
-              f"{args.bind}:{args.port}{C.RESET}", file=out)
+              f"{args.bind}:{listen_port}{C.RESET}", file=out)
         statics = (f"  |  static entries: {len(resolver.static)}"
                    if resolver.static else "")
         print(f"{C.GREY}Hostname resolution: {MODE_DESC[args.resolve]}"

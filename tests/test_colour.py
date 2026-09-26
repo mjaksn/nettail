@@ -18,9 +18,11 @@ rather than the same words undressed.
 import argparse
 import io
 import json
+import queue
+import re
 import subprocess
 import sys
-import time
+import threading
 import urllib.request
 
 from harness import check, finish
@@ -339,46 +341,74 @@ finally:
 # What is checked is the banner the browser is greeted with, because that is
 # the text the reporter saw arrive white.
 
-def greeting(port, token, extra=()):
+#
+# Both ports are zero, so the operating system picks them, and the web port is
+# read back off the URL the run prints. Numbers written in here were taken by
+# whatever else the machine was running, and Hyper-V reserves whole ranges of
+# them on Windows, so a clean checkout failed here for reasons that said
+# nothing about the code. A bind that fails is not fatal to the collector,
+# which carries on without a web interface, so the URL is also the first thing
+# checked: without it the run would only have said that the greeting was
+# empty.
+WEB_URL = re.compile(r"Web interface: http://127\.0\.0\.1:(\d+)/")
+
+
+def greeting(token, extra=()):
+    """The run's `hello` event, and the stderr it printed on the way."""
     proc = subprocess.Popen(
-        [sys.executable, "-m", "nettail", "--web", "--web-port", str(port),
-         "--port", str(port + 1), "--web-token", token, "--resolve", "off"]
+        [sys.executable, "-m", "nettail", "--web", "--web-port", "0",
+         "--port", "0", "--web-token", token, "--resolve", "off"]
         + list(extra),
         stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    lines, bound = [], queue.Queue()
+
+    def read():
+        for raw in iter(proc.stderr.readline, b""):
+            line = strip_colour(raw.decode("utf-8", "replace"))
+            lines.append(line)
+            found = WEB_URL.search(line)
+            if found:
+                bound.put(int(found.group(1)))
+
+    reader = threading.Thread(target=read, daemon=True)
+    reader.start()
     try:
-        deadline = time.time() + 20
-        while time.time() < deadline:
-            try:
-                host = "127.0.0.1:%d" % port
-                stream = urllib.request.urlopen(urllib.request.Request(
-                    "http://%s/t/%s/events" % (host, token),
-                    headers={"Host": host}), timeout=5)
-            except OSError:
-                time.sleep(0.3)
-                continue
-            try:
-                name = None
-                for _ in range(40):
-                    line = stream.readline().decode("utf-8", "replace")
-                    if line.startswith("event: "):
-                        name = line[7:].strip()
-                    elif line.startswith("data: ") and name == "hello":
-                        return json.loads(line[6:])
-            finally:
-                stream.close()
-            break
-        return {}
+        try:
+            port = bound.get(timeout=20)
+        except queue.Empty:
+            return {}, "".join(lines)
+        host = "127.0.0.1:%d" % port
+        stream = urllib.request.urlopen(urllib.request.Request(
+            "http://%s/t/%s/events" % (host, token),
+            headers={"Host": host}), timeout=5)
+        try:
+            name = None
+            for _ in range(40):
+                line = stream.readline().decode("utf-8", "replace")
+                if line.startswith("event: "):
+                    name = line[7:].strip()
+                elif line.startswith("data: ") and name == "hello":
+                    return json.loads(line[6:]), "".join(lines)
+        finally:
+            stream.close()
+        return {}, "".join(lines)
     finally:
         proc.terminate()
-        proc.communicate(timeout=15)
+        proc.wait(timeout=15)
+        reader.join(timeout=5)
+        proc.stdout.close()
+        proc.stderr.close()
 
 
-hello = greeting(2251, "colour-e2e")
+hello, err = greeting("colour-e2e")
+check("the run bound a web interface and printed where", bool(WEB_URL.search(err)),
+      err[-400:])
 check("a piped run still greets a browser in colour",
       "\033[" in hello.get("banner", ""), repr(hello.get("banner", ""))[:120])
 check("and the columns arrive as ever", bool(hello.get("columns")))
 
-hello = greeting(2253, "colour-e2e", ["--web-colour", "off"])
+hello, err = greeting("colour-e2e", ["--web-colour", "off"])
+check("and so did the run without colour", bool(WEB_URL.search(err)), err[-400:])
 check("unless the browser was told not to have any",
       "\033[" not in hello.get("banner", "x"), repr(hello.get("banner", ""))[:120])
 check("and the banner is still there, just plain",
