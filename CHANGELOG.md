@@ -11,6 +11,41 @@ but it is a program rather than a library, and the names inside it may move
 without that being a breaking change. `--json` output is the part meant to be
 parsed, and it is treated as public.
 
+## [0.20.0] - 2026-09-26
+
+### Changed
+
+- **`--update-country-db` leaves a DB-IP database alone when it is already
+  the newest build.** It says so, naming the file and its build date, and
+  exits with success rather than downloading the same file again. A file
+  built in the current month is the newest without anything being asked. One
+  built in an earlier month may still be the newest for the first few days of
+  a month, before DB-IP puts the new build up, so there the run makes the
+  same HEAD request the offer at startup makes before deciding, and a newer
+  build found that way is fetched straight from the address it answered at.
+  A database from any other publisher is still replaced, however new it is,
+  after being named.
+
+### Added
+
+- **The compose file can fetch a country database at every start.** A
+  `country-db` service, commented out, runs `--update-country-db` into the
+  history volume and exits, and a `depends_on` on it, also commented out,
+  holds the collector back until it has finished. Uncomment both together
+  with `--country`. A fetch that fails still lets the collector start, with
+  the database it already had or with none, and that service's logs say why.
+  It is off unless uncommented because it can reach db-ip.com every time it
+  runs, and nettail fetches nothing from there unless somebody asked.
+
+### Documentation
+
+- **Fetching a country database under Docker is written down.** Since 0.19.0
+  the image points `XDG_DATA_HOME` at `/var/lib`, so
+  `docker compose run --rm nettail --update-country-db` puts one on the
+  history volume where the collector finds it without being told. The README
+  and the compose file used to say the only way was to fetch a file by hand
+  and mount it, which still works and is still described.
+
 ## [0.19.0] - 2026-09-26
 
 ### Changed
@@ -1195,6 +1230,7 @@ console: the part that decides what a flow should look like on a terminal.
   reminder line under the startup banner can be a pointer rather than a
   two-hundred-character list that wrapped and then scrolled away.
 
+[0.20.0]: https://github.com/mjaksn/nettail/releases/tag/v0.20.0
 [0.19.0]: https://github.com/mjaksn/nettail/releases/tag/v0.19.0
 [0.18.0]: https://github.com/mjaksn/nettail/releases/tag/v0.18.0
 [0.17.0]: https://github.com/mjaksn/nettail/releases/tag/v0.17.0
