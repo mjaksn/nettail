@@ -385,9 +385,19 @@ knowing before touching it.
   the same file from the same publisher, fetched because somebody typed a flag
   rather than because a prompt caught them. Every guard on `offer_country_db`
   is about not mistaking an empty pipe for a yes, so none of them applies here
-  and none is kept: no question, no terminal check, and no probe either, since
-  the probe exists to avoid putting a question whose yes could not be carried
-  out and there is no question. What is left to get wrong is where it writes.
+  and none is kept: no question and no terminal check, and the probe is not
+  there as a guard, since it exists to avoid putting a question whose yes
+  could not be carried out and there is no question. It is asked something
+  else instead, and only about a DB-IP file built before this month: whether a
+  newer build is up yet. A DB-IP file that is already the newest is left where
+  it is and the errand succeeds, which is what lets the compose file's
+  `country-db` service run it at every start without downloading anything.
+  `country.newest` is that rule. It calls a file built this month the newest
+  without a request, because DB-IP names each build for the month it was made
+  in, which one real file was checked against; were that ever not so, the cost
+  is a fetch that was not needed rather than a file left old, since a build
+  from an earlier month always goes to the probe. What is left to get wrong is
+  where it writes.
   A named `--country-db` is the file, whatever the search would have said.
   Otherwise the search order decides, and a database above `destination()`
   refuses the fetch and is named, because a copy written below it would be

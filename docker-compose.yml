@@ -69,10 +69,23 @@ services:
       # Only flows that touch the internet, which is usually what is wanted.
       #- --external-only
       # Mark public addresses with the country a database says they are in.
-      # No country data is in the image, so this wants the mount at the foot
-      # of this file as well; with nothing to read it says so once at startup
-      # and marks nothing.
+      # No country data is in the image, so something has to fetch one into
+      # the history volume below. Either do it by hand, and again whenever you
+      # want a newer one:
+      #   docker compose run --rm nettail --update-country-db
+      # or uncomment the depends_on block below and the country-db service at
+      # the foot of this file, which fetch a newer one at every start when there
+      # is one. With nothing to read this says so once at startup and marks
+      # nothing.
       #- --country
+
+    # Wait for country-db to fetch the country database before starting. Only
+    # with that service uncommented as well: a dependency on a service that is
+    # not defined stops the whole file from loading. It waits for the fetch to
+    # finish rather than for it to succeed, for the reason given there.
+    #depends_on:
+    #  country-db:
+    #    condition: service_completed_successfully
 
     # Pin the token so a bookmark survives a restart. Leave it out and a
     # fresh random one is printed at every start. It goes in a file rather
@@ -89,18 +102,47 @@ services:
     # and start again on a restart, as they always have. Put `--flow-store off`
     # in the command above to keep no history at all.
     #
+    # The same volume holds a country database fetched with
+    # `--update-country-db`, as the note on `--country` above says. A run at a
+    # terminal is offered one and a detached container is not, since it has
+    # nobody to ask, so it goes without until the command fetches one.
+    #
     # Two more things are worth mounting, both read-only because both are only
     # ever read. Your own static name mappings, if you keep any, paired with
     # `--hosts /etc/nettail/lan-hosts` in the command above. And a country
-    # database for `--country`, which is a file you fetch rather than one this
-    # image could ship; /etc/nettail/country.mmdb is the first place nettail
-    # looks, so nothing has to name it twice. A run at a terminal is offered
-    # one and this is not that: a detached container has nobody to ask, so it
-    # goes without a database rather than fetching one unasked.
+    # database you keep on the host yourself, in place of the fetched one:
+    # /etc/nettail/country.mmdb is the first place nettail looks, so nothing
+    # has to name it, and while it is mounted `--update-country-db` refuses to
+    # fetch a copy that would be read after it and so never at all.
     volumes:
       - history:/var/lib/nettail
       #- ./lan-hosts:/etc/nettail/lan-hosts:ro
       #- ./dbip-country-lite.mmdb:/etc/nettail/country.mmdb:ro
+
+  # Fetches DB-IP's free country database into the history volume and exits,
+  # so that the collector above finds a current one when it starts. It runs at
+  # every `docker compose up`, and downloads only when DB-IP has published a
+  # newer build than the one already there; otherwise it says the file is
+  # current and leaves it. A collector that was already running when it did
+  # download goes on with the file it loaded until it is restarted, and Docker
+  # restarting the collector on its own, after a crash or a reboot, does not
+  # run this again.
+  #
+  # Off unless uncommented, together with the depends_on block above and
+  # `--country`. It can reach out to db-ip.com every time it runs, and nettail
+  # fetches nothing from there unless somebody asked, so this file does not ask
+  # on anybody's behalf.
+  #
+  # `|| true` is so that a fetch which fails, with db-ip.com unreachable or the
+  # network not up yet, still lets the collector start. It then runs with the
+  # database it already had, or unmarked when there was none, and says which at
+  # startup. The error from the fetch is in `docker compose logs country-db`.
+  #country-db:
+  #  image: ghcr.io/mjaksn/nettail:latest
+  #  entrypoint: ["sh", "-c", "nettail --update-country-db || true"]
+  #  restart: "no"
+  #  volumes:
+  #    - history:/var/lib/nettail
 
 volumes:
   history:

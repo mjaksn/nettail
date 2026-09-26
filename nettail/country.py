@@ -210,6 +210,8 @@ STALE_AFTER = 365 * 24 * 3600
 # leaving it to the reader: nothing was asked for by hand, so nobody but this
 # program knows whose data is on the screen. `credit` is where that is decided.
 DBIP_URL = "https://download.db-ip.com/free/dbip-country-lite-%04d-%02d.mmdb.gz"
+# The year and month back out of one of those, which is how DB-IP names builds.
+_BUILD_MONTH = re.compile(r"-(\d{4})-(\d{2})\.mmdb\.gz$")
 DBIP_LICENCE = "Creative Commons Attribution 4.0"
 DBIP_CREDIT = "IP Geolocation by DB-IP"
 DBIP_HOME = "https://db-ip.com"
@@ -1051,6 +1053,42 @@ def built():
     if _database is None or not _database.build_epoch:
         return None
     return time.strftime("%Y-%m-%d", time.gmtime(_database.build_epoch))
+
+
+def newest(when=None, ask=None):
+    """Whether the database in hand is the newest build DB-IP has published.
+
+    A pair: the answer, and the address of the newest build when finding out
+    meant asking db-ip.com, so that a fetch which follows can go straight to
+    it. `ask` is `probe` unless a caller says otherwise, called with nothing,
+    and the clock is an argument for the reason `download_urls` takes it.
+
+    Only a DB-IP file can be the newest DB-IP build. Anything else in the
+    place a refresh writes is replaced as it always was, after being named.
+
+    A file built in the current month is the newest without asking anybody,
+    since DB-IP names each build for the month it was made in: the September
+    file a real fetch brought down said it was built at 01:32 on the first of
+    September. One from an earlier month may still be the newest for the few
+    days before the new build is up, and only the probe can say, so that is
+    the one case that makes a request. Were DB-IP ever to build a month's file
+    on the last day of the month before, the cost would be a fetch that was
+    not needed, which is what every run paid before this was here.
+    """
+    if _database is None or not _database.build_epoch:
+        return False, None
+    if not (_database.database_type or "").lower().startswith(DBIP_TYPE):
+        return False, None
+    when = time.gmtime() if when is None else when
+    made = time.gmtime(_database.build_epoch)
+    have = (made.tm_year, made.tm_mon)
+    if have >= (when.tm_year, when.tm_mon):
+        return True, None
+    url, _size, _trouble = probe(when=when) if ask is None else ask()
+    published = _BUILD_MONTH.search(url or "")
+    if published is None:
+        return False, None
+    return have >= (int(published.group(1)), int(published.group(2))), url
 
 
 def describe():

@@ -1327,6 +1327,28 @@ os.makedirs(os.path.dirname(UPDATE_DEST))
 BUILT_EPOCH = 1788307200
 BUILT_ON = time.strftime("%Y-%m-%d", time.gmtime(BUILT_EPOCH))
 
+# A clock months past every build this suite makes, so that a DB-IP file left
+# by an earlier check is old rather than current and an errand run over it
+# fetches again, as the checks below it want.
+LATER = time.gmtime(time.time() + 200 * 86400)
+
+
+class Published:
+    """A probe answering that the newest build is the one for `when`."""
+
+    def __init__(self, when):
+        self.url = country.download_urls(when)[0]
+        self.asked = 0
+
+    def __call__(self):
+        self.asked += 1
+        return self.url, None, None
+
+
+def offline():
+    """A probe that could not reach anybody."""
+    return None, None, "db-ip.com: timed out"
+
 
 class Dated(Counted):
     """A fetch that leaves a database built on a day of the suite's choosing."""
@@ -1365,12 +1387,69 @@ try:
     check("and nothing is said about replacing a file that was not there",
           "replacing" not in printed, printed)
 
-    # Again, over the file the first one left. This is the case the flag
+    # Again, in the month the file was built. It is the newest there is, and
+    # fetching it again would be a download for nothing on every start of a
+    # container that runs this first.
+    country.close()
+    fetch = Dated()
+    asked = Published(time.gmtime(BUILT_EPOCH))
+    out = FakeTTY()
+    status = main.update_country_db(stream=out, fetch=fetch,
+                                    when=time.gmtime(BUILT_EPOCH), ask=asked)
+    printed = plain(out.getvalue())
+    check("a DB-IP file built this month is left where it is",
+          status == 0 and fetch.asked == [], "%s %s" % (status, fetch.asked))
+    check("without asking db-ip.com anything", asked.asked == 0,
+          str(asked.asked))
+    check("and the reader is told why, naming the file and its build",
+          "newest DB-IP has published" in printed and UPDATE_DEST in printed
+          and BUILT_ON in printed, printed)
+    check("and nothing is said about fetching",
+          "Fetching" not in printed, printed)
+
+    # The first days of the next month, before DB-IP has put the new build up.
+    # Last month's is still the newest, and only the probe can say so.
+    early = time.gmtime(BUILT_EPOCH + 31 * 86400)
+    fetch = Dated()
+    asked = Published(time.gmtime(BUILT_EPOCH))
+    out = FakeTTY()
+    status = main.update_country_db(stream=out, fetch=fetch, when=early,
+                                    ask=asked)
+    check("last month's build is left alone while it is still the newest",
+          status == 0 and fetch.asked == [], "%s %s" % (status, fetch.asked))
+    check("which took one question to find out", asked.asked == 1,
+          str(asked.asked))
+
+    # And once the new build is up, it is fetched, and fetched from the
+    # address the probe found rather than by trying this month's name again.
+    fetch = Dated()
+    asked = Published(early)
+    out = FakeTTY()
+    status = main.update_country_db(stream=out, fetch=fetch, when=early,
+                                    ask=asked)
+    check("a newer build once it is up is fetched",
+          status == 0 and fetch.asked == [UPDATE_DEST],
+          "%s %s" % (status, fetch.asked))
+    check("from the address the probe found", fetch.urls == (asked.url,),
+          str(fetch.urls))
+
+    # A probe that could not reach anybody answers nothing either way, and the
+    # fetch goes ahead to find out for itself, as it did before there was one.
+    fetch = Counted(trouble="db-ip.com: timed out")
+    out = FakeTTY()
+    status = main.update_country_db(stream=out, fetch=fetch, when=early,
+                                    ask=offline)
+    check("an unanswered probe leaves the fetch to try both months",
+          fetch.asked == [UPDATE_DEST] and fetch.urls is None,
+          "%s %s" % (fetch.asked, fetch.urls))
+
+    # Months on, over the file the first one left. This is the case the flag
     # exists for: a database that is there and is old.
     country.close()
     fetch = Dated()
     out = FakeTTY()
-    status = main.update_country_db(stream=out, fetch=fetch)
+    status = main.update_country_db(stream=out, fetch=fetch, when=LATER,
+                                    ask=Published(LATER))
     printed = plain(out.getvalue())
     check("a second errand replaces what the first one left", status == 0,
           str(status))
@@ -1388,21 +1467,28 @@ try:
     # A file somebody put there by hand from the other publisher. Swapping one
     # for the other without saying which is going is the wrong shape for a
     # feature this careful about whose terms are being agreed to.
+    # Built today, so that being current cannot be what decides it: only a
+    # DB-IP file can be DB-IP's newest build.
     country.close()
     with io.open(UPDATE_DEST, "wb") as handle:
         handle.write(build(NETWORKS, kind="GeoLite2-Country"))
     fetch = Counted()
+    asked = Published(time.gmtime())
     out = FakeTTY()
-    main.update_country_db(stream=out, fetch=fetch)
+    main.update_country_db(stream=out, fetch=fetch, ask=asked)
     line = next((one for one in plain(out.getvalue()).splitlines()
                  if one.startswith("replacing")), "")
     check("a file from the other publisher is named before it is swapped out",
           "GeoLite2-Country" in line, repr(line))
+    check("and is swapped out however new it is, with nobody asked",
+          fetch.asked == [UPDATE_DEST] and asked.asked == 0,
+          "%s %s" % (fetch.asked, asked.asked))
 
     country.close()
     fetch = Counted(trouble="db-ip.com: timed out")
     out = FakeTTY()
-    status = main.update_country_db(stream=out, fetch=fetch)
+    status = main.update_country_db(stream=out, fetch=fetch, when=LATER,
+                                    ask=Published(LATER))
     printed = plain(out.getvalue())
     check("a fetch that fails answers with a status a script can read",
           status == 1, str(status))
@@ -1430,7 +1516,8 @@ try:
             return None
 
     out = FakeTTY()
-    status = main.update_country_db(stream=out, fetch=Nonsense())
+    status = main.update_country_db(stream=out, fetch=Nonsense(), when=LATER,
+                                    ask=Published(LATER))
     check("a fetch that lands something unreadable is not a success",
           status == 1, str(status))
     check("and says which file it could not read",
