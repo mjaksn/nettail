@@ -2623,17 +2623,23 @@ Two more things are worth mounting. Your own static name mappings:
 and then `--hosts /etc/nettail/lan-hosts`. And a country database, if you want
 `--country`, which is a file you fetch rather than one this image could ship.
 The image can fetch it into the history volume, where it is found without
-being named:
+being named. Under the compose file:
 
 ```
 docker compose run --rm nettail --update-country-db
+```
+
+which uses whatever volume the compose file gave the service, so nothing has
+to name it. Under a plain `docker run` with the volume above, name the same
+volume:
+
+```
 docker run --rm -v nettail-history:/var/lib/nettail ghcr.io/mjaksn/nettail:latest --update-country-db
 ```
 
-The first is for the compose file, the second for a plain `docker run` with
-the volume above. Either fetches, says where the file went and exits, and
-running it again replaces the file with the current month's; restart the
-collector to read the new one. A detached container is never offered a
+Either fetches, says where the file went and exits, and running it again
+replaces the file with the current month's; restart the collector to read the
+new one. A detached container is never offered a
 database, since it has nobody to ask, so this command is how one arrives. Or
 mount a file you keep yourself:
 
