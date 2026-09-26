@@ -120,11 +120,13 @@ services:
       #- ./dbip-country-lite.mmdb:/etc/nettail/country.mmdb:ro
 
   # Fetches DB-IP's free country database into the history volume and exits,
-  # so that the collector above finds a current one when it starts. It runs
-  # whenever `docker compose up` starts the collector, and downloads only when
-  # DB-IP has published a newer build than the one already there; otherwise it
-  # says the file is current and leaves it. Docker restarting the collector on
-  # its own, after a crash or a reboot, does not run it again.
+  # so that the collector above finds a current one when it starts. It runs at
+  # every `docker compose up`, and downloads only when DB-IP has published a
+  # newer build than the one already there; otherwise it says the file is
+  # current and leaves it. A collector that was already running when it did
+  # download goes on with the file it loaded until it is restarted, and Docker
+  # restarting the collector on its own, after a crash or a reboot, does not
+  # run this again.
   #
   # Off unless uncommented, together with the depends_on block above and
   # `--country`. It can reach out to db-ip.com every time it runs, and nettail
