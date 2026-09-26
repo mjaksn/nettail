@@ -2630,7 +2630,12 @@ docker compose run --rm nettail --update-country-db
 ```
 
 which uses whatever volume the compose file gave the service, so nothing has
-to name it. Under a plain `docker run` with the volume above, name the same
+to name it. The compose file also carries a `country-db` service, commented
+out, that does the same at every `docker compose up` and holds the collector
+back until it has finished. Uncomment it together with the collector's
+`depends_on` block and `--country`. A fetch that fails still lets the collector
+start, with the database it already had or with none, and that service's logs
+say why. Under a plain `docker run` with the volume above, name the same
 volume:
 
 ```
