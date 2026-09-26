@@ -259,7 +259,7 @@ usage: nettail [-h] [--version] [--config FILE | --save-config [FILE]]
 | `--config FILE` | searched | Read settings from this file instead of looking for one. See [Settings file](#settings-file) |
 | `--save-config [FILE]` | `~/.nettail/nettail.conf` | Write what this run would have used to a file and exit without collecting anything |
 | `--bind BIND` | `0.0.0.0` | Address to bind the UDP socket to |
-| `--port PORT` | `2055` | UDP port to listen on |
+| `--port PORT` | `2055` | UDP port to listen on. `0` has the system pick a free one, and the startup line names the port it picked |
 | `--external-only` | off | Only display flows where the source or destination is a public IP. Everything is still counted in the summary |
 | `--names` | off | Show a host by its name in place of its address, where a name is known. The `n` key turns it off and on while running |
 | `--macs` | off | Show hardware addresses on a line under each flow, on the exporters that send them. The `p` key turns it off and on while running |
@@ -284,7 +284,7 @@ All off unless `--web` is given. See [The web interface](#the-web-interface).
 | Option | Default | Description |
 | --- | --- | --- |
 | `--web` | off | Also serve the display to a browser |
-| `--web-port PORT` | `2056` | Port for the web interface |
+| `--web-port PORT` | `2056` | Port for the web interface. `0` has the system pick a free one, and the printed URL names the port it picked |
 | `--web-bind ADDR` | `127.0.0.1` | Address for the web interface. Anything other than loopback exposes this network's traffic over cleartext HTTP, and is warned about at startup |
 | `--web-host NAME` | none | A name the view answers to. Under the loopback default it is added beside `localhost`; under another `--web-bind`, which otherwise answers to any name, it restricts the view to the names given. May be repeated |
 | `--web-colour WHEN` | `on` | Colour in the browser view: `on` or `off`. A browser is a colour-capable reader whatever stdout is, so a redirected run does not take the colour out of it. `--web-color` is accepted too |
