@@ -11,6 +11,19 @@ but it is a program rather than a library, and the names inside it may move
 without that being a breaking change. `--json` output is the part meant to be
 parsed, and it is treated as public.
 
+## [0.20.1] - 2026-09-27
+
+### Documentation
+
+- **The sample compose file shows how to choose the ports.** `--port` and
+  `--web-port` are in its command list, commented out at their defaults of
+  2055 and 2056. Under host networking those two entries are all it takes,
+  since the collector binds the host's own interfaces and nothing is
+  published; under bridge networking the `ports:` section has to follow them,
+  with the flow port as the container side of the UDP publish and the web
+  port the same number on both sides for the Host check. The compose file the
+  installer writes already passed both.
+
 ## [0.20.0] - 2026-09-26
 
 ### Changed
@@ -1230,6 +1243,7 @@ console: the part that decides what a flow should look like on a terminal.
   reminder line under the startup banner can be a pointer rather than a
   two-hundred-character list that wrapped and then scrolled away.
 
+[0.20.1]: https://github.com/mjaksn/nettail/releases/tag/v0.20.1
 [0.20.0]: https://github.com/mjaksn/nettail/releases/tag/v0.20.0
 [0.19.0]: https://github.com/mjaksn/nettail/releases/tag/v0.19.0
 [0.18.0]: https://github.com/mjaksn/nettail/releases/tag/v0.18.0
