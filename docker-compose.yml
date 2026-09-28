@@ -50,6 +50,17 @@ services:
     #  - "127.0.0.1:2056:2056"
 
     command:
+      # The UDP port flows arrive on and the TCP port the browser view is
+      # served on, 2055 and 2056 unless these say otherwise. Under host
+      # networking these are the whole of choosing a port, since the collector
+      # binds the host's own interfaces and nothing is published. Under bridge
+      # networking the ports section above has to follow them: the flow port
+      # as the container side of the UDP publish, and the web port as the same
+      # number on both sides, for the Host check.
+      #- --port
+      #- "2055"
+      #- --web-port
+      #- "2056"
       - --web
       # Loopback, not 0.0.0.0, because host networking means the host's own
       # loopback. This is the same guarantee the program gives outside a
