@@ -19,7 +19,7 @@ import queue
 
 from harness import check, finish, plain
 
-from nettail.cli import web_bind_warning, web_reach_note
+from nettail.cli import web_bind_warning, web_port_note, web_reach_note
 from nettail.feed import Feed
 from nettail.web import WebInterface, in_container, is_loopback
 
@@ -92,6 +92,18 @@ check("nor a container, where the published 127.0.0.1 is right as printed",
       web_reach_note("0.0.0.0", [], contained=True) is None)
 check("while a host with the same bind still gets it",
       web_reach_note("0.0.0.0", [], contained=False) is not None)
+
+# A request naming another port has two usual causes in either place: the
+# publish or the tunnel the line names, and a reverse proxy, which is mended
+# by --web-url rather than --web-port. A container sits behind a proxy as
+# easily as a host does, so both lines name the flag.
+for contained in (True, False):
+    said = plain(web_port_note(8443, 2056, contained=contained))
+    where = "in a container" if contained else "on a host"
+    check("the port note %s names --web-port to match" % where,
+          "--web-port 8443" in said, said)
+    check("and names --web-url for a reverse proxy %s" % where,
+          "--web-url" in said, said)
 
 # -- what the detection is not allowed to affect ---------------------------
 

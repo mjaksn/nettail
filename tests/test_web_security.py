@@ -33,9 +33,12 @@ from nettail.web import (
     is_loopback,
     origin_allowed,
     port_named,
+    public_host,
     split_host,
+    url_endpoint,
     web_host_arg,
     web_token_arg,
+    web_url_arg,
 )
 
 # -- the Host rule, on its own -------------------------------------------
@@ -283,6 +286,115 @@ check("a --web-host with a port stops the program at parse",
       bad_flag.returncode == 2, "exit %d" % bad_flag.returncode)
 check("and says which flag the port belongs to",
       "--web-port" in bad_flag.stderr, bad_flag.stderr[-200:])
+
+# -- the address a proxy is reached at ------------------------------------
+#
+# --web-url is stored as an origin, written the way a browser writes one,
+# because the Origin check compares it byte for byte: lowercased, the default
+# port dropped, an IPv6 literal bracketed, and no trailing slash.
+
+for given, stored in (("https://Flows.Example.com", "https://flows.example.com"),
+                      ("https://flows.example.com/", "https://flows.example.com"),
+                      ("HTTPS://flows.example.com:443", "https://flows.example.com"),
+                      ("http://flows.example.com:80/", "http://flows.example.com"),
+                      ("https://flows.example.com:8443",
+                       "https://flows.example.com:8443"),
+                      ("http://flows.lan:443", "http://flows.lan:443"),
+                      ("https://[FD00::1]:8443", "https://[fd00::1]:8443"),
+                      (" https://flows.example.com ", "https://flows.example.com")):
+    check("a web url %r is stored as %r" % (given, stored),
+          web_url_arg(given) == stored, repr(web_url_arg(given)))
+for bad, why in (("", "empty"), ("flows.example.com", "no scheme"),
+                 ("ftp://flows.example.com", "another scheme"),
+                 ("https://flows.example.com/nettail", "a path"),
+                 ("https://flows.example.com/?a=1", "a query"),
+                 ("https://flows.example.com/#top", "a fragment"),
+                 ("https://flows.example.com?", "an empty query"),
+                 ("https://user@flows.example.com", "a user name"),
+                 ("https://u:p@flows.example.com", "a password"),
+                 ("https://flows.example.com:zz", "a port that is not a number"),
+                 ("https://flows.example.com:0", "port zero"),
+                 ("https://flows.example.com:70000", "a port out of range"),
+                 ("https://", "no host"), ("https://*.example.com", "a pattern"),
+                 ("https://caf\xe9.example.com", "non-ascii")):
+    try:
+        web_url_arg(bad)
+        refused = False
+    except argparse.ArgumentTypeError:
+        refused = True
+    check("a web url is refused for %s" % why, refused, "%a" % bad)
+
+# The browser leaves the port out of Host when it is the proxy's default, and
+# a proxy passes the name on bare (nginx's $host) or as it found it. Both are
+# taken for the name --web-url gave; nothing else new is.
+PUBLIC = url_endpoint("https://flows.example.com")
+check("the endpoint of a portless https url is port 443",
+      PUBLIC == ("flows.example.com", 443), repr(PUBLIC))
+check("a bare Host naming the proxy's name is taken",
+      public_host("flows.example.com", PUBLIC) is True)
+check("and in any case", public_host("Flows.Example.COM", PUBLIC) is True)
+check("and with the default port written out",
+      public_host("flows.example.com:443", PUBLIC) is True)
+check("but not with some other port",
+      public_host("flows.example.com:2056", PUBLIC) is False)
+check("nor under another name", public_host("other.example.com", PUBLIC) is False)
+check("nor a name that merely starts with it",
+      public_host("flows.example.com.evil.example", PUBLIC) is False)
+check("nor with no --web-url at all",
+      public_host("flows.example.com", None) is False)
+check("nor with no Host at all", public_host(None, PUBLIC) is False)
+ODD = url_endpoint("https://flows.example.com:8443")
+check("a written port is the one meant", ODD == ("flows.example.com", 8443))
+check("and a Host carrying it is taken",
+      public_host("flows.example.com:8443", ODD) is True)
+check("as is the bare name a proxy reduced it to",
+      public_host("flows.example.com", ODD) is True)
+V6 = url_endpoint("https://[fd00::1]:8443")
+check("an IPv6 literal is taken bracketed",
+      public_host("[fd00::1]:8443", V6) is True)
+check("and is not taken unbracketed", public_host("fd00::1", V6) is False)
+
+# The Origin is the browser's, and the browser opened the proxy's address, so
+# the origin --web-url gave is the one https origin taken, and only exactly.
+ORIGIN = "https://flows.example.com"
+check("the proxy's origin is taken",
+      origin_allowed(ORIGIN, "127.0.0.1", 2056, (), None, ORIGIN) is True)
+check("and in the open case too",
+      origin_allowed(ORIGIN, "192.0.2.10", 2056, (), ANY, ORIGIN) is True)
+check("but not over plain http",
+      origin_allowed("http://flows.example.com", "127.0.0.1", 2056, (), None,
+                     ORIGIN) is False)
+check("nor with a port written in",
+      origin_allowed("https://flows.example.com:2056", "127.0.0.1", 2056, (),
+                     None, ORIGIN) is False)
+check("nor from another site",
+      origin_allowed("https://evil.example.com", "127.0.0.1", 2056, (), None,
+                     ORIGIN) is False)
+check("and an https origin is still refused with no --web-url",
+      origin_allowed(ORIGIN, "127.0.0.1", 2056, ("flows.example.com",))
+      is False)
+
+# Naming a proxy narrows a routable bind as --web-host does, so a view behind
+# one answers to its own address and that name rather than to anything.
+proxied = WebInterface(Feed(), queue.Queue(), set(), bind="0.0.0.0", port=2056,
+                       public="https://Flows.Example.com/")
+check("a routable bind behind a named proxy is restricted",
+      proxied.restricted is True)
+check("the proxy's name is among the view's names",
+      "flows.example.com" in proxied.hosts, repr(proxied.hosts))
+check("an origin given directly is reduced as the flag reduces it",
+      proxied.public == "https://flows.example.com", repr(proxied.public))
+check("and the printed url is the proxy's, with no port of this server's",
+      proxied.url == "https://flows.example.com/t/%s/" % proxied.token,
+      proxied.url)
+
+helped_url = "--web-url" in helped.stdout
+check("--web-url is in the help", helped_url)
+bad_url = subprocess.run([sys.executable, "-m", "nettail", "--web-url",
+                          "https://flows.example.com/nettail"],
+                         capture_output=True, text=True)
+check("a --web-url with a path stops the program at parse",
+      bad_url.returncode == 2, "exit %d" % bad_url.returncode)
 
 # -- the address a request is judged against ------------------------------
 #
@@ -760,6 +872,44 @@ try:
         check("so exactly one key was queued", named_keys.qsize() == 1)
     finally:
         named.stop(timeout=1.0)
+
+    # -- behind a proxy ---------------------------------------------------
+    #
+    # What a reverse proxy terminating TLS hands this server: the browser's
+    # own Host, which names the proxy and usually no port, and the browser's
+    # Origin, which says https. Each was refused before --web-url, the first
+    # as a 404 and the second as a 403 on every key press.
+    proxy_keys = queue.Queue(maxsize=8)
+    behind = WebInterface(Feed(), proxy_keys, {"e"}, bind="127.0.0.1", port=0,
+                          public="https://flows.example.com")
+    behind.start()
+    behind_url = "http://127.0.0.1:%d/t/%s/" % (behind.port, behind.token)
+    try:
+        check("the page is served under the proxy's bare name",
+              fetch(behind_url, host_header="flows.example.com") == 200)
+        check("and with its default port written in",
+              fetch(behind_url, host_header="flows.example.com:443") == 200)
+        check("and still to this machine directly",
+              fetch(behind_url, host_header="127.0.0.1:%d" % behind.port)
+              == 200)
+        check("but not under some other bare name",
+              fetch(behind_url, host_header="other.example.com") == 404)
+        check("nor without the token",
+              fetch("http://127.0.0.1:%d/t/%s/" % (behind.port, "x" * 32),
+                    host_header="flows.example.com") == 404)
+        body = json.dumps({"key": "e"}).encode("utf-8")
+        check("a key press from the proxy's https origin is accepted",
+              fetch(behind_url + "key", host_header="flows.example.com",
+                    method="POST", body=body,
+                    origin="https://flows.example.com") == 200)
+        check("and one from another https origin is not",
+              fetch(behind_url + "key", host_header="flows.example.com",
+                    method="POST", body=body,
+                    origin="https://evil.example.com") == 403)
+        check("so exactly one key was queued behind the proxy",
+              proxy_keys.qsize() == 1)
+    finally:
+        behind.stop(timeout=1.0)
 
     # -- the token --------------------------------------------------------
 

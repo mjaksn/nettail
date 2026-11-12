@@ -635,7 +635,8 @@ Nine things about it are easy to break and quiet when broken.
   False, and `http.server` decodes the request line as latin-1, so any byte at
   all arrives. That is the raise the guard above was added for.
 - **The `Host` check compares names under a loopback bind, and under a
-  routable bind only when `--web-host` gave some.** `hosts_restricted` is
+  routable bind only when `--web-host` or `--web-url` gave some.**
+  `hosts_restricted` is
   where that is decided, once per bind in `bind()` from the address that was
   bound, and never per connection: a wildcard bind answers the same way on
   every interface. Jupyter, Syncthing and Ollama each arrived at the same
@@ -650,6 +651,18 @@ Nine things about it are easy to break and quiet when broken.
   routable bind already answers to any name, and the flag is an allow-list,
   not a pattern. The names are kept in the order given rather than in a set,
   because the first one is what the printed URL uses.
+
+  `--web-url` is the one way past `split_host`'s rule about a missing port,
+  and it is a separate check, `public_host`, rather than a loosening of that
+  rule. Behind a proxy the browser leaves the port out because it is the
+  proxy's default and the proxy passes the name on bare, so the name it gave
+  is taken with no port or with its own, and no other name is taken without
+  this server's port. The origin it gave is held in the form a browser writes
+  one, by `web_url_arg`, and is the only https origin `origin_allowed` will
+  take, in either case. Its name also joins `hosts`, last, which is what
+  restricts a routable bind once a proxy is named. Nothing reads an
+  `X-Forwarded-` header and nothing should: anybody who reaches the port
+  directly can send one.
 - **A subscription and the `finally` that gives it back belong in the same
   `try`.** `wfile` is unbuffered, so writing the response headers can raise if
   the browser has already gone, and a subscription taken before that `try`

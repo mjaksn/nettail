@@ -96,6 +96,7 @@ from .web import (
     unpad,
     web_host_arg,
     web_token_arg,
+    web_url_arg,
 )
 
 
@@ -982,22 +983,27 @@ def web_port_note(asked, port, contained=None):
 
     A published port mapped to a different number is how this is nearly always
     reached, so in a container the line says so in those terms and hands over
-    the flag that fixes it. On a host the same mismatch means a proxy in front,
-    or a tunnel, and the same flag is still the answer, so the difference is
-    only in which arrangement is named.
+    the flag that fixes it. On a host the same mismatch means a tunnel or a
+    proxy in front. A tunnel that forwards bytes untouched is answered by the
+    same flag, but a reverse proxy is not: it connects to this port whatever
+    the browser named, and what it needs is `--web-url`. A container can sit
+    behind one as easily as a host can, so both lines name it, since nothing
+    here can tell a proxy from either of the other two.
 
     `contained` is for the tests. Left as None it asks the environment.
     """
     if contained is None:
         contained = in_container()
     where = ("a published port mapped to a different number on the host"
-             if contained else "a proxy or a tunnel in front of this")
+             if contained else "a tunnel in front of this")
+    proxy = (" Behind a reverse proxy, pass --web-url with the address the "
+             "browser opens instead.")
     return (f"{C.YELLOW}a request asked for port {asked} and this is "
             f"listening on {port}, so it was refused, and it was refused with "
             f"the same 404 a wrong token gets. {where.capitalize()} is the "
             f"usual reason. The port in the address bar has to be the port "
             f"this was told to serve, so pass --web-port {asked} to match, or "
-            f"move the other side to {port}. Said once.{C.RESET}")
+            f"move the other side to {port}.{proxy} Said once.{C.RESET}")
 
 
 def web_reach_note(bound_addr, hosts, contained=None):
@@ -1391,7 +1397,8 @@ def build_parser():
                          metavar="PORT",
                          help=f"port for the web interface (default "
                               f"{DEFAULT_WEB_PORT}; 0 picks a free one, which "
-                              f"the printed URL names)")
+                              f"the printed URL names unless --web-url gave "
+                              f"it)")
     web_grp.add_argument("--web-bind", default="127.0.0.1", metavar="ADDR",
                          help="address for the web interface (default "
                               "127.0.0.1, and anything else exposes this "
@@ -1403,6 +1410,16 @@ def build_parser():
                               "another --web-bind, which otherwise answers to "
                               "any name, it restricts the view to the names "
                               "given. May be repeated")
+    web_grp.add_argument("--web-url", type=web_url_arg, default=None,
+                         metavar="URL",
+                         help="the address a browser opens when a reverse "
+                              "proxy stands in front of the view, such as "
+                              "https://flows.example.com. The view answers to "
+                              "that name with or without a port and takes "
+                              "key presses from that origin, the printed URL "
+                              "becomes it, and the name narrows the view as "
+                              "--web-host does. The proxy serves the view "
+                              "from the root of that name")
     web_grp.add_argument("--web-token", type=web_token_arg, default=None,
                          metavar="TOKEN",
                          help="use this token in the URL instead of a fresh "
@@ -2153,7 +2170,7 @@ def main():
         web = WebInterface(bus, key_queue, web_keyset, bind=args.web_bind,
                            port=args.web_port, token=args.web_token,
                            readonly=args.web_readonly, hosts=args.web_host,
-                           asks=ask_queue,
+                           public=args.web_url, asks=ask_queue,
                            # Only with a store to answer from. The queue is
                            # what tells the server there is one, and handed
                            # over regardless it advertised a replay and a
@@ -2211,7 +2228,9 @@ def main():
               f"{C.RESET}", file=out)
         if web_url:
             print(f"{C.BOLD}Web interface: {web_url}{C.RESET}", file=out)
-            reach = web_reach_note(web.bound_addr, args.web_host)
+            # The server's names rather than the flag's, since a name from
+            # --web-url is among them and is what the URL carries then.
+            reach = web_reach_note(web.bound_addr, web.hosts)
             if reach:
                 print(f"{C.GREY}{reach}{C.RESET}", file=out)
             if qr_key:

@@ -241,13 +241,13 @@ usage: nettail [-h] [--version] [--config FILE | --save-config [FILE]]
                [--colour WHEN] [--no-color] [--header-every HEADER_EVERY]
                [--sticky-header] [--hide-status] [--no-supplemental-services]
                [--web] [--web-port PORT] [--web-bind ADDR] [--web-host NAME]
-               [--web-token TOKEN] [--web-colour WHEN] [--web-readonly]
-               [--web-detail-refresh SECONDS] [--size-scale-max BYTES |
-               --size-scale-dynamic] [--size-scale-window FLOWS] [--country]
-               [--country-db FILE] [--update-country-db]
-               [--country-style {auto,flag,code}] [--resolve {off,dns,all}]
-               [--hosts FILE] [--resolve-public] [--fqdn]
-               [--resolve-workers RESOLVE_WORKERS]
+               [--web-url URL] [--web-token TOKEN] [--web-colour WHEN]
+               [--web-readonly] [--web-detail-refresh SECONDS]
+               [--size-scale-max BYTES | --size-scale-dynamic]
+               [--size-scale-window FLOWS] [--country] [--country-db FILE]
+               [--update-country-db] [--country-style {auto,flag,code}]
+               [--resolve {off,dns,all}] [--hosts FILE] [--resolve-public]
+               [--fqdn] [--resolve-workers RESOLVE_WORKERS]
                [--resolve-timeout RESOLVE_TIMEOUT]
 ```
 
@@ -284,9 +284,10 @@ All off unless `--web` is given. See [The web interface](#the-web-interface).
 | Option | Default | Description |
 | --- | --- | --- |
 | `--web` | off | Also serve the display to a browser |
-| `--web-port PORT` | `2056` | Port for the web interface. `0` has the system pick a free one, and the printed URL names the port it picked |
+| `--web-port PORT` | `2056` | Port for the web interface. `0` has the system pick a free one, and the printed URL names the port it picked unless `--web-url` gave the URL |
 | `--web-bind ADDR` | `127.0.0.1` | Address for the web interface. Anything other than loopback exposes this network's traffic over cleartext HTTP, and is warned about at startup |
 | `--web-host NAME` | none | A name the view answers to. Under the loopback default it is added beside `localhost`; under another `--web-bind`, which otherwise answers to any name, it restricts the view to the names given. May be repeated |
+| `--web-url URL` | none | The address a browser opens when a reverse proxy stands in front of the view, such as `https://flows.example.com`. The view answers to that name with or without a port and takes key presses from that origin, the printed URL becomes it, and the name narrows the view as `--web-host` does. The proxy serves the view from the root of that name. See [Behind a reverse proxy](#behind-a-reverse-proxy) |
 | `--web-colour WHEN` | `on` | Colour in the browser view: `on` or `off`. A browser is a colour-capable reader whatever stdout is, so a redirected run does not take the colour out of it. `--web-color` is accepted too |
 | `--web-token TOKEN` | random | Use this token in the URL instead of a fresh random one, so a bookmark survives a restart. Taken from `NETTAIL_WEB_TOKEN` in the environment when the flag is not given, which is how an installed service receives one without it appearing in `ps` |
 | `--web-readonly` | off | Serve the display but accept no keys from the browser |
@@ -1304,7 +1305,7 @@ resolution to active mDNS and NetBIOS probing. Treat the URL as a password.
 - The `Host` header is checked on every request, which is what stops a web page
   you happen to have open from reaching it by rebinding a name to `127.0.0.1`.
   Under this bind the view answers to its address, to `localhost`, and to no
-  other name unless `--web-host` gave it.
+  other name unless `--web-host` or `--web-url` gave it.
 - The page loads nothing from anywhere and is served under a content security
   policy that names the hashes of its own script and style.
 - Hostnames off the wire are shown as text and never as markup, which matters
@@ -1341,6 +1342,47 @@ says to put this machine's address or name in its place from elsewhere.
 There is no TLS and no login. If you want it reachable from elsewhere, put it
 behind something that provides both, and bind it to loopback so that thing is
 the only way in.
+
+### Behind a reverse proxy
+
+A proxy that terminates TLS changes two things the view checks. The browser
+names the proxy's address in its `Host` header, usually with no port, and its
+`Origin` says `https`. Left to itself the view refuses the first with the same
+404 a wrong token gets and the second with a 403 on every key press, so the
+page either never loads or loads and takes no keys. `--web-url` tells it the
+address the browser opens:
+
+```
+nettail --web --web-url https://flows.example.com
+```
+
+The view then answers to that name with no port or with the URL's own, takes
+key presses from exactly that origin, and prints that address with the token
+on the end. The name narrows the view as `--web-host` does, so under a
+routable `--web-bind` it answers to its own address and that name rather than
+to any name at all. Nothing from an `X-Forwarded-` header is read: anybody who
+can reach the port directly can send one.
+
+The proxy has to serve the view from the root of a name of its own, since the
+routes start at `/t/`, and has to pass the event stream through unbuffered.
+The view asks nginx for that itself with `X-Accel-Buffering`, and sends a
+heartbeat every fifteen seconds, inside the read timeout any proxy is likely
+to have. No websocket support is needed.
+
+In Nginx Proxy Manager that is a proxy host for the name, forwarding over
+`http` to the address and port the view is bound to, with a certificate on
+the SSL tab and nothing on the Advanced tab. The forward address has to be one
+the proxy's container can reach. Under the compose file's host networking the
+default `127.0.0.1` is the host's loopback, which a proxy in a container of
+its own cannot reach, so bind the view to the gateway of the proxy's Docker
+network instead and forward to that:
+
+```
+docker network inspect <proxy-network> -f '{{(index .IPAM.Config 0).Gateway}}'
+```
+
+The token is in the URL, so pin it with `NETTAIL_WEB_TOKEN` or a restart
+prints an address the bookmark no longer matches.
 
 ### With `--json`
 
@@ -2609,10 +2651,11 @@ docker run -d --name nettail --restart unless-stopped \
 ```
 
 Publishing `9000:2056` and leaving the collector on its default does not work
-and cannot be made to, short of a proxy that rewrites the header. The same
-applies outside Docker: anything in front of this that changes the port, a
-tunnel or a reverse proxy included, needs `--web-port` set to the port the
-browser will actually name.
+and cannot be made to. The same applies outside Docker: a tunnel in front of
+this that changes the port needs `--web-port` set to the port the browser will
+actually name. A reverse proxy is the exception, because it connects to this
+port whatever the browser named, and what it needs is `--web-url`; see [Behind
+a reverse proxy](#behind-a-reverse-proxy).
 
 ### What it does and does not carry
 
@@ -2850,12 +2893,14 @@ exit summary to see which sources are producing hits.
 
 The token is right and the page is still a 404. A wrong token and a refused
 `Host` header get the same 404 on purpose, so nothing at your end says which
-it was. The `Host` check refuses a request in three cases: the collector is on
+it was. The `Host` check refuses a request in four cases: the collector is on
 its loopback default, which no other machine reaches anyway; `--web-host` was
-given and the name in the address bar is not on it; or the port in the address
+given and the name in the address bar is not on it; the port in the address
 bar is not `--web-port`, which happens behind a port forward or a Docker
-publish that maps one port to another. Under a routable `--web-bind` with no
-`--web-host`, any name works. See [The web interface](#the-web-interface).
+publish that maps one port to another; or a reverse proxy is in front and
+`--web-url` does not name the address the browser opened. Under a routable
+`--web-bind` with no `--web-host` and no `--web-url`, any name works. See [The
+web interface](#the-web-interface).
 
 ### `unsupported_version` climbing
 

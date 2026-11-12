@@ -240,6 +240,9 @@ def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
             self.url = "http://127.0.0.1:2056/t/test-token/"
             self.asked_for = kw.get("bind", "127.0.0.1")
             self.bound_addr = self.asked_for
+            # The names the banner's reach note is asked about, which the
+            # real server holds with the name from --web-url among them.
+            self.hosts = tuple(kw.get("hosts", ()))
             self.stopped = False
             self.serving = False
             self.port_notice = None

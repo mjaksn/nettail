@@ -75,6 +75,15 @@ services:
       # Either way the printed URL carries the first.
       #- --web-host
       #- z2m
+      # The address a browser opens when a reverse proxy, such as Nginx Proxy
+      # Manager, stands in front of the view and terminates TLS. It is what
+      # lets the view take the proxy's name without a port and key presses
+      # from an https page, and the printed URL becomes it. A proxy in a
+      # container of its own cannot reach the host's loopback, so change
+      # --web-bind above to the gateway of the proxy's Docker network and
+      # forward to that. See "Behind a reverse proxy" in the README.
+      #- --web-url
+      #- https://flows.example.com
       # Serve the display but accept no keys from the browser.
       #- --web-readonly
       # Only flows that touch the internet, which is usually what is wanted.
