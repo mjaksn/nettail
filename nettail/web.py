@@ -449,29 +449,42 @@ def origin_allowed(origin, local_addr, port, names=(), host=None, public=None):
     """
     if not origin or not origin.isascii():
         return False
-    if public is not None and hmac.compare_digest(origin, public):
-        return True
+    for candidate in origin_candidates(local_addr, port, names, host, public):
+        if hmac.compare_digest(origin, candidate):
+            return True
+    return False
+
+
+def origin_candidates(local_addr, port, names=(), host=None, public=None):
+    """Every origin `origin_allowed` takes, in the order it tries them.
+
+    A function of its own so that the check and the line explaining a refusal
+    of it read the one list: a note that described the rule in other words
+    would be a second statement of it, free to drift from what is enforced.
+    A `host` that is not ascii gives no candidate, for the reason the ascii
+    check on an origin exists, and every other candidate is ascii already:
+    an address, `localhost`, and names `web_host_arg` and `web_url_arg` have
+    been through.
+    """
+    candidates = [public] if public is not None else []
     if host is not None:
         if not host.isascii():
-            return False
+            return candidates
         host = host.strip()
-        candidates = ["http://%s" % host]
+        candidates.append("http://%s" % host)
         if port == 80 and host.endswith(":80"):
             # A browser leaves the default port out of an Origin even when
             # the Host it sent spelt it out.
             candidates.append("http://%s" % host[:-3])
     else:
-        candidates = ["http://%s:%d" % (local_addr, port),
-                      "http://localhost:%d" % port]
+        candidates += ["http://%s:%d" % (local_addr, port),
+                       "http://localhost:%d" % port]
         candidates += ["http://%s:%d" % (in_url(name), port)
                        for name in names]
         if port == 80:
             candidates += ["http://%s" % local_addr, "http://localhost"]
             candidates += ["http://%s" % in_url(name) for name in names]
-    for candidate in candidates:
-        if hmac.compare_digest(origin, candidate):
-            return True
-    return False
+    return candidates
 
 
 def in_url(name):
@@ -1350,8 +1363,19 @@ class _Handler(BaseHTTPRequestHandler):
         # In the open case the origin is held to the name this request
         # carried; otherwise to the address and the names, as the Host was.
         host = None if self.site.restricted else self.headers.get("Host")
-        return origin_allowed(origin, self._local_addr(), self.site.port,
-                              self.site.hosts, host, self.site.public)
+        local = self._local_addr()
+        if origin_allowed(origin, local, self.site.port, self.site.hosts,
+                          host, self.site.public):
+            return True
+        # Refused with the same three words whatever the reason, and the
+        # browser is told nothing more. The reader at the terminal is told
+        # the rest, out of band and by the receive loop, as a refused port
+        # is: what was sent, and what would have been taken instead.
+        self.site.origin_notice = (
+            origin, host,
+            origin_candidates(local, self.site.port, self.site.hosts, host,
+                              self.site.public))
+        return False
 
 
 class _Server(ThreadingHTTPServer):
@@ -1454,6 +1478,12 @@ class WebInterface:
         # and would be more than this needs, because the newest value is as
         # good as the oldest and only one of them is ever reported.
         self.port_notice = None
+        # The same arrangement for a refused `Origin`: the origin sent, the
+        # `Host` it was judged against in the open case and None otherwise,
+        # and the origins that would have been taken. One tuple assigned
+        # whole, so the receive loop never reads half of one refusal and half
+        # of the next.
+        self.origin_notice = None
         self._httpd = None
         self._thread = None
 

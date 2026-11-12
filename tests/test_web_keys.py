@@ -71,7 +71,8 @@ check("the terminal listing still shows every key, browser or not",
 
 
 def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
-        keyboard=None, presses=(), window=None, port_notices=(), asks=(),
+        keyboard=None, presses=(), window=None, port_notices=(),
+        origin_notices=(), asks=(),
         filters=(), restore_after=None, history_before=None,
         history_term=""):
     """Drive main() with keys arriving as if from a browser.
@@ -107,6 +108,9 @@ def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
     request whose Host named another port, which cannot be made to arrive
     here: the fake interface answers nothing.
 
+    `origin_notices` are the same for a refused `Origin`, as (after_n_polls,
+    (origin, host, candidates)), the tuple the request thread would assign.
+
     `window` is a (columns, lines) pair to run with, set through the two
     environment variables `shutil.get_terminal_size` reads before it asks the
     operating system anything. A suite has no terminal, so anything that
@@ -134,6 +138,7 @@ def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
     asked = list(asks)
     filtering = list(filters)
     noticed = list(port_notices)
+    refusals = list(origin_notices)
     waiting = list(packets)
     seen = {}
 
@@ -173,6 +178,10 @@ def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
                 if note[0] <= FakeSocket.calls:
                     noticed.remove(note)
                     seen["site"].port_notice = note[1]
+            for refusal in list(refusals):
+                if refusal[0] <= FakeSocket.calls:
+                    refusals.remove(refusal)
+                    seen["site"].origin_notice = refusal[1]
             if gap is not None:
                 bus = seen["site"].bus
                 if FakeSocket.calls == gap[0] - 1:
@@ -246,6 +255,8 @@ def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
             self.stopped = False
             self.serving = False
             self.port_notice = None
+            self.origin_notice = None
+            self.public = kw.get("public")
             # The third, where a tab back from the background asks for the
             # flows it missed and a tab scrolling up asks for older ones. The
             # receive loop answers both from the store, which is that
@@ -494,6 +505,33 @@ check("and it is the first of them that is reported",
 result = run([], [v5_packet(0)] * 4)
 check("a run nothing was refused in says nothing",
       "asked for port" not in plain(result["err"]))
+check("about an origin either", "Origin" not in plain(result["err"]))
+
+# A refused Origin is reported the same way and for the same reason: the
+# browser is told "bad origin" and nothing more, and the reader at the
+# terminal is told what was sent and what would have been taken, once. The
+# case that prompted it is a proxy whose Host and Origin disagree, so the
+# open case, with the Host the origin was judged against, is the one driven.
+PROXY_REFUSAL = ("http://ha-sup:2056", "nettail.example.com:2056",
+                 ["http://nettail.example.com:2056"])
+result = run([], [v5_packet(0)] * 8,
+             origin_notices=[(2, PROXY_REFUSAL), (4, PROXY_REFUSAL),
+                             (6, ("http://later:2056", None, []))])
+err = plain(result["err"])
+check("a refused origin is reported on stderr",
+      "its Origin, http://ha-sup:2056," in err, repr(err[-400:]))
+check("naming the origin that would have been taken",
+      "It takes http://nettail.example.com:2056." in err)
+check("and the Host it was judged against",
+      "which was nettail.example.com:2056" in err)
+check("and the flag for a proxy, with none given", "--web-url" in err)
+check("three refusals are reported once",
+      err.count("was refused with 403") == 1,
+      str(err.count("was refused with 403")))
+check("and it is the first", "later" not in err)
+check("nothing about it reaches stdout", "ha-sup" not in result["out"])
+check("nor the browser, which was told bad origin and nothing else",
+      not any("ha-sup" in text for _kind, text in result["prose"]))
 
 
 # -- and pressing it draws the symbol, on the terminal only --------------

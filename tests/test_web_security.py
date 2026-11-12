@@ -20,8 +20,9 @@ import time
 import urllib.error
 import urllib.request
 
-from harness import check, finish
+from harness import check, finish, plain
 
+from nettail.cli import web_origin_note, wire_text
 from nettail.feed import Feed
 from nettail.web import (
     REQUEST_TIMEOUT,
@@ -32,6 +33,7 @@ from nettail.web import (
     hosts_restricted,
     is_loopback,
     origin_allowed,
+    origin_candidates,
     port_named,
     public_host,
     split_host,
@@ -373,6 +375,52 @@ check("nor from another site",
 check("and an https origin is still refused with no --web-url",
       origin_allowed(ORIGIN, "127.0.0.1", 2056, ("flows.example.com",))
       is False)
+
+# The note explaining a refusal lists origin_candidates, so every one of them
+# has to be an origin the check takes, or the note would advise something
+# that is then refused as well.
+for args in (("127.0.0.1", 2056, (), None, None),
+             ("192.0.2.10", 2056, NAMES, None, ORIGIN),
+             ("192.0.2.10", 80, NAMES, None, None),
+             ("192.0.2.10", 2056, (), ANY, ORIGIN),
+             ("192.0.2.10", 80, (), "anything.example:80", None)):
+    listed = origin_candidates(*args)
+    check("every origin listed for %r is taken" % (args,),
+          listed and all(origin_allowed(o, *args) for o in listed), repr(listed))
+check("a non-ascii Host lists no origin of its own",
+      origin_candidates("192.0.2.10", 2056, (), "café:2056", None) == [])
+
+# What the note does with text off the wire. A header is whatever whoever
+# reached the port sent, so nothing in it may reach the terminal as a control
+# sequence, and its length is bounded.
+check("printable ascii is shown as sent",
+      wire_text("http://ha-sup:2056") == "http://ha-sup:2056")
+check("an escape is not", "" not in wire_text("http://a]0;xb"))
+check("nor anything past ascii", wire_text("http://café") == "http://caf?")
+check("a long header is cut short", len(wire_text("a" * 1000)) < 130)
+check("a missing Host is said to be missing", wire_text(None) == "(none)")
+
+note = web_origin_note("http://ha-sup:2056", "nettail.example.com:2056",
+                       ["http://nettail.example.com:2056"])
+check("the note names the origin sent and the one taken",
+      "http://ha-sup:2056" in note
+      and "It takes http://nettail.example.com:2056." in note, note)
+check("and, in the open case, the Host they had to agree with",
+      "which was nettail.example.com:2056" in note, note)
+check("and points at --web-url when none was given", "--web-url" in note)
+restricted_note = web_origin_note("https://evil.example.com", None,
+                                  ["https://flows.example.com"],
+                                  public="https://flows.example.com")
+check("a restricted view's note names no Host",
+      "Host, which was" not in restricted_note, restricted_note)
+check("and one already behind --web-url does not suggest it again",
+      "pass --web-url" not in restricted_note, restricted_note)
+hostile = web_origin_note("http://x[2J", "y[H:2056", ["http://z"])
+# The note's own colour is SGR and is taken out first; what is left must hold
+# no escape and no bell, since every one of those came from the request.
+bare = plain(hostile)
+check("nothing from the request reaches the terminal as a control",
+      "" not in bare and "" not in bare, "%a" % bare)
 
 # Naming a proxy narrows a routable bind as --web-host does, so a view behind
 # one answers to its own address and that name rather than to anything.
@@ -908,6 +956,22 @@ try:
                     origin="https://evil.example.com") == 403)
         check("so exactly one key was queued behind the proxy",
               proxy_keys.qsize() == 1)
+
+        # The refusal leaves the receive loop what it needs to explain it,
+        # and an accepted request leaves nothing. Loopback is restricted, so
+        # there is no Host to have been judged against.
+        refused = behind.origin_notice
+        check("a refused origin is noted for the receive loop",
+              refused is not None and refused[0] == "https://evil.example.com"
+              and refused[1] is None, repr(refused))
+        check("with the origins that would have been taken, the proxy's first",
+              refused is not None
+              and refused[2][0] == "https://flows.example.com", repr(refused))
+        behind.origin_notice = None
+        fetch(behind_url + "key", host_header="flows.example.com",
+              method="POST", body=body, origin="https://flows.example.com")
+        check("and an accepted one notes nothing",
+              behind.origin_notice is None, repr(behind.origin_notice))
     finally:
         behind.stop(timeout=1.0)
 

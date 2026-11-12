@@ -1006,6 +1006,54 @@ def web_port_note(asked, port, contained=None):
             f"move the other side to {port}.{proxy} Said once.{C.RESET}")
 
 
+def wire_text(text, limit=120):
+    """Text a request sent, made fit to print on this terminal.
+
+    A header is whatever whoever reached the port chose to send, decoded as
+    latin-1, so it may hold an escape sequence that would move the cursor or
+    retitle the window. Everything outside printable ascii is shown as a
+    question mark, and the length is bounded so a header cannot fill the
+    screen. The line it goes into is said once a run, which bounds the rest.
+    """
+    if text is None:
+        return "(none)"
+    shown = "".join(ch if " " <= ch <= "~" else "?" for ch in text)
+    if len(shown) > limit:
+        shown = shown[:limit] + "..."
+    return shown
+
+
+def web_origin_note(origin, host, candidates, public=None):
+    """What to say when a page's request was refused for its `Origin`.
+
+    The browser is told "bad origin" and nothing else, for the reason a
+    refused `Host` gets the bare 404. The reader at the terminal is owed the
+    rest, because the ordinary way to arrive here is a proxy in front whose
+    `Host` and `Origin` disagree, and that is invisible from either end: both
+    tabs of a page send the same origin, and only the one through the proxy
+    is refused. So this names what was sent and what would have been taken,
+    which are the two things that have to be compared to see it.
+
+    `host` is the `Host` the origin was judged against, which is only the
+    case when the view answers to any name, and None otherwise. Every value
+    from the request goes through `wire_text` on its way out.
+    """
+    taken = ", ".join(wire_text(c) for c in candidates) or "none"
+    line = (f"{C.YELLOW}a request from a browser page was refused with 403 "
+            f"because its Origin, {wire_text(origin)}, is not one this view "
+            f"takes. It takes {taken}.")
+    if host is not None:
+        line += (f" This view answers to whatever name a request carries, so "
+                 f"the origin has to name the same host and port as the "
+                 f"request's own Host, which was {wire_text(host)}. Behind a "
+                 f"proxy, the Host it sends and the Origin it passes on have "
+                 f"to agree.")
+    if public is None:
+        line += (" Behind a reverse proxy, pass --web-url with the address "
+                 "the browser opens.")
+    return line + f" Said once.{C.RESET}"
+
+
 def web_reach_note(bound_addr, hosts, contained=None):
     """What to say about reaching the view from another machine, or None.
 
@@ -1981,10 +2029,11 @@ def main():
         return snapshot(stats, tally, resolver, sequences, sampling, scale,
                         args, controls, rates)
 
-    # Whether the port mismatch above has been reported. In a one element list
-    # for the reason `shown_flows` below is: the receive loop writes it and it
-    # is read in the same nested scope.
+    # Whether the port mismatch above has been reported, and whether a refused
+    # origin has. In one element lists for the reason `shown_flows` below is:
+    # the receive loop writes them and they are read in the same nested scope.
     port_told = [False]
+    origin_told = [False]
 
     # Flows that have passed the display filter. In a one element list rather
     # than a bare integer because `web_status` below reads it and the receive
@@ -2613,6 +2662,12 @@ def main():
                 if not port_told[0]:
                     port_told[0] = True
                     print(web_port_note(asked, web.port), file=sys.stderr)
+            if web is not None and web.origin_notice is not None:
+                refused, web.origin_notice = web.origin_notice, None
+                if not origin_told[0]:
+                    origin_told[0] = True
+                    print(web_origin_note(*refused, public=web.public),
+                          file=sys.stderr)
             if controls.quit:
                 break
             if not controls.paused and controls.held:
