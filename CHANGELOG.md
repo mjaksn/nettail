@@ -11,6 +11,64 @@ but it is a program rather than a library, and the names inside it may move
 without that being a breaking change. `--json` output is the part meant to be
 parsed, and it is treated as public.
 
+## [0.21.0] - 2026-11-12
+
+### Added
+
+- **`--web-url` puts the browser view behind a reverse proxy.** Give it the
+  address a browser opens through a proxy that terminates TLS, such as Nginx
+  Proxy Manager, and the view answers to that name with no port or with the
+  URL's own, takes requests from exactly that origin, https included, and
+  prints that address with the token on the end. Nothing is needed on the
+  proxy beyond an ordinary proxy host. Before this the page either never
+  loaded through one, because the proxy's `Host` named no port, or loaded and
+  took no keys, because its `Origin` said https. The name narrows a routable
+  bind to the view's own address and the names given, as `--web-host` does,
+  and no `X-Forwarded-` header is read. The address is stored the way a
+  browser writes an origin, and one a browser would open as some other
+  address is refused at startup with the reason: a path, a trailing dot, a
+  numeric host in any spelling but four plain decimal parts, brackets round
+  anything but an IPv6 address, or a character a browser drops from a host.
+- **A request refused for its `Origin` is explained on stderr.** The browser
+  is still told only `bad origin`. The first refusal of a run names the
+  route, the origin that was sent and the origins that would have been taken,
+  and where the view answers to any name, the `Host` the origin had to agree
+  with, which is how a proxy rewriting the two to different names shows up.
+  Later refusals get a line each, up to five every ten seconds, and the rest
+  are counted, because the token a refusal needs is also held by a
+  `--web-readonly` watcher.
+
+### Changed
+
+- **A specific `--web-bind` address in a container gets a warning of its
+  own.** Under host networking such an address is one of the host's, with
+  nothing published in front of it, so the line now says that every container
+  on the host can reach the view there with only the token to stop it, rather
+  than that a publish settles what is exposed. A wildcard bind keeps the quiet
+  line it had.
+- **The note about a request for the wrong port names `--web-url`** as the
+  answer behind a reverse proxy, beside `--web-port` for a tunnel or a
+  publish. With `--web-url` already given it says the flag may not match the
+  address the browser opened.
+
+### Fixed
+
+- **A view bound to an IPv6 address took no key presses from a page opened
+  by that address once it compared names.** The origin it accepted for its
+  own address was written without brackets, which no browser sends. It
+  compared names under a `--web-host` before and does under a `--web-url`
+  now, which is how this was found.
+
+### Documentation
+
+- **The README has a section on running behind a reverse proxy**, with what
+  Nginx Proxy Manager needs and what a bind to a Docker network's gateway
+  exposes, and a troubleshooting entry for key presses answered `bad origin`.
+  The compose file carries a commented `--web-url` example. Prose elsewhere
+  that had fallen behind the code was brought up to date: the browser view's
+  routes, which the security notes counted as six when scrolling back in time
+  had made seven, the `k` key, and the history route.
+
 ## [0.20.1] - 2026-09-27
 
 ### Documentation
@@ -1243,6 +1301,7 @@ console: the part that decides what a flow should look like on a terminal.
   reminder line under the startup banner can be a pointer rather than a
   two-hundred-character list that wrapped and then scrolled away.
 
+[0.21.0]: https://github.com/mjaksn/nettail/releases/tag/v0.21.0
 [0.20.1]: https://github.com/mjaksn/nettail/releases/tag/v0.20.1
 [0.20.0]: https://github.com/mjaksn/nettail/releases/tag/v0.20.0
 [0.19.0]: https://github.com/mjaksn/nettail/releases/tag/v0.19.0
