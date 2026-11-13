@@ -2906,14 +2906,16 @@ web interface](#the-web-interface).
 
 The page loads and every key press, click on a row and filter is answered
 `bad origin`. The browser's `Origin` header named a site the view does not
-take, and the collector says which on stderr the first time it happens,
-naming the origin that was sent and the ones that would have been taken.
-Behind a reverse proxy that is nearly always one of two things: the page is
-served over `https` and `--web-url` was not given, or the proxy rewrites the
-`Host` and `Origin` headers to names that disagree. Under a routable
-`--web-bind` with no `--web-host` and no `--web-url`, the origin has to name
-the same host and port as the `Host` header that request arrived with. See
-[Behind a reverse proxy](#behind-a-reverse-proxy).
+take. The collector says which on stderr: the first refusal in full, naming
+the route, the origin that was sent and the ones that would have been taken,
+and every one after it in a single line, since a page with a details dialog
+open asks again on its own every few seconds. Behind a reverse proxy that is
+nearly always one of two things: the page is served over `https` and
+`--web-url` was not given, or the proxy rewrites the `Host` and `Origin`
+headers to names that disagree. Under a routable `--web-bind` with no
+`--web-host` and no `--web-url`, the origin has to name the same host and port
+as the `Host` header that request arrived with. See [Behind a reverse
+proxy](#behind-a-reverse-proxy).
 
 ### `unsupported_version` climbing
 

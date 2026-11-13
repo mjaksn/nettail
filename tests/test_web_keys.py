@@ -109,7 +109,9 @@ def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
     here: the fake interface answers nothing.
 
     `origin_notices` are the same for a refused `Origin`, as (after_n_polls,
-    (origin, host, candidates)), the tuple the request thread would assign.
+    (origin, host, candidates, route)), the record a request thread would
+    leave, and an (after_n_polls, count) pair in place of the record stands
+    for that many refusals that did not fit the queue.
 
     `window` is a (columns, lines) pair to run with, set through the two
     environment variables `shutil.get_terminal_size` reads before it asks the
@@ -181,7 +183,10 @@ def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
             for refusal in list(refusals):
                 if refusal[0] <= FakeSocket.calls:
                     refusals.remove(refusal)
-                    seen["site"].origin_notice = refusal[1]
+                    if isinstance(refusal[1], int):
+                        seen["site"].origins_unkept += refusal[1]
+                    else:
+                        seen["site"].origin_notices.append(refusal[1])
             if gap is not None:
                 bus = seen["site"].bus
                 if FakeSocket.calls == gap[0] - 1:
@@ -255,7 +260,8 @@ def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
             self.stopped = False
             self.serving = False
             self.port_notice = None
-            self.origin_notice = None
+            self.origin_notices = []
+            self.origins_unkept = 0
             self.public = kw.get("public")
             # The third, where a tab back from the background asks for the
             # flows it missed and a tab scrolling up asks for older ones. The
@@ -264,6 +270,11 @@ def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
             self.lookups = kw.get("lookups")
             self.store_enabled = self.lookups is not None
             seen["site"] = self
+
+        def take_origin_notices(self):
+            taken, self.origin_notices = self.origin_notices, []
+            unkept, self.origins_unkept = self.origins_unkept, 0
+            return taken, unkept
 
         # Bound and serving are two steps for a reason: the greeting has to be
         # set between them, so a browser can never arrive before there is one.
@@ -505,30 +516,43 @@ check("and it is the first of them that is reported",
 result = run([], [v5_packet(0)] * 4)
 check("a run nothing was refused in says nothing",
       "asked for port" not in plain(result["err"]))
-check("about an origin either", "Origin" not in plain(result["err"]))
+check("about an origin either",
+      "Origin" not in plain(result["err"])
+      and "refused origin" not in plain(result["err"]))
 
-# A refused Origin is reported the same way and for the same reason: the
-# browser is told "bad origin" and nothing more, and the reader at the
-# terminal is told what was sent and what would have been taken, once. The
-# case that prompted it is a proxy whose Host and Origin disagree, so the
-# open case, with the Host the origin was judged against, is the one driven.
+# A refused Origin is reported on stderr as a refused port is, and unlike
+# the port it is reported every time: a request is only refused for its origin
+# once it has shown the token, so nobody without the URL can write here. The
+# first is explained in full, with what was sent and what would have been
+# taken; each after it is one line, since a page behind a broken proxy asks
+# again on its own every few seconds. The case that prompted it is a proxy
+# whose Host and Origin disagree, so the open case, with the Host the origin
+# was judged against, is the one driven.
 PROXY_REFUSAL = ("http://ha-sup:2056", "nettail.example.com:2056",
-                 ["http://nettail.example.com:2056"])
-result = run([], [v5_packet(0)] * 8,
+                 ["http://nettail.example.com:2056"], "key")
+result = run([], [v5_packet(0)] * 10,
              origin_notices=[(2, PROXY_REFUSAL), (4, PROXY_REFUSAL),
-                             (6, ("http://later:2056", None, []))])
+                             (6, ("http://later:2056", None, [], "detail")),
+                             (8, 5)])
 err = plain(result["err"])
 check("a refused origin is reported on stderr",
-      "its Origin, http://ha-sup:2056," in err, repr(err[-400:]))
+      "its Origin, http://ha-sup:2056," in err, repr(err[-600:]))
+check("with the route it was refused on", "to /key was refused" in err)
 check("naming the origin that would have been taken",
       "It takes http://nettail.example.com:2056." in err)
 check("and the Host it was judged against",
       "which was nettail.example.com:2056" in err)
 check("and the flag for a proxy, with none given", "--web-url" in err)
-check("three refusals are reported once",
+check("the explanation is given once",
       err.count("was refused with 403") == 1,
       str(err.count("was refused with 403")))
-check("and it is the first", "later" not in err)
+check("and every later refusal gets a line of its own",
+      "refused origin http://ha-sup:2056 on /key (403)" in err
+      and "refused origin http://later:2056 on /detail (403)" in err, err)
+check("so three refusals make one explanation and two lines",
+      err.count("refused origin ") == 2, str(err.count("refused origin ")))
+check("and refusals that did not fit the queue are counted, not lost",
+      "and 5 more refused for their origin" in err, repr(err[-300:]))
 check("nothing about it reaches stdout", "ha-sup" not in result["out"])
 check("nor the browser, which was told bad origin and nothing else",
       not any("ha-sup" in text for _kind, text in result["prose"]))

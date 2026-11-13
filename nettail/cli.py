@@ -1023,8 +1023,8 @@ def wire_text(text, limit=120):
     return shown
 
 
-def web_origin_note(origin, host, candidates, public=None):
-    """What to say when a page's request was refused for its `Origin`.
+def web_origin_note(origin, host, candidates, route, public=None):
+    """What to say the first time a page's request is refused for its `Origin`.
 
     The browser is told "bad origin" and nothing else, for the reason a
     refused `Host` gets the bare 404. The reader at the terminal is owed the
@@ -1037,11 +1037,17 @@ def web_origin_note(origin, host, candidates, public=None):
     `host` is the `Host` the origin was judged against, which is only the
     case when the view answers to any name, and None otherwise. Every value
     from the request goes through `wire_text` on its way out.
+
+    Only the first refusal of a run is told all of this. A page behind a
+    misconfigured proxy asks again on its own, a details dialog every few
+    seconds and a refused filter after a short wait, so the explanation in
+    full every time would bury the flows it is printed between; every later
+    refusal gets `web_origin_line` instead.
     """
     taken = ", ".join(wire_text(c) for c in candidates) or "none"
-    line = (f"{C.YELLOW}a request from a browser page was refused with 403 "
-            f"because its Origin, {wire_text(origin)}, is not one this view "
-            f"takes. It takes {taken}.")
+    line = (f"{C.YELLOW}a request from a browser page to /{wire_text(route)} "
+            f"was refused with 403 because its Origin, {wire_text(origin)}, "
+            f"is not one this view takes. It takes {taken}.")
     if host is not None:
         line += (f" This view answers to whatever name a request carries, so "
                  f"the origin has to name the same host and port as the "
@@ -1051,7 +1057,14 @@ def web_origin_note(origin, host, candidates, public=None):
     if public is None:
         line += (" Behind a reverse proxy, pass --web-url with the address "
                  "the browser opens.")
-    return line + f" Said once.{C.RESET}"
+    return (line + f" Each later refusal is reported in one line."
+            f"{C.RESET}")
+
+
+def web_origin_line(origin, route):
+    """One line for each refusal after the first, which said why."""
+    return (f"{C.YELLOW}refused origin {wire_text(origin)} on "
+            f"/{wire_text(route)} (403){C.RESET}")
 
 
 def web_reach_note(bound_addr, hosts, contained=None):
@@ -2030,8 +2043,9 @@ def main():
                         args, controls, rates)
 
     # Whether the port mismatch above has been reported, and whether a refused
-    # origin has. In one element lists for the reason `shown_flows` below is:
-    # the receive loop writes them and they are read in the same nested scope.
+    # origin has been explained in full yet. In one element lists for the
+    # reason `shown_flows` below is: the receive loop writes them and they are
+    # read in the same nested scope.
     port_told = [False]
     origin_told = [False]
 
@@ -2662,11 +2676,21 @@ def main():
                 if not port_told[0]:
                     port_told[0] = True
                     print(web_port_note(asked, web.port), file=sys.stderr)
-            if web is not None and web.origin_notice is not None:
-                refused, web.origin_notice = web.origin_notice, None
-                if not origin_told[0]:
-                    origin_told[0] = True
-                    print(web_origin_note(*refused, public=web.public),
+            if web is not None:
+                # Every refusal, unlike the port: one is only possible with
+                # the token, so nobody without the URL can write here.
+                refusals, unkept = web.take_origin_notices()
+                for origin, host, candidates, route in refusals:
+                    if not origin_told[0]:
+                        origin_told[0] = True
+                        print(web_origin_note(origin, host, candidates, route,
+                                              public=web.public),
+                              file=sys.stderr)
+                    else:
+                        print(web_origin_line(origin, route), file=sys.stderr)
+                if unkept:
+                    print(f"{C.YELLOW}and {unkept} more refused for their "
+                          f"origin, too quickly to keep{C.RESET}",
                           file=sys.stderr)
             if controls.quit:
                 break

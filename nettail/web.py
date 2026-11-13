@@ -113,6 +113,14 @@ KEY_QUEUE_MAX = 64
 # four of these every few seconds, so sixteen is a long way past a person and
 # a long way short of a way to keep the collector busy.
 ASK_QUEUE_MAX = 16
+
+# Refused origins allowed to wait for the receive loop to report them. Every
+# one is reported, and a request has to carry the token before its origin is
+# looked at, so only somebody holding the URL can add to this. A page behind a
+# misconfigured proxy refreshing a dialog in four tabs is a handful between two
+# turns of the loop; past this many the rest are counted rather than kept, and
+# the count is reported in their place.
+ORIGIN_NOTICE_MAX = 32
 RESTORE_MAX = 4000
 
 # How many stored flows one answer to a scroll up carries, and how many rows
@@ -1141,7 +1149,7 @@ class _Handler(BaseHTTPRequestHandler):
         # every route, because the reasoning has nothing to do with what the
         # request goes on to ask for.
         origin = self.headers.get("Origin")
-        if origin and not self._origin_ok(origin):
+        if origin and not self._origin_ok(origin, route):
             self._refuse(403, "bad origin")
             return
 
@@ -1359,7 +1367,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _origin_ok(self, origin):
+    def _origin_ok(self, origin, route):
         # In the open case the origin is held to the name this request
         # carried; otherwise to the address and the names, as the Host was.
         host = None if self.site.restricted else self.headers.get("Host")
@@ -1371,10 +1379,11 @@ class _Handler(BaseHTTPRequestHandler):
         # browser is told nothing more. The reader at the terminal is told
         # the rest, out of band and by the receive loop, as a refused port
         # is: what was sent, and what would have been taken instead.
-        self.site.origin_notice = (
+        self.site.note_origin((
             origin, host,
             origin_candidates(local, self.site.port, self.site.hosts, host,
-                              self.site.public))
+                              self.site.public),
+            route))
         return False
 
 
@@ -1478,14 +1487,42 @@ class WebInterface:
         # and would be more than this needs, because the newest value is as
         # good as the oldest and only one of them is ever reported.
         self.port_notice = None
-        # The same arrangement for a refused `Origin`: the origin sent, the
-        # `Host` it was judged against in the open case and None otherwise,
-        # and the origins that would have been taken. One tuple assigned
-        # whole, so the receive loop never reads half of one refusal and half
-        # of the next.
-        self.origin_notice = None
+        # Every refused `Origin`, for the receive loop to report: the origin
+        # sent, the `Host` it was judged against in the open case and None
+        # otherwise, the origins that would have been taken, and the route.
+        # A queue rather than the port's single slot, because each refusal is
+        # reported and a slot would fold two between turns of the loop into
+        # one. Bounded, with what does not fit counted under the lock, so a
+        # request thread never waits on it and it never grows.
+        self.origin_notices = queue.Queue(maxsize=ORIGIN_NOTICE_MAX)
+        self.origins_unkept = 0
+        self._unkept_lock = threading.Lock()
         self._httpd = None
         self._thread = None
+
+    def note_origin(self, refusal):
+        """Leave a refused origin for the receive loop. Never blocks."""
+        try:
+            self.origin_notices.put_nowait(refusal)
+        except queue.Full:
+            with self._unkept_lock:
+                self.origins_unkept += 1
+
+    def take_origin_notices(self):
+        """Every refusal waiting, oldest first, and how many did not fit.
+
+        Called by the receive loop and by nothing else, so the queue has one
+        reader and the count one resetter.
+        """
+        taken = []
+        while True:
+            try:
+                taken.append(self.origin_notices.get_nowait())
+            except queue.Empty:
+                break
+        with self._unkept_lock:
+            unkept, self.origins_unkept = self.origins_unkept, 0
+        return taken, unkept
 
     @property
     def url(self):
