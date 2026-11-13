@@ -2915,14 +2915,16 @@ The page loads and every key press, click on a row, filter and scroll back in
 time is answered `bad origin`. The browser's `Origin` header named a site the
 view does not take. The collector says which on stderr: the first refusal in
 full, naming the route, the origin that was sent and the ones that would have
-been taken, and every one after it in a single line, since a page with a details
-dialog open asks again on its own every few seconds. Behind a reverse proxy that
-is nearly always one of two things: the page is served over `https` and
-`--web-url` was not given, or the proxy rewrites the `Host` and `Origin` headers
-to names that disagree. Under a routable `--web-bind` with no `--web-host` and
-no `--web-url`, the origin has to name the same host and port as the `Host`
-header that request arrived with. See [Behind a reverse
-proxy](#behind-a-reverse-proxy).
+been taken, then a line for each refusal after it, up to five every ten seconds
+with the rest counted, since a page with a details dialog open asks again on its
+own every few seconds. Behind a reverse proxy that is nearly always one of three
+things: the page is served over `https` and `--web-url` was not given;
+`--web-url` was given but is not quite the address the browser opened, a scheme
+or a port apart, since the origin has to match it exactly; or the proxy rewrites
+the `Host` and `Origin` headers to names that disagree. Under a routable
+`--web-bind` with no `--web-host` and no `--web-url`, the origin has to name the
+same host and port as the `Host` header that request arrived with. See [Behind a
+reverse proxy](#behind-a-reverse-proxy).
 
 ### `unsupported_version` climbing
 
@@ -2945,7 +2947,7 @@ python tests/run.py tally keys    # only suites whose name contains either
 python tests/run.py -v            # print every check, not only failures
 ```
 
-2720 checks across 42 suites, in about a minute and a half. No test
+2752 checks across 42 suites, in about a minute and a half. No test
 dependencies and no test runner to learn: the suites need only netflume and
 lanname, the same as the collector.
 
