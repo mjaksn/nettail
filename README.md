@@ -2912,16 +2912,16 @@ web interface](#the-web-interface).
 ### Key presses in the browser are refused with 403
 
 The page loads and every key press, click on a row, filter and scroll back in
-time is answered `bad origin`. The browser's `Origin` header named a site the view does not
-take. The collector says which on stderr: the first refusal in full, naming
-the route, the origin that was sent and the ones that would have been taken,
-and every one after it in a single line, since a page with a details dialog
-open asks again on its own every few seconds. Behind a reverse proxy that is
-nearly always one of two things: the page is served over `https` and
-`--web-url` was not given, or the proxy rewrites the `Host` and `Origin`
-headers to names that disagree. Under a routable `--web-bind` with no
-`--web-host` and no `--web-url`, the origin has to name the same host and port
-as the `Host` header that request arrived with. See [Behind a reverse
+time is answered `bad origin`. The browser's `Origin` header named a site the
+view does not take. The collector says which on stderr: the first refusal in
+full, naming the route, the origin that was sent and the ones that would have
+been taken, and every one after it in a single line, since a page with a details
+dialog open asks again on its own every few seconds. Behind a reverse proxy that
+is nearly always one of two things: the page is served over `https` and
+`--web-url` was not given, or the proxy rewrites the `Host` and `Origin` headers
+to names that disagree. Under a routable `--web-bind` with no `--web-host` and
+no `--web-url`, the origin has to name the same host and port as the `Host`
+header that request arrived with. See [Behind a reverse
 proxy](#behind-a-reverse-proxy).
 
 ### `unsupported_version` climbing
@@ -3037,16 +3037,16 @@ another suite's result.
 
 Nothing reaches the network except `test_size_end_to_end`, which starts a real
 collector on the loopback interface, waits to be told the socket is bound, and
-sends it NetFlow v5 datagrams; the two web suites, which bind a server on a
-port the operating system picks and talk to it over loopback; `test_colour`,
-which starts a real collector on ports the operating system picks and reads its
+sends it NetFlow v5 datagrams; the two web suites, which bind a server on a port
+the operating system picks and talk to it over loopback; `test_colour`, which
+starts a real collector on ports the operating system picks and reads its
 greeting back off the event stream; and `test_config`, which starts one on a
-fixed loopback port to watch a setting reach the socket. Nothing leaves the machine.
-Everything else drives the code in process with synthetic packets, which is
-also the honest limitation: the exporters are imaginary, and how the colours
-actually look still needs a human and a terminal. The page is checked for what
-it must not contain rather than rendered, so the browser half wants a human
-too.
+fixed loopback port to watch a setting reach the socket. Nothing leaves the
+machine. Everything else drives the code in process with synthetic packets,
+which is also the honest limitation: the exporters are imaginary, and how the
+colours actually look still needs a human and a terminal. The page is checked
+for what it must not contain rather than rendered, so the browser half wants a
+human too.
 
 ---
 
