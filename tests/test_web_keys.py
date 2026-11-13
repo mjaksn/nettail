@@ -513,6 +513,16 @@ check("three refusals are still reported once",
 check("and it is the first of them that is reported",
       "asked for port 9000" in err and "9001" not in err)
 
+# Behind --web-url the receive loop hands the flag's value to the note, which
+# then asks whether it names the address opened instead of suggesting it.
+result = run([], [v5_packet(0)] * 4,
+             argv=["--web-url", "https://flows.example.com"],
+             port_notices=[(2, 9000)])
+err = plain(result["err"])
+check("a port mismatch behind --web-url quotes the flag's value",
+      "--web-url (https://flows.example.com)" in err, repr(err[-400:]))
+check("and does not tell the reader to pass it", "pass --web-url" not in err)
+
 result = run([], [v5_packet(0)] * 4)
 check("a run nothing was refused in says nothing",
       "asked for port" not in plain(result["err"]))

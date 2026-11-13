@@ -327,6 +327,20 @@ for bad, why in (("", "empty"), ("flows.example.com", "no scheme"),
         refused = True
     check("a web url is refused for %s" % why, refused, "%a" % bad)
 
+# A wildcard is refused in words about a URL rather than in --web-host's,
+# which talk about --web-bind and would send the reader to the wrong flag.
+try:
+    web_url_arg("https://*.example.com")
+    pattern_reason = ""
+except argparse.ArgumentTypeError as exc:
+    pattern_reason = str(exc)
+check("a wildcard web url is refused as a pattern",
+      "not a pattern" in pattern_reason, pattern_reason)
+check("in words about a web url", pattern_reason.startswith("a web url"),
+      pattern_reason)
+check("and not in --web-host's, which point at --web-bind",
+      "--web-bind" not in pattern_reason, pattern_reason)
+
 # The browser leaves the port out of Host when it is the proxy's default, and
 # a proxy passes the name on bare (nginx's $host) or as it found it. Both are
 # taken for the name --web-url gave; nothing else new is.
