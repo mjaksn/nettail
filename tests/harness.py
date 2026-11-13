@@ -4,7 +4,8 @@ Each suite is a plain script: it runs top to bottom, prints a line per check,
 and exits non-zero if any of them failed. That suits what these tests do, since
 most build state up over a sequence of steps and assert along the way, and it
 keeps the project free of test dependencies for the same reason the collector
-itself is standard library only.
+itself installs nothing but two small pure Python packages, netflume and
+lanname.
 
 Run one suite with `python tests/test_tally.py`, or all of them with
 `python tests/run.py`. Each runs in its own process, which matters: several of

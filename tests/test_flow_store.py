@@ -1,4 +1,4 @@
-"""Phase 1 durable flow storage: the file, its defaults, and its retention.
+"""Durable flow storage: the file, its defaults, and its retention.
 """
 
 import json
