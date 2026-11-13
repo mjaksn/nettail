@@ -636,21 +636,21 @@ Nine things about it are easy to break and quiet when broken.
   all arrives. That is the raise the guard above was added for.
 - **The `Host` check compares names under a loopback bind, and under a
   routable bind only when `--web-host` or `--web-url` gave some.**
-  `hosts_restricted` is
-  where that is decided, once per bind in `bind()` from the address that was
-  bound, and never per connection: a wildcard bind answers the same way on
-  every interface. Jupyter, Syncthing and Ollama each arrived at the same
-  rule, which is why it was chosen over the allow-list-everywhere shape Vite
-  and Transmission use. In the open case `origin_allowed` is handed the
-  request's own `Host` and accepts only an origin naming it, after an
-  `isascii()` check on that header, which is text off the wire and would
-  otherwise reach `compare_digest`. The names are held lowercased, ascii,
-  without brackets or a port, which `web_host_arg` enforces for the reason
-  `web_token_arg` does: a name stored with a port matches nothing for ever,
-  and a non-ascii one raises on every key press. `*` is refused too: a
-  routable bind already answers to any name, and the flag is an allow-list,
-  not a pattern. The names are kept in the order given rather than in a set,
-  because the first one is what the printed URL uses.
+  `hosts_restricted` is where that is decided, once per bind in `bind()` from
+  the address that was bound, and never per connection: a wildcard bind
+  answers the same way on every interface. Jupyter, Syncthing and Ollama each
+  arrived at the same rule, which is why it was chosen over the
+  allow-list-everywhere shape Vite and Transmission use. In the open case
+  `origin_allowed` is handed the request's own `Host` and accepts only an
+  origin naming it, after an `isascii()` check on that header, which is text
+  off the wire and would otherwise reach `compare_digest`. The names are held
+  lowercased, ascii, without brackets or a port, which `web_host_arg` enforces
+  for the reason `web_token_arg` does: a name stored with a port matches
+  nothing for ever, and a non-ascii one raises on every key press. `*` is
+  refused too: a routable bind already answers to any name, and the flag is an
+  allow-list, not a pattern. The names are kept in the order given rather than
+  in a set, because the first one is what the printed URL uses when
+  `--web-url` gave no address of its own.
 
   `--web-url` is the one way past `split_host`'s rule about a missing port,
   and it is a separate check, `public_host`, rather than a loosening of that
@@ -671,13 +671,16 @@ Nine things about it are easy to break and quiet when broken.
   asks `bus.active` first, and a record or a snapshot is built only then. The
   display path builds neither today, so a publish that assembled one
   speculatively would be real work per flow on a busy link.
-- **Two keys do not cross.** `WEB_EXCLUDED` in `keys.py` keeps them back.
+- **Three keys do not cross.** `WEB_EXCLUDED` in `keys.py` keeps them back.
   `esc` because ending the process for everybody, this terminal included, is
   not something that should arrive as a side effect of mirroring a keyboard.
   `q` because there would be nothing for it to do: it draws the URL of the
   page as a QR code, for a terminal, on the terminal, and a browser showing
   that page has the address in its own bar. Allowing it would give a browser
-  a key that appears to work and visibly does nothing.
+  a key that appears to work and visibly does nothing. `k` because a
+  browser's table has a head of its own that is always there, so pinning the
+  terminal's would move something no browser can see; see "The terminal is
+  shared state".
 - **One key goes the other way, and it is the page's own.** The down arrow
   works the Follow box, and `web.html` answers it without telling anybody.
   That is not the page hardcoding something the terminal names: following the
@@ -768,19 +771,20 @@ did not waive DB-IP's credit.
 
 Whether a key may be pressed and whether it deserves a button are two
 questions, so `keys.py` keeps two tables. `WEB_EXCLUDED` is what a browser may
-not press at all, and holds `esc` and `q`. `WEB_UNLISTED` is what it may press
-but gets no button for, and holds `?`: the drawer is already the list that key
-would print, so a button reading "this list" beside the list would be absurd,
-but somebody who knows the program will still reach for the key. `web_keys` is
-the first set and `web_buttons` the second, derived from it, so a key can never
-gain a button it is not allowed to press. The page asks `hello.pressable`, not
-its own buttons, when deciding whether to answer a keystroke.
+not press at all, and holds `esc`, `q` and `k`. `WEB_UNLISTED` is what it may
+press but gets no button for, and holds `?`: the drawer is already the list
+that key would print, so a button reading "this list" beside the list would be
+absurd, but somebody who knows the program will still reach for the key.
+`web_keys` is the first set and `web_buttons` the second, derived from it, so a
+key can never gain a button it is not allowed to press. The page asks
+`hello.pressable`, not its own buttons, when deciding whether to answer a
+keystroke.
 
 The `?` listing is the one place the two views are shown different text rather
-than the same characters: the browser's copy leaves out `esc` and `q`, neither
-of which it can press. `controls.listing` writes to stderr directly rather than
-through `controls.out`, which is a tee and would publish the listing a line at
-a time dressed as replies to keys nobody pressed.
+than the same characters: the browser's copy leaves out `esc`, `q` and `k`,
+none of which it can press. `controls.listing` writes to stderr directly rather
+than through `controls.out`, which is a tee and would publish the listing a
+line at a time dressed as replies to keys nobody pressed.
 
 ### Asking about a flow
 

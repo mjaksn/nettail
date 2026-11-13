@@ -72,12 +72,13 @@ services:
       # A name the view answers to. Under the loopback bind above it is added
       # beside localhost; under a routable --web-bind, which otherwise answers
       # to any name, the names listed here become the only ones it answers to.
-      # Either way the printed URL carries the first.
+      # Either way the printed URL carries the first, unless --web-url below
+      # is given, in which case it carries that address.
       #- --web-host
       #- z2m
       # The address a browser opens when a reverse proxy, such as Nginx Proxy
       # Manager, stands in front of the view and terminates TLS. It is what
-      # lets the view take the proxy's name without a port and key presses
+      # lets the view take the proxy's name without a port and take requests
       # from an https page, and the printed URL becomes it. A proxy in a
       # container of its own cannot reach the host's loopback, so change
       # --web-bind above to the gateway of the proxy's Docker network and

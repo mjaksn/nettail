@@ -287,7 +287,7 @@ All off unless `--web` is given. See [The web interface](#the-web-interface).
 | `--web-port PORT` | `2056` | Port for the web interface. `0` has the system pick a free one, and the printed URL names the port it picked unless `--web-url` gave the URL |
 | `--web-bind ADDR` | `127.0.0.1` | Address for the web interface. Anything other than loopback exposes this network's traffic over cleartext HTTP, and is warned about at startup |
 | `--web-host NAME` | none | A name the view answers to. Under the loopback default it is added beside `localhost`; under another `--web-bind`, which otherwise answers to any name, it restricts the view to the names given. May be repeated |
-| `--web-url URL` | none | The address a browser opens when a reverse proxy stands in front of the view, such as `https://flows.example.com`. The view answers to that name with or without a port and takes key presses from that origin, the printed URL becomes it, and the name narrows the view as `--web-host` does. The proxy serves the view from the root of that name. See [Behind a reverse proxy](#behind-a-reverse-proxy) |
+| `--web-url URL` | none | The address a browser opens when a reverse proxy stands in front of the view, such as `https://flows.example.com`. The view answers to that name with no port or with the URL's own and takes the page's requests (key presses, row clicks, filters and scrolling back) from that origin, the printed URL becomes it, and the name narrows the view as `--web-host` does. The proxy serves the view from the root of that name. See [Behind a reverse proxy](#behind-a-reverse-proxy) |
 | `--web-colour WHEN` | `on` | Colour in the browser view: `on` or `off`. A browser is a colour-capable reader whatever stdout is, so a redirected run does not take the colour out of it. `--web-color` is accepted too |
 | `--web-token TOKEN` | random | Use this token in the URL instead of a fresh random one, so a bookmark survives a restart. Taken from `NETTAIL_WEB_TOKEN` in the environment when the flag is not given, which is how an installed service receives one without it appearing in `ps` |
 | `--web-readonly` | off | Serve the display but accept no keys from the browser |
@@ -735,6 +735,7 @@ keyboard has no reason to press anything, `?` included.
 | `l` | List the local addresses seen this session and the names they answered to |
 | `c` | Clear the collected statistics and restart the runtime clock |
 | `b` | Hide the status bar, or bring it back, in both views at once. See [The status bar](#the-status-bar) |
+| `k` | Pin the column header to the top row, or let it scroll away. See [Sticky header](#sticky-header) |
 | `d` | Toggle re-ranging of the size colour scale |
 | `m` | Ask for a new fixed top for the size colour scale, and switch to it |
 | `h` | Cycle host name resolution: off, dns, all |
@@ -1093,7 +1094,7 @@ that off the collector rather than tracking it locally, so a key pressed at the
 terminal or in another browser moves this one too.
 
 The buttons are built from the collector's own key table, so a key added to the
-program appears in the browser without the page being touched. Three keys are
+program appears in the browser without the page being touched. Four keys are
 treated differently.
 
 `esc` closes the program, which would end it for everybody, this terminal
@@ -1106,7 +1107,11 @@ to do. It draws the URL of this page as a QR code, for a terminal, on the
 terminal, and a browser showing that page has the address in its own bar
 already.
 
-`?` has no button, for the same reason: it prints the list of keys, and the
+`k` is kept back for the same reason as `q`. It pins the terminal's column
+header, and the browser's table has a head of its own that is always there, so
+pressing it in a browser would move something no browser can see.
+
+`?` has no button, for a reason of its own: it prints the list of keys, and the
 drawer is that list, labelled and already in front of you. The key itself still
 works. Press it and the listing appears among the flows, as it does at the
 terminal, showing the keys a browser can press.
@@ -1335,9 +1340,10 @@ nettail --web --web-bind 0.0.0.0 --web-host z2m
 ```
 
 Under the loopback default the same flag adds a name beside `localhost`. It
-may be repeated, and the URL printed at startup uses the first one. Under a
-wildcard bind with no name the printed URL says `127.0.0.1`, and the banner
-says to put this machine's address or name in its place from elsewhere.
+may be repeated, and the URL printed at startup uses the first one unless
+`--web-url` gave the address. Under a wildcard bind with no name the printed
+URL says `127.0.0.1`, and the banner says to put this machine's address or
+name in its place from elsewhere.
 
 There is no TLS and no login. If you want it reachable from elsewhere, put it
 behind something that provides both, and bind it to loopback so that thing is
@@ -1357,11 +1363,12 @@ nettail --web --web-url https://flows.example.com
 ```
 
 The view then answers to that name with no port or with the URL's own, takes
-key presses from exactly that origin, and prints that address with the token
-on the end. The name narrows the view as `--web-host` does, so under a
-routable `--web-bind` it answers to its own address and that name rather than
-to any name at all. Nothing from an `X-Forwarded-` header is read: anybody who
-can reach the port directly can send one.
+the page's requests from exactly that origin (key presses, row clicks, filters
+and scrolling back alike), and prints that address with the token on the end.
+The name narrows the view as `--web-host` does, so under a routable
+`--web-bind` it answers to its own address and that name rather than to any
+name at all. Nothing from an `X-Forwarded-` header is read: anybody who can
+reach the port directly can send one.
 
 The proxy has to serve the view from the root of a name of its own, since the
 routes start at `/t/`, and has to pass the event stream through unbuffered.
@@ -2550,7 +2557,7 @@ docker logs nettail        # the URL, with its token, is printed at startup
 Under host networking the container's `0.0.0.0` is the host's, so that puts the
 view on every address the host has, and from another machine it opens by the
 host's address or by its name. `--web-host` narrows it to the names given, and
-the printed URL then carries the first:
+the printed URL then carries the first unless `--web-url` gave the address:
 
 ```
 docker run -d --name nettail --restart unless-stopped \
@@ -2904,8 +2911,8 @@ web interface](#the-web-interface).
 
 ### Key presses in the browser are refused with 403
 
-The page loads and every key press, click on a row and filter is answered
-`bad origin`. The browser's `Origin` header named a site the view does not
+The page loads and every key press, click on a row, filter and scroll back in
+time is answered `bad origin`. The browser's `Origin` header named a site the view does not
 take. The collector says which on stderr: the first refusal in full, naming
 the route, the origin that was sent and the ones that would have been taken,
 and every one after it in a single line, since a page with a details dialog
@@ -2938,9 +2945,9 @@ python tests/run.py tally keys    # only suites whose name contains either
 python tests/run.py -v            # print every check, not only failures
 ```
 
-2329 checks across 40 suites, in about a minute. No test dependencies and
-no test runner to learn: the suites need only netflume and lanname, the same as
-the collector.
+2705 checks across 42 suites, in about a minute and a half. No test
+dependencies and no test runner to learn: the suites need only netflume and
+lanname, the same as the collector.
 
 ### Traffic for the checks a suite cannot make
 
@@ -3000,9 +3007,11 @@ another suite's result.
 | `test_keys`, `test_keys_end_to_end` | every keyboard control, and scripted keys driven through the real receive loop |
 | `test_key_help` | the `?` listing, the table and the dispatch agreeing, and the reminder line pointing at a key that answers |
 | `test_size_scale`, `test_size_window`, `test_size_observe` | the BYTES colour ramp, its sliding window, and what it ranges against |
-| `test_sticky_header`, `test_sticky_resize`, `test_sticky_shutdown` | the scroll region, what a resize does to it, and giving the terminal back |
+| `test_sticky_header`, `test_sticky_resize`, `test_sticky_shutdown`, `test_sticky_toggle` | the scroll region, what a resize does to it, giving the terminal back, and the `k` key handing the margins to the status bar and taking them back |
 | `test_status_lines`, `test_status_bar`, `test_status_shutdown` | what the bar says at every width, the rows it claims, and the two features sharing one scroll region |
 | `test_flow_display` | the direction arrow, names in place of addresses, and the mac line sitting under the columns it belongs to |
+| `test_templates` | a template spelled out the first time it arrives, a line for each resend after that, the shape again when an ID is redefined, and none of it without `--templates` |
+| `test_flow_store` | the flow store: where the file goes by default, one row in and back out, writes held until the commit cadence, and retention |
 | `test_colour` | colour decided per reader, painted once and taken out again for whichever of the two refused it |
 | `test_help_colour` | the help staying plain on 3.14, where argparse settles colour before this program can |
 | `test_hosts_and_gradient` | the local host list, and the report ramp spanning the rows it prints |
@@ -3030,9 +3039,9 @@ Nothing reaches the network except `test_size_end_to_end`, which starts a real
 collector on the loopback interface, waits to be told the socket is bound, and
 sends it NetFlow v5 datagrams; the two web suites, which bind a server on a
 port the operating system picks and talk to it over loopback; `test_colour`,
-which starts a real collector on a fixed loopback port and reads its greeting
-back off the event stream; and `test_config`, which starts one on a fixed
-loopback port to watch a setting reach the socket. Nothing leaves the machine.
+which starts a real collector on ports the operating system picks and reads its
+greeting back off the event stream; and `test_config`, which starts one on a
+fixed loopback port to watch a setting reach the socket. Nothing leaves the machine.
 Everything else drives the code in process with synthetic packets, which is
 also the honest limitation: the exporters are imaginary, and how the colours
 actually look still needs a human and a terminal. The page is checked for what
