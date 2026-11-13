@@ -1029,14 +1029,18 @@ def wire_text(text, limit=120):
     latin-1, so it may hold an escape sequence that would move the cursor or
     retitle the window. Everything outside printable ascii is shown as a
     question mark, and the length is bounded so a header cannot fill the
-    screen. Only a request carrying the token reaches the origin check, so only
-    somebody holding the URL can make these lines appear at all.
+    screen. It is cut to length before it is cleaned, so that a header of
+    most of 64 KB costs no more to print than one of a hundred characters.
+    Only a request carrying the token reaches the origin check, so only
+    somebody holding the URL can make these lines appear at all, which
+    includes a watcher given a --web-readonly one; `OriginReports` is what
+    limits how many they can make.
     """
     if text is None:
         return "(none)"
-    shown = "".join(ch if " " <= ch <= "~" else "?" for ch in text)
-    if len(shown) > limit:
-        shown = shown[:limit] + "..."
+    shown = "".join(ch if " " <= ch <= "~" else "?" for ch in text[:limit])
+    if len(text) > limit:
+        shown += "..."
     return shown
 
 
@@ -1058,7 +1062,12 @@ def web_origin_note(origin, host, candidates, route, public=None):
     Only the first refusal of a run is told all of this. A page behind a
     misconfigured proxy asks again on its own, a details dialog every few
     seconds, so the explanation in full every time would bury the flows it is
-    printed between; every later refusal gets `web_origin_line` instead.
+    printed between; later refusals get `web_origin_line`, as many as
+    `OriginReports` allows, and a count for the rest.
+
+    With `--web-url` given there is no flag to suggest, and the likeliest
+    trouble left is that it is not quite the address the browser opened, a
+    scheme or a port apart, so that is what the note says instead.
     """
     taken = ", ".join(wire_text(c) for c in candidates) or "none"
     line = (f"{C.YELLOW}a request from a browser page to /{wire_text(route)} "
@@ -1073,14 +1082,85 @@ def web_origin_note(origin, host, candidates, route, public=None):
     if public is None:
         line += (" Behind a reverse proxy, pass --web-url with the address "
                  "the browser opens.")
-    return (line + f" Each later refusal is reported in one line."
-            f"{C.RESET}")
+    else:
+        line += (f" If the page was opened through the proxy, --web-url "
+                 f"({public}) is not the address the browser opened: its "
+                 f"scheme, name and port have to be exactly that address's.")
+    return (line + f" Later refusals are reported in one line each, up to "
+            f"{ORIGIN_LINES} every {ORIGIN_WINDOW:g} seconds, and the rest "
+            f"are counted.{C.RESET}")
 
 
 def web_origin_line(origin, route):
-    """One line for each refusal after the first, which said why."""
+    """One line for a refusal after the first, which said why, while
+    `OriginReports` still has lines to give in the current stretch."""
     return (f"{C.YELLOW}refused origin {wire_text(origin)} on "
             f"/{wire_text(route)} (403){C.RESET}")
+
+
+# How many refusals after the first are printed one by one in a stretch of
+# this many seconds. A page behind a broken proxy asks a few times a minute;
+# a watcher holding a --web-readonly URL could ask a thousand times a second,
+# and every one of those would otherwise be a line scrolling the flows away.
+ORIGIN_LINES = 5
+ORIGIN_WINDOW = 10.0
+
+
+class OriginReports:
+    """Puts refused origins on stderr: the first in full, then a few, then a
+    count.
+
+    Written for the receive loop, which hands over what `take_origin_notices`
+    returned on every turn whether it holds anything or not, since a turn is
+    also how a stretch of time ends. Every refusal is accounted for. The first
+    of a run is explained by `web_origin_note`; up to `ORIGIN_LINES` after it
+    in each `ORIGIN_WINDOW` get a line of their own; the rest, and any the
+    server could not keep, are counted and reported in one line when the
+    stretch ends, or by `flush` at the end of the run.
+
+    `clock` is for the tests. `out` is looked up at each print when left as
+    None, because `main` wraps stderr after this may have been built.
+    """
+
+    def __init__(self, public=None, clock=time.monotonic, out=None):
+        self.public = public
+        self.clock = clock
+        self.out = out
+        self.explained = False
+        self.started = None
+        self.shown = 0
+        self.held = 0
+
+    def _print(self, text):
+        print(text, file=self.out if self.out is not None else sys.stderr)
+
+    def report(self, refusals, unkept=0):
+        now = self.clock()
+        if self.started is None:
+            self.started = now
+        elif now - self.started >= ORIGIN_WINDOW:
+            self.flush()
+            self.started = now
+            self.shown = 0
+        for origin, host, candidates, route in refusals:
+            if not self.explained:
+                self.explained = True
+                self._print(web_origin_note(origin, host, candidates, route,
+                                            public=self.public))
+            elif self.shown < ORIGIN_LINES:
+                self.shown += 1
+                self._print(web_origin_line(origin, route))
+            else:
+                self.held += 1
+        self.held += unkept
+
+    def flush(self):
+        """Report the refusals counted and not shown, if there were any."""
+        if self.held:
+            self._print(f"{C.YELLOW}and {self.held} more refused for their "
+                        f"origin, counted rather than shown one by one"
+                        f"{C.RESET}")
+            self.held = 0
 
 
 def web_reach_note(bound_addr, hosts, contained=None):
@@ -2060,12 +2140,13 @@ def main():
         return snapshot(stats, tally, resolver, sequences, sampling, scale,
                         args, controls, rates)
 
-    # Whether the port mismatch above has been reported, and whether a refused
-    # origin has been explained in full yet. In one element lists for the
-    # reason `shown_flows` below is: the receive loop writes them and they are
-    # read in the same nested scope.
+    # Whether the port mismatch above has been reported. In a one element list
+    # for the reason `shown_flows` below is: the receive loop writes it and it
+    # is read in the same nested scope.
     port_told = [False]
-    origin_told = [False]
+    # Refused origins on their way to stderr. The flag's value is the origin
+    # the server holds, both having been through `web_url_arg`.
+    origin_reports = OriginReports(public=args.web_url)
 
     # Flows that have passed the display filter. In a one element list rather
     # than a bare integer because `web_status` below reads it and the receive
@@ -2696,21 +2777,11 @@ def main():
                     print(web_port_note(asked, web.port, public=web.public),
                           file=sys.stderr)
             if web is not None:
-                # Every refusal, unlike the port: one is only possible with
-                # the token, so nobody without the URL can write here.
-                refusals, unkept = web.take_origin_notices()
-                for origin, host, candidates, route in refusals:
-                    if not origin_told[0]:
-                        origin_told[0] = True
-                        print(web_origin_note(origin, host, candidates, route,
-                                              public=web.public),
-                              file=sys.stderr)
-                    else:
-                        print(web_origin_line(origin, route), file=sys.stderr)
-                if unkept:
-                    print(f"{C.YELLOW}and {unkept} more refused for their "
-                          f"origin, too quickly to keep{C.RESET}",
-                          file=sys.stderr)
+                # Every refusal is accounted for, unlike the port, and how
+                # many are printed is limited by time rather than to one: a
+                # refusal needs the token, but --web-readonly hands the token
+                # to people who are only meant to watch.
+                origin_reports.report(*web.take_origin_notices())
             if controls.quit:
                 break
             if not controls.paused and controls.held:
@@ -2895,3 +2966,8 @@ def main():
             # joins nothing, so without this the interpreter is free to exit
             # while a writer is halfway through the summary it was just handed.
             web.stop()
+            # The server answered right up to that point, after the receive
+            # loop's last turn, so whatever it refused since is reported here
+            # rather than lost, along with anything counted and not shown.
+            origin_reports.report(*web.take_origin_notices())
+            origin_reports.flush()

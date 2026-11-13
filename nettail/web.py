@@ -43,10 +43,10 @@ are not optional.
   `--web-host` or `--web-url` gave it. Under a routable bind the LAN reaches
   the view directly and the token is its guard, so any name is accepted
   unless one of those narrows it, which is the rule Jupyter, Syncthing and
-  Ollama each settled on. See `host_allowed` for why comparing against the bound
-  address is not enough, and `hosts_restricted` for where the rule is
-  decided. A name from `--web-url` narrows it the same way, and is the one
-  name accepted without this server's port, for the reason on `public_host`.
+  Ollama each settled on. See `host_allowed` for why comparing against the
+  bound address is not enough, and `hosts_restricted` for where the rule is
+  decided. The name from `--web-url` is the one name accepted without this
+  server's port, for the reason on `public_host`.
 - **An `Origin` check on every route a browser posts to**, refusing a request
   that names an origin other than this one. The one from `--web-url` is the
   only origin it takes that may say https, and only exactly as given.
@@ -114,13 +114,19 @@ KEY_QUEUE_MAX = 64
 # a long way short of a way to keep the collector busy.
 ASK_QUEUE_MAX = 16
 
-# Refused origins allowed to wait for the receive loop to report them. Every
-# one is reported, and a request has to carry the token before its origin is
-# looked at, so only somebody holding the URL can add to this. A page behind a
-# misconfigured proxy refreshing a dialog in four tabs is a handful between two
-# turns of the loop; past this many the rest are counted rather than kept, and
-# the count is reported in their place.
+# Refused origins allowed to wait for the receive loop to report them. A
+# request has to carry the token before its origin is looked at, so only
+# somebody holding the URL can add to this, but that includes a watcher given
+# a --web-readonly one, which is why how many are printed one by one is
+# limited separately, by `cli.OriginReports`. A page behind a misconfigured
+# proxy refreshing a dialog in four tabs is a handful between two turns of the
+# loop; past this many the rest are counted rather than kept, and the count is
+# reported in their place.
 ORIGIN_NOTICE_MAX = 32
+
+# How much of a refused request's Origin and Host is kept for the report. More
+# than the report prints, so that it can still say the header ran on.
+WIRE_KEPT = 256
 
 # How many stored flows a tab back from the background is replayed, at most,
 # before it is put on the live stream.
@@ -487,12 +493,16 @@ def origin_candidates(local_addr, port, names=(), host=None, public=None):
             # the Host it sent spelt it out.
             candidates.append("http://%s" % host[:-3])
     else:
-        candidates += ["http://%s:%d" % (local_addr, port),
+        # Bracketed when it is IPv6, as a browser writes it in an Origin.
+        # Unbracketed, a view reached directly by such an address took every
+        # key press as coming from somewhere else.
+        candidates += ["http://%s:%d" % (in_url(str(local_addr)), port),
                        "http://localhost:%d" % port]
         candidates += ["http://%s:%d" % (in_url(name), port)
                        for name in names]
         if port == 80:
-            candidates += ["http://%s" % local_addr, "http://localhost"]
+            candidates += ["http://%s" % in_url(str(local_addr)),
+                           "http://localhost"]
             candidates += ["http://%s" % in_url(name) for name in names]
     return candidates
 
@@ -652,6 +662,17 @@ def web_url_arg(text):
     here too, in words about a URL rather than about `--web-host`, since what
     this flag does is more than add a name. The host part then goes through
     `web_host_arg`, so the rest are refused for the reasons given there.
+
+    Two things a browser does to a host are done here too, or refused where
+    doing them would be a guess. A backslash, a control character and the few
+    other characters a browser will not keep in a host are refused, since the
+    browser would open some other address than the one stored. And an address
+    literal is written the way a browser serialises it: an IPv6 one compressed
+    and lowercased, and a numeric host taken as IPv4 only when it is already
+    four plain decimal parts, because a browser reads `127.000.0.1` or
+    `0x7f.1` as an address and a stored spelling of it would match nothing.
+    An IPv4 address mapped into IPv6 is refused rather than spelt, since not
+    every interpreter this runs on spells it the way a browser does.
     """
     raw = text.strip()
     if not raw:
@@ -660,6 +681,11 @@ def web_url_arg(text):
         raise argparse.ArgumentTypeError(
             "a web url must be ascii, with any other name in its punycode "
             "form; it is compared byte for byte with what a browser sends")
+    bad = [ch for ch in raw if ch in "\\<>^|" or ch < " " or ch == "\x7f"]
+    if bad:
+        raise argparse.ArgumentTypeError(
+            "a web url cannot hold %s; a browser would not keep it in the "
+            "address it opens" % ", ".join(sorted(set(map(repr, bad)))))
     parts = urlsplit(raw)
     scheme = parts.scheme.lower()
     if scheme not in ("http", "https"):
@@ -691,10 +717,47 @@ def web_url_arg(text):
         raise argparse.ArgumentTypeError(
             "a web url names one site, not a pattern; it is the single "
             "address a browser opens through the proxy")
-    name = web_host_arg(parts.hostname)
+    name = canonical_host(web_host_arg(parts.hostname))
     if port is None or port == DEFAULT_PORTS[scheme]:
         return "%s://%s" % (scheme, in_url(name))
     return "%s://%s:%d" % (scheme, in_url(name), port)
+
+
+def canonical_host(name):
+    """A host from `web_host_arg` as a browser writes it, or refused.
+
+    A name is returned as it is. An IPv6 literal is compressed, which is the
+    one spelling a browser sends. A host whose last label is a number is one
+    a browser reads as IPv4, in decimal, octal or hex, so it is taken only
+    when it is already the plain dotted form, which is the form a browser
+    writes back out; any other spelling of an address is refused with the
+    one that would work, since storing it would match nothing.
+    """
+    if ":" in name:
+        address = ipaddress.IPv6Address(name)
+        if address.ipv4_mapped is not None:
+            raise argparse.ArgumentTypeError(
+                "a web url's host is an IPv4 address mapped into IPv6; give "
+                "the IPv4 address itself, %s" % address.ipv4_mapped)
+        return str(address)
+    labels = name.split(".")
+    if len(labels) > 1 and labels[-1] == "":
+        labels = labels[:-1]
+    last = labels[-1]
+    numeric = last.isdigit() or (
+        last[:2] == "0x" and all(ch in "0123456789abcdef" for ch in last[2:]))
+    if not numeric:
+        return name
+    try:
+        plain = str(ipaddress.IPv4Address(name))
+    except ValueError:
+        plain = None
+    if plain != name:
+        raise argparse.ArgumentTypeError(
+            "a web url's host ends in a number, so a browser reads it as an "
+            "IPv4 address; write it as four plain decimal parts, as a "
+            "browser would, such as 192.0.2.10")
+    return name
 
 
 # The port a browser leaves out of a URL, and so out of the `Host` and the
@@ -1387,7 +1450,12 @@ class _Handler(BaseHTTPRequestHandler):
         # Refused with the same two words whatever the reason, and the
         # browser is told nothing more. The reader at the terminal is told
         # the rest, out of band and by the receive loop, as a refused port
-        # is: what was sent, and what would have been taken instead.
+        # is: what was sent, and what would have been taken instead. Only
+        # the start of each header is kept, since only the start is ever
+        # printed and a header may be most of 64 KB.
+        origin = origin[:WIRE_KEPT]
+        if host is not None:
+            host = host[:WIRE_KEPT]
         self.site.note_origin((
             origin, host,
             origin_candidates(local, self.site.port, self.site.hosts, host,
@@ -1470,7 +1538,8 @@ class WebInterface:
         # Put through the flag's own reduction for a caller that is not the
         # flag, since an origin stored any other way matches nothing.
         self.public = web_url_arg(public) if public else None
-        self.public_endpoint = url_endpoint(public) if public else None
+        self.public_endpoint = (url_endpoint(self.public) if self.public
+                                else None)
         named = list(hosts)
         if self.public_endpoint:
             named.append(self.public_endpoint[0])
@@ -1502,8 +1571,8 @@ class WebInterface:
         # sent, the `Host` it was judged against in the open case and None
         # otherwise, the origins that would have been taken, and the route.
         # A queue rather than the port's single slot, because each refusal is
-        # reported and a slot would fold two between turns of the loop into
-        # one. Bounded, with what does not fit counted under the lock, so a
+        # accounted for and a slot would fold two between turns of the loop
+        # into one. Bounded, with what does not fit counted under the lock, so a
         # request thread never waits on it and it never grows.
         self.origin_notices = queue.Queue(maxsize=ORIGIN_NOTICE_MAX)
         self.origins_unkept = 0

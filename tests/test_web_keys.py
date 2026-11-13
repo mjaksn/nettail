@@ -31,6 +31,7 @@ from nettail.keys import (
     web_buttons,
     web_keys,
 )
+from nettail.web import in_container, url_endpoint, web_url_arg
 
 V5_HDR = struct.Struct("!HHIIIIBBH")
 V5_REC = struct.Struct("!4s4s4sHHIIIIHHBBBBHHBBH")
@@ -256,7 +257,11 @@ def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
             self.bound_addr = self.asked_for
             # The names the banner's reach note is asked about, which the
             # real server holds with the name from --web-url among them.
-            self.hosts = tuple(kw.get("hosts", ()))
+            public = kw.get("public")
+            named = list(kw.get("hosts", ()))
+            if public:
+                named.append(url_endpoint(web_url_arg(public))[0])
+            self.hosts = tuple(named)
             self.stopped = False
             self.serving = False
             self.port_notice = None
@@ -566,6 +571,36 @@ check("and refusals that did not fit the queue are counted, not lost",
 check("nothing about it reaches stdout", "ha-sup" not in result["out"])
 check("nor the browser, which was told bad origin and nothing else",
       not any("ha-sup" in text for _kind, text in result["prose"]))
+
+# The receive loop hands --web-url to the note, so a run already behind one is
+# not told to pass it, and is told instead that it may not be the address the
+# browser opened.
+result = run([], [v5_packet(0)] * 4,
+             argv=["--web-url", "https://flows.example.com"],
+             origin_notices=[(2, ("https://other.example.com", None,
+                                  ["https://flows.example.com"], "key"))])
+err = plain(result["err"])
+check("behind --web-url a refused origin is not told to pass it",
+      "was refused with 403" in err and "pass --web-url" not in err,
+      repr(err[-400:]))
+check("and is told the flag may not be the address opened",
+      "--web-url (https://flows.example.com) is not the address" in err)
+
+# The banner's line about putting this machine's address in place of
+# 127.0.0.1 is asked about the server's names, which hold the --web-url name,
+# so a wildcard bind behind a proxy prints the proxy's address and nothing
+# about substituting one. Without the flag the line is there, outside a
+# container, which is the one place it is meant to be left out.
+REACH = "put this machine's address or name in place of 127.0.0.1"
+plain_run = plain(run([], [v5_packet(0)] * 2,
+                      argv=["--web-bind", "0.0.0.0"])["err"])
+check("a wildcard bind with no name says how to reach it from elsewhere",
+      (REACH in plain_run) != in_container(), repr(plain_run[:400]))
+proxied_run = plain(run([], [v5_packet(0)] * 2,
+                        argv=["--web-bind", "0.0.0.0", "--web-url",
+                              "https://flows.example.com"])["err"])
+check("and behind --web-url it does not", REACH not in proxied_run,
+      repr(proxied_run[:400]))
 
 
 # -- and pressing it draws the symbol, on the terminal only --------------
