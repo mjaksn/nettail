@@ -77,6 +77,7 @@ SAMPLES = {
     "web_port": "9996",
     "web_bind": "0.0.0.0",
     "web_host": "collector.lan",
+    "web_url": "https://flows.example.com",
     "web_token": "a-token-worth-keeping",
     "web_colour": "off",
     "web_readonly": "true",

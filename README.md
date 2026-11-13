@@ -241,13 +241,13 @@ usage: nettail [-h] [--version] [--config FILE | --save-config [FILE]]
                [--colour WHEN] [--no-color] [--header-every HEADER_EVERY]
                [--sticky-header] [--hide-status] [--no-supplemental-services]
                [--web] [--web-port PORT] [--web-bind ADDR] [--web-host NAME]
-               [--web-token TOKEN] [--web-colour WHEN] [--web-readonly]
-               [--web-detail-refresh SECONDS] [--size-scale-max BYTES |
-               --size-scale-dynamic] [--size-scale-window FLOWS] [--country]
-               [--country-db FILE] [--update-country-db]
-               [--country-style {auto,flag,code}] [--resolve {off,dns,all}]
-               [--hosts FILE] [--resolve-public] [--fqdn]
-               [--resolve-workers RESOLVE_WORKERS]
+               [--web-url URL] [--web-token TOKEN] [--web-colour WHEN]
+               [--web-readonly] [--web-detail-refresh SECONDS]
+               [--size-scale-max BYTES | --size-scale-dynamic]
+               [--size-scale-window FLOWS] [--country] [--country-db FILE]
+               [--update-country-db] [--country-style {auto,flag,code}]
+               [--resolve {off,dns,all}] [--hosts FILE] [--resolve-public]
+               [--fqdn] [--resolve-workers RESOLVE_WORKERS]
                [--resolve-timeout RESOLVE_TIMEOUT]
 ```
 
@@ -284,9 +284,10 @@ All off unless `--web` is given. See [The web interface](#the-web-interface).
 | Option | Default | Description |
 | --- | --- | --- |
 | `--web` | off | Also serve the display to a browser |
-| `--web-port PORT` | `2056` | Port for the web interface. `0` has the system pick a free one, and the printed URL names the port it picked |
+| `--web-port PORT` | `2056` | Port for the web interface. `0` has the system pick a free one, and the printed URL names the port it picked unless `--web-url` gave the URL |
 | `--web-bind ADDR` | `127.0.0.1` | Address for the web interface. Anything other than loopback exposes this network's traffic over cleartext HTTP, and is warned about at startup |
 | `--web-host NAME` | none | A name the view answers to. Under the loopback default it is added beside `localhost`; under another `--web-bind`, which otherwise answers to any name, it restricts the view to the names given. May be repeated |
+| `--web-url URL` | none | The address a browser opens when a reverse proxy stands in front of the view, such as `https://flows.example.com`. The view answers to that name with no port or with the URL's own and takes the page's requests (key presses, row clicks, filters and scrolling back) from that origin, the printed URL becomes it, and the name narrows the view as `--web-host` does. The proxy serves the view from the root of that name. See [Behind a reverse proxy](#behind-a-reverse-proxy) |
 | `--web-colour WHEN` | `on` | Colour in the browser view: `on` or `off`. A browser is a colour-capable reader whatever stdout is, so a redirected run does not take the colour out of it. `--web-color` is accepted too |
 | `--web-token TOKEN` | random | Use this token in the URL instead of a fresh random one, so a bookmark survives a restart. Taken from `NETTAIL_WEB_TOKEN` in the environment when the flag is not given, which is how an installed service receives one without it appearing in `ps` |
 | `--web-readonly` | off | Serve the display but accept no keys from the browser |
@@ -734,6 +735,7 @@ keyboard has no reason to press anything, `?` included.
 | `l` | List the local addresses seen this session and the names they answered to |
 | `c` | Clear the collected statistics and restart the runtime clock |
 | `b` | Hide the status bar, or bring it back, in both views at once. See [The status bar](#the-status-bar) |
+| `k` | Pin the column header to the top row, or let it scroll away. See [Sticky header](#sticky-header) |
 | `d` | Toggle re-ranging of the size colour scale |
 | `m` | Ask for a new fixed top for the size colour scale, and switch to it |
 | `h` | Cycle host name resolution: off, dns, all |
@@ -1092,7 +1094,7 @@ that off the collector rather than tracking it locally, so a key pressed at the
 terminal or in another browser moves this one too.
 
 The buttons are built from the collector's own key table, so a key added to the
-program appears in the browser without the page being touched. Three keys are
+program appears in the browser without the page being touched. Four keys are
 treated differently.
 
 `esc` closes the program, which would end it for everybody, this terminal
@@ -1105,7 +1107,11 @@ to do. It draws the URL of this page as a QR code, for a terminal, on the
 terminal, and a browser showing that page has the address in its own bar
 already.
 
-`?` has no button, for the same reason: it prints the list of keys, and the
+`k` is kept back for the same reason as `q`. It pins the terminal's column
+header, and the browser's table has a head of its own that is always there, so
+pressing it in a browser would move something no browser can see.
+
+`?` has no button, for a reason of its own: it prints the list of keys, and the
 drawer is that list, labelled and already in front of you. The key itself still
 works. Press it and the listing appears among the flows, as it does at the
 terminal, showing the keys a browser can press.
@@ -1304,7 +1310,7 @@ resolution to active mDNS and NetBIOS probing. Treat the URL as a password.
 - The `Host` header is checked on every request, which is what stops a web page
   you happen to have open from reaching it by rebinding a name to `127.0.0.1`.
   Under this bind the view answers to its address, to `localhost`, and to no
-  other name unless `--web-host` gave it.
+  other name unless `--web-host` or `--web-url` gave it.
 - The page loads nothing from anywhere and is served under a content security
   policy that names the hashes of its own script and style.
 - Hostnames off the wire are shown as text and never as markup, which matters
@@ -1334,13 +1340,63 @@ nettail --web --web-bind 0.0.0.0 --web-host z2m
 ```
 
 Under the loopback default the same flag adds a name beside `localhost`. It
-may be repeated, and the URL printed at startup uses the first one. Under a
-wildcard bind with no name the printed URL says `127.0.0.1`, and the banner
-says to put this machine's address or name in its place from elsewhere.
+may be repeated, and the URL printed at startup uses the first one unless
+`--web-url` gave the address. Under a wildcard bind with no name the printed
+URL says `127.0.0.1`, and the banner says to put this machine's address or
+name in its place from elsewhere.
 
 There is no TLS and no login. If you want it reachable from elsewhere, put it
 behind something that provides both, and bind it to loopback so that thing is
 the only way in.
+
+### Behind a reverse proxy
+
+A proxy that terminates TLS changes two things the view checks. The browser
+names the proxy's address in its `Host` header, usually with no port, and its
+`Origin` says `https`. Left to itself the view refuses the first with the same
+404 a wrong token gets and the second with a 403 on every key press, so the
+page either never loads or loads and takes no keys. `--web-url` tells it the
+address the browser opens:
+
+```
+nettail --web --web-url https://flows.example.com
+```
+
+The view then answers to that name with no port or with the URL's own, takes
+the page's requests from exactly that origin (key presses, row clicks, filters
+and scrolling back alike), and prints that address with the token on the end.
+The name narrows the view as `--web-host` does, so under a routable
+`--web-bind` it answers to its own address and that name rather than to any
+name at all. Nothing from an `X-Forwarded-` header is read: anybody who can
+reach the port directly can send one.
+
+The proxy has to serve the view from the root of a name of its own, since the
+routes start at `/t/`, and has to pass the event stream through unbuffered.
+The view asks nginx for that itself with `X-Accel-Buffering`, and sends a
+heartbeat every fifteen seconds, inside the read timeout any proxy is likely
+to have. No websocket support is needed.
+
+In Nginx Proxy Manager that is a proxy host for the name, forwarding over
+`http` to the address and port the view is bound to, with a certificate on
+the SSL tab and nothing on the Advanced tab. The forward address has to be one
+the proxy's container can reach. Under the compose file's host networking the
+default `127.0.0.1` is the host's loopback, which a proxy in a container of
+its own cannot reach, so bind the view to the gateway of the proxy's Docker
+network instead and forward to that:
+
+```
+docker network inspect <proxy-network> -f '{{(index .IPAM.Config 0).Gateway}}'
+```
+
+Under host networking that gateway is an address of the host itself, and
+nothing is published in front of it. Every container on the host can reach it,
+whichever network it is on, and so can any machine with a route to it; the
+token is the only guard, and the hop from the proxy is plain HTTP. The
+collector says as much at startup. A proxy running on the host itself, or with
+host networking of its own, can reach `127.0.0.1` and needs none of this.
+
+The token is in the URL, so pin it with `NETTAIL_WEB_TOKEN` or a restart
+prints an address the bookmark no longer matches.
 
 ### With `--json`
 
@@ -2508,7 +2564,7 @@ docker logs nettail        # the URL, with its token, is printed at startup
 Under host networking the container's `0.0.0.0` is the host's, so that puts the
 view on every address the host has, and from another machine it opens by the
 host's address or by its name. `--web-host` narrows it to the names given, and
-the printed URL then carries the first:
+the printed URL then carries the first unless `--web-url` gave the address:
 
 ```
 docker run -d --name nettail --restart unless-stopped \
@@ -2609,10 +2665,11 @@ docker run -d --name nettail --restart unless-stopped \
 ```
 
 Publishing `9000:2056` and leaving the collector on its default does not work
-and cannot be made to, short of a proxy that rewrites the header. The same
-applies outside Docker: anything in front of this that changes the port, a
-tunnel or a reverse proxy included, needs `--web-port` set to the port the
-browser will actually name.
+and cannot be made to. The same applies outside Docker: a tunnel in front of
+this that changes the port needs `--web-port` set to the port the browser will
+actually name. A reverse proxy is the exception, because it connects to this
+port whatever the browser named, and what it needs is `--web-url`; see [Behind
+a reverse proxy](#behind-a-reverse-proxy).
 
 ### What it does and does not carry
 
@@ -2850,12 +2907,31 @@ exit summary to see which sources are producing hits.
 
 The token is right and the page is still a 404. A wrong token and a refused
 `Host` header get the same 404 on purpose, so nothing at your end says which
-it was. The `Host` check refuses a request in three cases: the collector is on
+it was. The `Host` check refuses a request in four cases: the collector is on
 its loopback default, which no other machine reaches anyway; `--web-host` was
-given and the name in the address bar is not on it; or the port in the address
+given and the name in the address bar is not on it; the port in the address
 bar is not `--web-port`, which happens behind a port forward or a Docker
-publish that maps one port to another. Under a routable `--web-bind` with no
-`--web-host`, any name works. See [The web interface](#the-web-interface).
+publish that maps one port to another; or a reverse proxy is in front and
+`--web-url` does not name the address the browser opened. Under a routable
+`--web-bind` with no `--web-host` and no `--web-url`, any name works. See [The
+web interface](#the-web-interface).
+
+### Key presses in the browser are refused with 403
+
+The page loads and every key press, click on a row, filter and scroll back in
+time is answered `bad origin`. The browser's `Origin` header named a site the
+view does not take. The collector says which on stderr: the first refusal in
+full, naming the route, the origin that was sent and the ones that would have
+been taken, then a line for each refusal after it, up to five every ten seconds
+with the rest counted, since a page with a details dialog open asks again on its
+own every few seconds. Behind a reverse proxy that is nearly always one of three
+things: the page is served over `https` and `--web-url` was not given;
+`--web-url` was given but is not quite the address the browser opened, a scheme
+or a port apart, since the origin has to match it exactly; or the proxy rewrites
+the `Host` and `Origin` headers to names that disagree. Under a routable
+`--web-bind` with no `--web-host` and no `--web-url`, the origin has to name the
+same host and port as the `Host` header that request arrived with. See [Behind a
+reverse proxy](#behind-a-reverse-proxy).
 
 ### `unsupported_version` climbing
 
@@ -2878,9 +2954,9 @@ python tests/run.py tally keys    # only suites whose name contains either
 python tests/run.py -v            # print every check, not only failures
 ```
 
-2329 checks across 40 suites, in about a minute. No test dependencies and
-no test runner to learn: the suites need only netflume and lanname, the same as
-the collector.
+2775 checks across 42 suites, in about a minute and a half. No test
+dependencies and no test runner to learn: the suites need only netflume and
+lanname, the same as the collector.
 
 ### Traffic for the checks a suite cannot make
 
@@ -2940,9 +3016,11 @@ another suite's result.
 | `test_keys`, `test_keys_end_to_end` | every keyboard control, and scripted keys driven through the real receive loop |
 | `test_key_help` | the `?` listing, the table and the dispatch agreeing, and the reminder line pointing at a key that answers |
 | `test_size_scale`, `test_size_window`, `test_size_observe` | the BYTES colour ramp, its sliding window, and what it ranges against |
-| `test_sticky_header`, `test_sticky_resize`, `test_sticky_shutdown` | the scroll region, what a resize does to it, and giving the terminal back |
+| `test_sticky_header`, `test_sticky_resize`, `test_sticky_shutdown`, `test_sticky_toggle` | the scroll region, what a resize does to it, giving the terminal back, and the `k` key handing the margins to the status bar and taking them back |
 | `test_status_lines`, `test_status_bar`, `test_status_shutdown` | what the bar says at every width, the rows it claims, and the two features sharing one scroll region |
 | `test_flow_display` | the direction arrow, names in place of addresses, and the mac line sitting under the columns it belongs to |
+| `test_templates` | a template spelled out the first time it arrives, a line for each resend after that, the shape again when an ID is redefined, and none of it without `--templates` |
+| `test_flow_store` | the flow store: where the file goes by default, one row in and back out, writes held until the commit cadence, and retention |
 | `test_colour` | colour decided per reader, painted once and taken out again for whichever of the two refused it |
 | `test_help_colour` | the help staying plain on 3.14, where argparse settles colour before this program can |
 | `test_hosts_and_gradient` | the local host list, and the report ramp spanning the rows it prints |
@@ -2968,16 +3046,16 @@ another suite's result.
 
 Nothing reaches the network except `test_size_end_to_end`, which starts a real
 collector on the loopback interface, waits to be told the socket is bound, and
-sends it NetFlow v5 datagrams; the two web suites, which bind a server on a
-port the operating system picks and talk to it over loopback; `test_colour`,
-which starts a real collector on a fixed loopback port and reads its greeting
-back off the event stream; and `test_config`, which starts one on a fixed
-loopback port to watch a setting reach the socket. Nothing leaves the machine.
-Everything else drives the code in process with synthetic packets, which is
-also the honest limitation: the exporters are imaginary, and how the colours
-actually look still needs a human and a terminal. The page is checked for what
-it must not contain rather than rendered, so the browser half wants a human
-too.
+sends it NetFlow v5 datagrams; the two web suites, which bind a server on a port
+the operating system picks and talk to it over loopback; `test_colour`, which
+starts a real collector on ports the operating system picks and reads its
+greeting back off the event stream; and `test_config`, which starts one on a
+fixed loopback port to watch a setting reach the socket. Nothing leaves the
+machine. Everything else drives the code in process with synthetic packets,
+which is also the honest limitation: the exporters are imaginary, and how the
+colours actually look still needs a human and a terminal. The page is checked
+for what it must not contain rather than rendered, so the browser half wants a
+human too.
 
 ---
 

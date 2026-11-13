@@ -168,8 +168,9 @@ def write_keys(out=None, keys=None):
     """List every key and what it does.
 
     `keys` narrows the listing to a particular set, which is what the browser's
-    copy asks for: it cannot press the escape key or the QR key, so a listing
-    offering either there would advertise something the control route refuses.
+    copy asks for: it cannot press the escape key, the QR key or the sticky
+    header key, so a listing offering any of them there would advertise
+    something the control route refuses.
 
     What the ? key prints, and what the reminder line under the banner points
     at rather than tries to be. A line has room to name the keys or to explain

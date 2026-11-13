@@ -19,7 +19,7 @@ import queue
 
 from harness import check, finish, plain
 
-from nettail.cli import web_bind_warning, web_reach_note
+from nettail.cli import web_bind_warning, web_port_note, web_reach_note
 from nettail.feed import Feed
 from nettail.web import WebInterface, in_container, is_loopback
 
@@ -71,6 +71,26 @@ check("the port is taken from the argument, not hardcoded",
       "-p 127.0.0.1:9999:9999" in plain(
           web_bind_warning("0.0.0.0", 9999, contained=True)))
 
+# A specific address in a container is either the container's own, behind a
+# publish, or under host networking one of the host's, with nothing published
+# in front of it. That second case is the bind the compose file suggests for a
+# proxy in a container of its own, so the line must not promise that a publish
+# keeps it private, and is coloured, since it may well be exposed.
+gateway = plain(web_bind_warning("172.18.0.1", 2056, contained=True))
+check("a specific address in a container is named",
+      "172.18.0.1" in gateway, gateway)
+check("and is not said to be settled by a publish",
+      "settled by the publish" not in gateway
+      and "-p 127.0.0.1:2056:2056" not in gateway, gateway)
+check("it says what host networking exposes",
+      "host networking" in gateway and "every other container" in gateway,
+      gateway)
+check("and is coloured, because it may be exposed",
+      web_bind_warning("172.18.0.1", 2056, contained=True) != gateway)
+check("a wildcard bind in a container keeps the quiet line",
+      "settled by the publish" in plain(
+          web_bind_warning("::", 2056, contained=True)))
+
 # -- the note about reaching the view from elsewhere -----------------------
 #
 # Under a wildcard bind the printed URL says 127.0.0.1, which is right here and
@@ -92,6 +112,37 @@ check("nor a container, where the published 127.0.0.1 is right as printed",
       web_reach_note("0.0.0.0", [], contained=True) is None)
 check("while a host with the same bind still gets it",
       web_reach_note("0.0.0.0", [], contained=False) is not None)
+
+# A request naming another port has two usual causes in either place: the
+# publish or the tunnel the line names, and a reverse proxy, which is mended
+# by --web-url rather than --web-port. A container sits behind a proxy as
+# easily as a host does, so both lines name the flag.
+for contained in (True, False):
+    said = plain(web_port_note(8443, 2056, contained=contained))
+    where = "in a container" if contained else "on a host"
+    check("the port note %s names --web-port to match" % where,
+          "--web-port 8443" in said, said)
+    check("and names --web-url for a reverse proxy %s" % where,
+          "--web-url" in said, said)
+
+# With --web-url already given, telling the reader to pass it would be advice
+# they have taken. The likelier trouble is that it does not name the address
+# the browser opened, so the note says that, quotes the flag's value, and
+# still offers --web-port for the tunnel or publish it may equally be.
+PUBLIC = "https://flows.example.com"
+for contained in (True, False):
+    said = plain(web_port_note(8443, 2056, contained=contained, public=PUBLIC))
+    where = "in a container" if contained else "on a host"
+    check("behind --web-url the port note %s quotes its value" % where,
+          "--web-url (%s)" % PUBLIC in said, said)
+    check("and says it may not match the address opened %s" % where,
+          "--web-url does not match the address it opened" in said, said)
+    check("and still offers --web-port %s" % where,
+          "--web-port 8443" in said, said)
+    check("without telling the reader to pass --web-url again %s" % where,
+          "pass --web-url" not in said, said)
+    check("and still says it once %s" % where, said.endswith("Said once."),
+          said)
 
 # -- what the detection is not allowed to affect ---------------------------
 

@@ -22,9 +22,9 @@ thing, a URL of this program's own making, so the general case can go:
   10, so there is no width to switch on.
 
 What that leaves is 106 bytes of URL. The longest this program can build is a
-routable name from `--web-host` with a token on the end, and it does not come
-close. Anything that somehow did gets its URL printed on its own, which is the
-answer the reader wanted anyway.
+routable name from `--web-host` or `--web-url` with a token on the end, and it
+does not come close. Anything that somehow did gets its URL printed on its own,
+which is the answer the reader wanted anyway.
 
 Byte mode throughout, and not alphanumeric, which would be denser: the token
 in the URL is case-sensitive and alphanumeric mode is uppercase only.
@@ -466,10 +466,11 @@ def fits(matrix, size, url, border=QUIET_ZONE):
 
     The URL is measured along with the symbol, and not only because it takes a
     row. It can be wider than the symbol above it, which a name from
-    `--web-host` makes easy, and then it wraps and takes several. Counting one
-    row for it regardless is how a window that this said yes to could still
-    scroll the top of the symbol away: the check has to be about the block
-    that gets printed rather than about the symbol in it.
+    `--web-host` or an address from `--web-url` makes easy, and then it wraps
+    and takes several. Counting one row for it regardless is how a window that
+    this said yes to could still scroll the top of the symbol away: the check
+    has to be about the block that gets printed rather than about the symbol
+    in it.
 
     A window that reports nothing, which is what a redirected stream does,
     fails this. So does one measured against a scroll region rather than the

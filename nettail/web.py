@@ -40,20 +40,22 @@ are not optional.
   bind.** This is what stops DNS rebinding, which is the attack that matters
   against anything listening on loopback: there the view answers to the
   address a connection arrived on, to `localhost`, and to a name only when
-  `--web-host` gave it. Under a routable bind the LAN reaches the view
-  directly and the token is its guard, so any name is accepted unless
-  `--web-host` narrows it, which is the rule Jupyter, Syncthing and Ollama
-  each settled on. See `host_allowed` for why comparing against the bound
-  address is not enough, and `hosts_restricted` for where the rule is
-  decided.
-- **An `Origin` check on the control route**, refusing a request that names an
-  origin other than this one.
-- **Six routes and no seventh.** The page, the stream, the flags font, the
-  control route, the one that answers a question about a flow and the one
-  that sets a tab's filter. No
-  directory listing, no file handler, nothing that turns part of a request
-  into a path on disk. The page and the font are read once at startup and
-  live in memory.
+  `--web-host` or `--web-url` gave it. Under a routable bind the LAN reaches
+  the view directly and the token is its guard, so any name is accepted
+  unless one of those narrows it, which is the rule Jupyter, Syncthing and
+  Ollama each settled on. See `host_allowed` for why comparing against the
+  bound address is not enough, and `hosts_restricted` for where the rule is
+  decided. The name from `--web-url` is the one name accepted without this
+  server's port, for the reason on `public_host`.
+- **An `Origin` check on every route a browser posts to**, refusing a request
+  that names an origin other than this one. The one from `--web-url` is the
+  only origin it takes that may say https, and only exactly as given.
+- **Seven routes and no eighth.** The page, the stream, the flags font, the
+  control route, the one that answers a question about a flow, the one that
+  sets a tab's filter and the one that looks back through stored flows for a
+  tab scrolling up. No directory listing, no file handler, nothing that turns
+  part of a request into a path on disk. The page and the font are read once
+  at startup and live in memory.
 - **A cap on connected browsers.** Each stream holds a thread for as long as
   the tab is open, so the count is bounded rather than left to whoever is
   opening tabs. That cap covers the stream only, which is why there is also
@@ -111,6 +113,23 @@ KEY_QUEUE_MAX = 64
 # four of these every few seconds, so sixteen is a long way past a person and
 # a long way short of a way to keep the collector busy.
 ASK_QUEUE_MAX = 16
+
+# Refused origins allowed to wait for the receive loop to report them. A
+# request has to carry the token before its origin is looked at, so only
+# somebody holding the URL can add to this, but that includes a watcher given
+# a --web-readonly one, which is why how many are printed one by one is
+# limited separately, by `cli.OriginReports`. A page behind a misconfigured
+# proxy refreshing a dialog in four tabs is a handful between two turns of the
+# loop; past this many the rest are counted rather than kept, and the count is
+# reported in their place.
+ORIGIN_NOTICE_MAX = 32
+
+# How much of a refused request's Origin and Host is kept for the report. More
+# than the report prints, so that it can still say the header ran on.
+WIRE_KEPT = 256
+
+# How many stored flows a tab back from the background is replayed, at most,
+# before it is put on the live stream.
 RESTORE_MAX = 4000
 
 # How many stored flows one answer to a scroll up carries, and how many rows
@@ -305,13 +324,13 @@ def host_allowed(header, local_addr, port, names=(), restricted=True):
     address into a name is the whole of the DNS rebinding attack, so a server
     that answers to no name except `localhost` cannot be rebound into.
 
-    `names` is what `--web-host` gave, lowercased: the names this machine goes
-    by, which a browser on another machine puts in the header in place of the
-    address. Accepting them does not reopen the hole. Rebinding works by
-    pointing a name the attacker controls at this address, and a name the
-    operator typed on the command line is, by construction, not one of those.
-    What it does mean is that the operator is trusted to list only names that
-    are theirs, which is what the flag's help says.
+    `names` is what `--web-host` gave, with the name from `--web-url` after
+    them, lowercased: the names this machine goes by, which a browser on
+    another machine puts in the header in place of the address. Accepting
+    them does not reopen the hole. Rebinding works by pointing a name the
+    attacker controls at this address, and a name the operator typed on the
+    command line is, by construction, not one of those. What it does mean is
+    that the operator is trusted to list only names that are theirs.
 
     `restricted` is False under a routable bind with no names given, and then
     every name passes once the port has. Rebinding is an attack on what only
@@ -415,7 +434,7 @@ def port_named(header):
         return None
 
 
-def origin_allowed(origin, local_addr, port, names=(), host=None):
+def origin_allowed(origin, local_addr, port, names=(), host=None, public=None):
     """Whether an `Origin` header names this server.
 
     Beside `host_allowed` and testable the same way, because the two are the
@@ -438,30 +457,54 @@ def origin_allowed(origin, local_addr, port, names=(), host=None):
     ascii check is the same trap as the one in the path: `compare_digest`
     refuses a non-ascii `str` by raising rather than by returning False, and
     every header here arrives decoded as latin-1.
+
+    `public` is the origin `--web-url` gave, already in the form a browser
+    writes one. It is the only candidate here that may say https, because it
+    is the only address this server is told is behind something that speaks
+    it, and it is accepted whichever of the two cases above applies.
     """
     if not origin or not origin.isascii():
         return False
+    for candidate in origin_candidates(local_addr, port, names, host, public):
+        if hmac.compare_digest(origin, candidate):
+            return True
+    return False
+
+
+def origin_candidates(local_addr, port, names=(), host=None, public=None):
+    """Every origin `origin_allowed` takes, in the order it tries them.
+
+    A function of its own so that the check and the line explaining a refusal
+    of it read the one list: a note that described the rule in other words
+    would be a second statement of it, free to drift from what is enforced.
+    A `host` that is not ascii adds no candidate of its own, for the reason
+    the ascii check on an origin exists, and every other candidate is ascii
+    already: an address, `localhost`, and names `web_host_arg` and
+    `web_url_arg` have been through.
+    """
+    candidates = [public] if public is not None else []
     if host is not None:
         if not host.isascii():
-            return False
+            return candidates
         host = host.strip()
-        candidates = ["http://%s" % host]
+        candidates.append("http://%s" % host)
         if port == 80 and host.endswith(":80"):
             # A browser leaves the default port out of an Origin even when
             # the Host it sent spelt it out.
             candidates.append("http://%s" % host[:-3])
     else:
-        candidates = ["http://%s:%d" % (local_addr, port),
-                      "http://localhost:%d" % port]
+        # Bracketed when it is IPv6, as a browser writes it in an Origin.
+        # Unbracketed, a view reached directly by such an address took every
+        # key press as coming from somewhere else.
+        candidates += ["http://%s:%d" % (in_url(str(local_addr)), port),
+                       "http://localhost:%d" % port]
         candidates += ["http://%s:%d" % (in_url(name), port)
                        for name in names]
         if port == 80:
-            candidates += ["http://%s" % local_addr, "http://localhost"]
+            candidates += ["http://%s" % in_url(str(local_addr)),
+                           "http://localhost"]
             candidates += ["http://%s" % in_url(name) for name in names]
-    for candidate in candidates:
-        if hmac.compare_digest(origin, candidate):
-            return True
-    return False
+    return candidates
 
 
 def in_url(name):
@@ -483,11 +526,11 @@ def hosts_restricted(bound_addr, hosts):
     Under a loopback bind it does, because loopback is what a DNS rebinding
     page can reach that nothing else can. Under a routable bind the LAN
     already reaches the view directly and the token is what guards it, so
-    names are not compared unless `--web-host` gave some, in which case they
-    are the only names allowed. Jupyter, Syncthing and Ollama each arrived at
-    this rule separately. It is decided from the address that was bound and
-    never from the address a connection arrived on, so that a wildcard bind
-    answers the same way on every interface.
+    names are not compared unless `--web-host` or `--web-url` gave some, in
+    which case they are the only names allowed. Jupyter, Syncthing and Ollama
+    each arrived at this rule separately. It is decided from the address that
+    was bound and never from the address a connection arrived on, so that a
+    wildcard bind answers the same way on every interface.
     """
     return is_loopback(bound_addr) or bool(hosts)
 
@@ -600,6 +643,179 @@ def web_host_arg(text):
     return name
 
 
+def web_url_arg(text):
+    """The address given with `--web-url`, reduced to an origin.
+
+    It is the address a browser opens when something stands in front of this
+    server, a reverse proxy most often, and it is written back out the way a
+    browser writes an `Origin`: scheme and host lowercased, brackets round an
+    IPv6 literal, and the port left out when it is the scheme's default. That
+    is the form the `Origin` check compares against byte for byte, so a URL
+    stored any other way would refuse every key press with nothing said.
+
+    A path is refused rather than honoured. The routes start at the root, a
+    proxy that serves the view under a prefix may or may not strip it before
+    passing the request on, and guessing which would be a route that works
+    behind one proxy and answers 404 behind the next. A trailing dot on the
+    host is refused for a similar reason: nginx drops it from the `Host` it
+    forwards, so the name stored with it would never be matched. A name with characters
+    beyond ascii is refused before it gets that far and has to be given in its
+    punycode form, which is what a browser sends anyway. A pattern is refused
+    here too, in words about a URL rather than about `--web-host`, since what
+    this flag does is more than add a name. The host part then goes through
+    `web_host_arg`, so the rest are refused for the reasons given there.
+
+    Two things a browser does to a host are done here too, or refused where
+    doing them would be a guess. A backslash, a control character and the few
+    other characters a browser will not keep in a host are refused, since the
+    browser would open some other address than the one stored. And an address
+    literal is written the way a browser serialises it: an IPv6 one compressed
+    and lowercased, and a numeric host taken as IPv4 only when it is already
+    four plain decimal parts, because a browser reads `127.000.0.1` or
+    `0x7f.1` as an address and a stored spelling of it would match nothing.
+    An IPv4 address mapped into IPv6 is refused rather than spelt, since not
+    every interpreter this runs on spells it the way a browser does.
+    """
+    raw = text.strip()
+    if not raw:
+        raise argparse.ArgumentTypeError("a web url cannot be empty")
+    if not raw.isascii():
+        raise argparse.ArgumentTypeError(
+            "a web url must be ascii, with any other name in its punycode "
+            "form; it is compared byte for byte with what a browser sends")
+    bad = [ch for ch in raw if ch in "\\<>^|" or ch < " " or ch == "\x7f"]
+    if bad:
+        raise argparse.ArgumentTypeError(
+            "a web url cannot hold %s; a browser would not keep it in the "
+            "address it opens" % ", ".join(sorted(set(map(repr, bad)))))
+    try:
+        parts = urlsplit(raw)
+    except ValueError:
+        # Unbalanced brackets, or brackets round something that is not an
+        # IPv6 address, which urlsplit refuses itself on newer interpreters.
+        raise argparse.ArgumentTypeError(
+            "a web url's brackets hold an IPv6 address and nothing else, "
+            "as in https://[fd00::1]") from None
+    scheme = parts.scheme.lower()
+    if scheme not in ("http", "https"):
+        raise argparse.ArgumentTypeError(
+            "a web url starts with https:// or http://, as the address a "
+            "browser opens does")
+    if "@" in parts.netloc:
+        raise argparse.ArgumentTypeError(
+            "a web url cannot carry a user name or a password")
+    if parts.path not in ("", "/"):
+        raise argparse.ArgumentTypeError(
+            "a web url names a site and no path; the view is served from the "
+            "root, so a proxy in front of it has to serve it from the root of "
+            "a name of its own")
+    if parts.query or parts.fragment or raw.endswith(("?", "#")):
+        raise argparse.ArgumentTypeError(
+            "a web url cannot carry a query or a fragment")
+    try:
+        port = parts.port
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            "a web url's port has to be a number from 1 to 65535") from None
+    if port == 0:
+        raise argparse.ArgumentTypeError(
+            "a web url's port has to be a number from 1 to 65535")
+    if not parts.hostname:
+        raise argparse.ArgumentTypeError("a web url has to name a host")
+    if "[" in parts.netloc and ":" not in parts.hostname:
+        # An IPvFuture literal, or a name someone bracketed. Older urlsplit
+        # lets it through and drops the brackets, which would store a name
+        # nobody typed.
+        raise argparse.ArgumentTypeError(
+            "a web url's brackets hold an IPv6 address and nothing else, "
+            "as in https://[fd00::1]")
+    if parts.hostname.endswith("."):
+        raise argparse.ArgumentTypeError(
+            "a web url's host cannot end in a dot; a proxy passes the name on "
+            "without it, so the view would never recognise the address, and "
+            "the name without the dot is the one to give")
+    if "*" in parts.hostname:
+        raise argparse.ArgumentTypeError(
+            "a web url names one site, not a pattern; it is the single "
+            "address a browser opens through the proxy")
+    name = canonical_host(web_host_arg(parts.hostname))
+    if port is None or port == DEFAULT_PORTS[scheme]:
+        return "%s://%s" % (scheme, in_url(name))
+    return "%s://%s:%d" % (scheme, in_url(name), port)
+
+
+def canonical_host(name):
+    """A host from `web_host_arg` as a browser writes it, or refused.
+
+    A name is returned as it is. An IPv6 literal is compressed, which is the
+    one spelling a browser sends. A host whose last label is a number is one
+    a browser reads as IPv4, in decimal, octal or hex, so it is taken only
+    when it is already the plain dotted form, which is the form a browser
+    writes back out; any other spelling of an address is refused with the
+    one that would work, since storing it would match nothing.
+    """
+    if ":" in name:
+        address = ipaddress.IPv6Address(name)
+        if address.ipv4_mapped is not None:
+            raise argparse.ArgumentTypeError(
+                "a web url's host is an IPv4 address mapped into IPv6; give "
+                "the IPv4 address itself, %s" % address.ipv4_mapped)
+        return str(address)
+    last = name.split(".")[-1]
+    numeric = last.isdigit() or (
+        last[:2] == "0x" and all(ch in "0123456789abcdef" for ch in last[2:]))
+    if not numeric:
+        return name
+    try:
+        plain = str(ipaddress.IPv4Address(name))
+    except ValueError:
+        plain = None
+    if plain != name:
+        raise argparse.ArgumentTypeError(
+            "a web url's host ends in a number, so a browser reads it as an "
+            "IPv4 address; write it as four plain decimal parts, as a "
+            "browser would, such as 192.0.2.10")
+    return name
+
+
+# The port a browser leaves out of a URL, and so out of the `Host` and the
+# `Origin` it sends, for each scheme `--web-url` takes.
+DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def url_endpoint(origin):
+    """The name and port an origin from `web_url_arg` reaches.
+
+    The name is in the form `host_allowed` reduces a header to, without
+    brackets, and the port is the one meant whether it was written or not.
+    """
+    parts = urlsplit(origin)
+    return parts.hostname, parts.port or DEFAULT_PORTS[parts.scheme]
+
+
+def public_host(header, public):
+    """Whether a `Host` header names the address `--web-url` gave.
+
+    Kept apart from `split_host`, whose rule about a missing port is exactly
+    right for a browser talking to this server directly and exactly wrong for
+    one talking to a proxy: the browser leaves the port out because it is the
+    proxy's default, and the proxy passes the name on as it found it. So the
+    name is taken here bare, which is what the browser sent and what nginx's
+    `$host` forwards, or with the port the browser would have named, which is
+    what a proxy passing the header through untouched sends when that port is
+    not the default. No other form of it is, and no other name.
+
+    That is not a gap in the DNS rebinding guard. Rebinding needs a name the
+    attacker controls, and this one was typed by the operator, which is the
+    argument `--web-host` already rests on.
+    """
+    if not header or public is None:
+        return False
+    name, port = public
+    shown = in_url(name)
+    return header.strip().lower() in (shown, "%s:%d" % (shown, port))
+
+
 def detail_refresh_arg(text):
     """Seconds between the details dialog re-asking, or 0 for never.
 
@@ -653,11 +869,12 @@ def _frame(event, payload):
 
 
 class _Handler(BaseHTTPRequestHandler):
-    """Six routes and nothing else.
+    """Seven routes and nothing else.
 
     The page, the stream, the flags font, one key press, one question about a
-    flow and one tab's filter. Matched exactly rather than by prefix, so a
-    path this does not name is a 404 and never a file on disk.
+    flow, one tab's filter and one ask for older stored flows. Matched exactly
+    rather than by prefix, so a path this does not name is a 404 and never a
+    file on disk.
     """
 
     # Named so that a response says as little about what is running as it can.
@@ -749,9 +966,10 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _checked(self):
         """Common checks. Returns the route, or None having already answered."""
-        if not host_allowed(self.headers.get("Host"), self._local_addr(),
-                            self.site.port, self.site.hosts,
-                            self.site.restricted):
+        header = self.headers.get("Host")
+        if not (public_host(header, self.site.public_endpoint)
+                or host_allowed(header, self._local_addr(), self.site.port,
+                                self.site.hosts, self.site.restricted)):
             # Deliberately the same answer a bad token gets. A response that
             # distinguished them would tell somebody probing which of the two
             # they had got right.
@@ -1021,7 +1239,7 @@ class _Handler(BaseHTTPRequestHandler):
         # every route, because the reasoning has nothing to do with what the
         # request goes on to ask for.
         origin = self.headers.get("Origin")
-        if origin and not self._origin_ok(origin):
+        if origin and not self._origin_ok(origin, route):
             self._refuse(403, "bad origin")
             return
 
@@ -1038,7 +1256,7 @@ class _Handler(BaseHTTPRequestHandler):
         """One key press, on its way to the dispatch the terminal also uses."""
         # The readonly refusal lives here rather than beside the origin check,
         # because it is about changing what the collector is doing and the
-        # other route changes nothing. Asking what a flow was is reading, and
+        # other routes change nothing. Asking what a flow was is reading, and
         # a view served for watching is still a view somebody may want to
         # read properly.
         if self.site.readonly:
@@ -1239,12 +1457,29 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _origin_ok(self, origin):
+    def _origin_ok(self, origin, route):
         # In the open case the origin is held to the name this request
         # carried; otherwise to the address and the names, as the Host was.
         host = None if self.site.restricted else self.headers.get("Host")
-        return origin_allowed(origin, self._local_addr(), self.site.port,
-                              self.site.hosts, host)
+        local = self._local_addr()
+        if origin_allowed(origin, local, self.site.port, self.site.hosts,
+                          host, self.site.public):
+            return True
+        # Refused with the same two words whatever the reason, and the
+        # browser is told nothing more. The reader at the terminal is told
+        # the rest, out of band and by the receive loop, as a refused port
+        # is: what was sent, and what would have been taken instead. Only
+        # the start of each header is kept, since only the start is ever
+        # printed and a header may be most of 64 KB.
+        origin = origin[:WIRE_KEPT]
+        if host is not None:
+            host = host[:WIRE_KEPT]
+        self.site.note_origin((
+            origin, host,
+            origin_candidates(local, self.site.port, self.site.hosts, host,
+                              self.site.public),
+            route))
+        return False
 
 
 class _Server(ThreadingHTTPServer):
@@ -1253,6 +1488,27 @@ class _Server(ThreadingHTTPServer):
     # backstop for a thread that has somehow got past it.
     daemon_threads = True
     allow_reuse_address = True
+
+    def process_request(self, request, client_address):
+        """Start a thread for one connection, and note it before it starts.
+
+        `ThreadingMixIn` keeps no list of its threads when they are daemons,
+        and `stop` needs one: a request being refused for its origin as the
+        run ends notes the refusal after the receive loop's last turn, and
+        only a join tells the final report it has everything. Noted here, on
+        the serving thread and before `start`, so a thread cannot be running
+        and unnoted at the moment `shutdown` returns.
+        """
+        thread = threading.Thread(target=self.process_request_thread,
+                                  args=(request, client_address), daemon=True)
+        self.site.track(thread)
+        thread.start()
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self.site.untrack(threading.current_thread())
 
     def handle_error(self, request, client_address):
         """Say nothing about a request that raised.
@@ -1279,7 +1535,7 @@ class WebInterface:
 
     def __init__(self, bus, keys, allowed, bind="127.0.0.1",
                  port=DEFAULT_WEB_PORT, token=None, readonly=False,
-                 hosts=(), asks=None, lookups=None):
+                 hosts=(), asks=None, lookups=None, public=None):
         self.bus = bus
         self.keys = keys
         # Where a browser's questions about a flow wait for the receive loop,
@@ -1304,13 +1560,30 @@ class WebInterface:
         self.bind_addr = bind
         self.port = port
         # The names the view answers to besides its address, in the order they
-        # were given, because the first one is the one the printed URL uses.
+        # were given, because the first one is the one the printed URL uses
+        # when there is no `--web-url`.
         # Reduced to the form the Host header is reduced to, lowercased and
         # without brackets, here as well as by the flag, for a caller that is
         # not the flag: a bracketed literal left as given would match nothing
         # and be bracketed twice in the URL.
+        #
+        # The name from `--web-url` joins them, last. That is what makes the
+        # Host check compare names under a routable bind once a proxy is
+        # named, as a name from `--web-host` does: the view then answers to
+        # its address, its names and the proxy's, rather than to anything at
+        # all. It also lets the name reach this port directly, which is
+        # `--web-host` behaviour and no wider than it.
+        #
+        # Put through the flag's own reduction for a caller that is not the
+        # flag, since an origin stored any other way matches nothing.
+        self.public = web_url_arg(public) if public else None
+        self.public_endpoint = (url_endpoint(self.public) if self.public
+                                else None)
+        named = list(hosts)
+        if self.public_endpoint:
+            named.append(self.public_endpoint[0])
         self.hosts = tuple(dict.fromkeys(
-            name.strip().strip("[]").lower() for name in hosts))
+            name.strip().strip("[]").lower() for name in named))
         # Whether names are compared at all, from the requested bind for now
         # and from the bound address once there is one; see bind().
         self.restricted = hosts_restricted(bind, self.hosts)
@@ -1324,6 +1597,10 @@ class WebInterface:
         self.font = load_font()
         self.policy = content_policy(self.page)
         self.watching = set()
+        # Every thread answering a connection, streams included, so that
+        # `stop` can wait for the requests still in flight when it is called.
+        self.handlers = set()
+        self._handlers_lock = threading.Lock()
         # A port some request named in its `Host` header that is not the one
         # this is listening on. Written by a request thread and read and
         # cleared by the receive loop, and that is the whole of the traffic on
@@ -1333,17 +1610,64 @@ class WebInterface:
         # and would be more than this needs, because the newest value is as
         # good as the oldest and only one of them is ever reported.
         self.port_notice = None
+        # Every refused `Origin`, for the receive loop to report: the origin
+        # sent, the `Host` it was judged against in the open case and None
+        # otherwise, the origins that would have been taken, and the route.
+        # A queue rather than the port's single slot, because each refusal is
+        # accounted for and a slot would fold two between turns of the loop
+        # into one. Bounded, with what does not fit counted under the lock, so a
+        # request thread never waits on it and it never grows.
+        self.origin_notices = queue.Queue(maxsize=ORIGIN_NOTICE_MAX)
+        self.origins_unkept = 0
+        self._unkept_lock = threading.Lock()
         self._httpd = None
         self._thread = None
 
+    def track(self, thread):
+        with self._handlers_lock:
+            self.handlers.add(thread)
+
+    def untrack(self, thread):
+        with self._handlers_lock:
+            self.handlers.discard(thread)
+
+    def note_origin(self, refusal):
+        """Leave a refused origin for the receive loop. Never blocks."""
+        try:
+            self.origin_notices.put_nowait(refusal)
+        except queue.Full:
+            with self._unkept_lock:
+                self.origins_unkept += 1
+
+    def take_origin_notices(self):
+        """Every refusal waiting, oldest first, and how many did not fit.
+
+        Called by the receive loop and by nothing else, so the queue has one
+        reader and the count one resetter.
+        """
+        taken = []
+        while True:
+            try:
+                taken.append(self.origin_notices.get_nowait())
+            except queue.Empty:
+                break
+        with self._unkept_lock:
+            unkept, self.origins_unkept = self.origins_unkept, 0
+        return taken, unkept
+
     @property
     def url(self):
-        # A name given with --web-host is the one to print, because it was
-        # given so that this URL would work from another machine. Failing
-        # that, a wildcard bind is every address, which is no use in a URL, so
-        # the one printed names the loopback address: it is the one that
-        # certainly works and the one somebody on this machine should be using
-        # anyway.
+        # The address from --web-url comes first of all, since it is the one
+        # a browser is actually going to open; the port this listens on is
+        # the proxy's business and appears nowhere in it.
+        if self.public:
+            return "%s/t/%s/" % (self.public, self.token)
+        # Otherwise a name given with --web-host is the one to print, because
+        # it was given so that this URL would work from another machine.
+        # Failing that, a wildcard bind is every address, which is no use in a
+        # URL, so the one printed names the loopback address: it is the one
+        # that certainly works and the one somebody on this machine should be
+        # using anyway.
         if self.hosts:
             shown = in_url(self.hosts[0])
         else:
@@ -1413,3 +1737,14 @@ class WebInterface:
             self._httpd.server_close()
         if self._thread is not None:
             self._thread.join(1.0)
+        # Nothing new is accepted now, so wait for what was already being
+        # answered, within the same deadline. A request refused for its
+        # origin during this notes it before its thread ends, which is what
+        # lets the report made after this call be the last word.
+        with self._handlers_lock:
+            answering = list(self.handlers)
+        for thread in answering:
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                break
+            thread.join(remaining)

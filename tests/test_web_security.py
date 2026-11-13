@@ -10,6 +10,7 @@ rebinding, and because the obvious version of it is wrong in both of the cases
 that actually arise.
 """
 import argparse
+import io
 import json
 import queue
 import socket
@@ -20,11 +21,21 @@ import time
 import urllib.error
 import urllib.request
 
-from harness import check, finish
+from harness import check, finish, plain
 
+from nettail.cli import (
+    ORIGIN_LINES,
+    ORIGIN_WINDOW,
+    OriginReports,
+    web_origin_line,
+    web_origin_note,
+    wire_text,
+)
 from nettail.feed import Feed
 from nettail.web import (
+    ORIGIN_NOTICE_MAX,
     REQUEST_TIMEOUT,
+    WIRE_KEPT,
     WebInterface,
     _Handler,
     content_policy,
@@ -32,10 +43,14 @@ from nettail.web import (
     hosts_restricted,
     is_loopback,
     origin_allowed,
+    origin_candidates,
     port_named,
+    public_host,
     split_host,
+    url_endpoint,
     web_host_arg,
     web_token_arg,
+    web_url_arg,
 )
 
 # -- the Host rule, on its own -------------------------------------------
@@ -283,6 +298,344 @@ check("a --web-host with a port stops the program at parse",
       bad_flag.returncode == 2, "exit %d" % bad_flag.returncode)
 check("and says which flag the port belongs to",
       "--web-port" in bad_flag.stderr, bad_flag.stderr[-200:])
+
+# -- the address a proxy is reached at ------------------------------------
+#
+# --web-url is stored as an origin, written the way a browser writes one,
+# because the Origin check compares it byte for byte: lowercased, the default
+# port dropped, an IPv6 literal bracketed, and no trailing slash.
+
+for given, stored in (("https://Flows.Example.com", "https://flows.example.com"),
+                      ("https://flows.example.com/", "https://flows.example.com"),
+                      ("HTTPS://flows.example.com:443", "https://flows.example.com"),
+                      ("http://flows.example.com:80/", "http://flows.example.com"),
+                      ("https://flows.example.com:8443",
+                       "https://flows.example.com:8443"),
+                      ("http://flows.lan:443", "http://flows.lan:443"),
+                      ("https://[FD00::1]:8443", "https://[fd00::1]:8443"),
+                      (" https://flows.example.com ", "https://flows.example.com")):
+    check("a web url %r is stored as %r" % (given, stored),
+          web_url_arg(given) == stored, repr(web_url_arg(given)))
+for bad, why in (("", "empty"), ("flows.example.com", "no scheme"),
+                 ("ftp://flows.example.com", "another scheme"),
+                 ("https://flows.example.com/nettail", "a path"),
+                 ("https://flows.example.com/?a=1", "a query"),
+                 ("https://flows.example.com/#top", "a fragment"),
+                 ("https://flows.example.com?", "an empty query"),
+                 ("https://user@flows.example.com", "a user name"),
+                 ("https://u:p@flows.example.com", "a password"),
+                 ("https://flows.example.com:zz", "a port that is not a number"),
+                 ("https://flows.example.com:0", "port zero"),
+                 ("https://flows.example.com:70000", "a port out of range"),
+                 ("https://", "no host"), ("https://*.example.com", "a pattern"),
+                 ("https://caf\xe9.example.com", "non-ascii")):
+    try:
+        web_url_arg(bad)
+        refused = False
+    except argparse.ArgumentTypeError:
+        refused = True
+    check("a web url is refused for %s" % why, refused, "%a" % bad)
+
+# An address literal is stored the way a browser serialises it, since the
+# Origin check compares byte for byte; a numeric host in any other spelling a
+# browser would read as an address, and a mapped IPv4 one, are refused rather
+# than guessed at; and so are characters a browser would not keep in a host.
+check("an uncompressed IPv6 literal is stored compressed",
+      web_url_arg("https://[2001:DB8:0:0::1]") == "https://[2001:db8::1]")
+check("and a padded one too",
+      web_url_arg("https://[fd00:0:0:0:0:0:0:5]:8443") == "https://[fd00::5]:8443")
+check("a plain IPv4 literal is kept",
+      web_url_arg("https://192.0.2.10") == "https://192.0.2.10")
+check("a name ending in letters is not taken for an address",
+      web_url_arg("https://flows.example") == "https://flows.example")
+for bad, why in (("https://127.000.0.1", "a zero-padded IPv4 address"),
+                 ("https://0x7f.0.0.1", "a hex IPv4 address"),
+                 ("https://1234", "a bare number"),
+                 ("https://[::ffff:192.0.2.10]", "a mapped IPv4 address"),
+                 ("https://flows.example.com" + chr(92) + "x", "a backslash"),
+                 ("https://a|b.example.com", "a pipe"),
+                 ("https://a<b.example.com", "an angle bracket"),
+                 ("https://flows.example.com" + chr(127), "a DEL")):
+    try:
+        web_url_arg(bad)
+        refused = False
+    except argparse.ArgumentTypeError:
+        refused = True
+    check("a web url is refused for %s" % why, refused, "%a" % bad)
+
+# A trailing dot is refused, since nginx's $host drops it and the stored
+# name would never be matched; brackets hold IPv6 and nothing else, and a
+# malformed pair is refused with a reason rather than argparse's generic line.
+for bad, why in (("https://flows.example.com.", "a trailing dot"),
+                 ("https://[fd00::1", "an unclosed bracket"),
+                 ("https://fd00::1]", "a stray closing bracket"),
+                 ("https://[v1.x]", "an IPvFuture literal"),
+                 ("https://[flows.example.com]", "a bracketed name")):
+    try:
+        web_url_arg(bad)
+        reason = None
+    except argparse.ArgumentTypeError as exc:
+        reason = str(exc)
+    check("a web url is refused for %s" % why, reason is not None, bad)
+    check("with a reason in words for %s" % why,
+          reason is not None and reason.startswith("a web url"), repr(reason))
+bracketed = subprocess.run([sys.executable, "-m", "nettail", "--web-url",
+                            "https://[fd00::1"], capture_output=True, text=True)
+check("a malformed bracket is explained at the command line, not as a value",
+      "brackets hold an IPv6 address" in bracketed.stderr
+      and "invalid web_url_arg value" not in bracketed.stderr,
+      bracketed.stderr[-200:])
+
+# A wildcard is refused in words about a URL rather than in --web-host's,
+# which talk about --web-bind and would send the reader to the wrong flag.
+try:
+    web_url_arg("https://*.example.com")
+    pattern_reason = ""
+except argparse.ArgumentTypeError as exc:
+    pattern_reason = str(exc)
+check("a wildcard web url is refused as a pattern",
+      "not a pattern" in pattern_reason, pattern_reason)
+check("in words about a web url", pattern_reason.startswith("a web url"),
+      pattern_reason)
+check("and not in --web-host's, which point at --web-bind",
+      "--web-bind" not in pattern_reason, pattern_reason)
+
+# The browser leaves the port out of Host when it is the proxy's default, and
+# a proxy passes the name on bare (nginx's $host) or as it found it. Both are
+# taken for the name --web-url gave; nothing else new is.
+PUBLIC = url_endpoint("https://flows.example.com")
+check("the endpoint of a portless https url is port 443",
+      PUBLIC == ("flows.example.com", 443), repr(PUBLIC))
+check("a bare Host naming the proxy's name is taken",
+      public_host("flows.example.com", PUBLIC) is True)
+check("and in any case", public_host("Flows.Example.COM", PUBLIC) is True)
+check("and with the default port written out",
+      public_host("flows.example.com:443", PUBLIC) is True)
+check("but not with some other port",
+      public_host("flows.example.com:2056", PUBLIC) is False)
+check("nor under another name", public_host("other.example.com", PUBLIC) is False)
+check("nor a name that merely starts with it",
+      public_host("flows.example.com.evil.example", PUBLIC) is False)
+check("nor with no --web-url at all",
+      public_host("flows.example.com", None) is False)
+check("nor with no Host at all", public_host(None, PUBLIC) is False)
+ODD = url_endpoint("https://flows.example.com:8443")
+check("a written port is the one meant", ODD == ("flows.example.com", 8443))
+check("and a Host carrying it is taken",
+      public_host("flows.example.com:8443", ODD) is True)
+check("as is the bare name a proxy reduced it to",
+      public_host("flows.example.com", ODD) is True)
+V6 = url_endpoint("https://[fd00::1]:8443")
+check("an IPv6 literal is taken bracketed",
+      public_host("[fd00::1]:8443", V6) is True)
+check("and is not taken unbracketed", public_host("fd00::1", V6) is False)
+
+# The Origin is the browser's, and the browser opened the proxy's address, so
+# the origin --web-url gave is the one https origin taken, and only exactly.
+ORIGIN = "https://flows.example.com"
+check("the proxy's origin is taken",
+      origin_allowed(ORIGIN, "127.0.0.1", 2056, (), None, ORIGIN) is True)
+check("and in the open case too",
+      origin_allowed(ORIGIN, "192.0.2.10", 2056, (), ANY, ORIGIN) is True)
+check("but not over plain http",
+      origin_allowed("http://flows.example.com", "127.0.0.1", 2056, (), None,
+                     ORIGIN) is False)
+check("nor with a port written in",
+      origin_allowed("https://flows.example.com:2056", "127.0.0.1", 2056, (),
+                     None, ORIGIN) is False)
+check("nor from another site",
+      origin_allowed("https://evil.example.com", "127.0.0.1", 2056, (), None,
+                     ORIGIN) is False)
+check("and an https origin is still refused with no --web-url",
+      origin_allowed(ORIGIN, "127.0.0.1", 2056, ("flows.example.com",))
+      is False)
+
+# The note explaining a refusal lists origin_candidates, and the check takes
+# exactly those, so the list is held here to what a browser sends, written
+# out by hand rather than read back from the function under test.
+for args, expected in (
+        (("127.0.0.1", 2056, (), None, None),
+         ["http://127.0.0.1:2056", "http://localhost:2056"]),
+        (("192.0.2.10", 2056, NAMES, None, ORIGIN),
+         [ORIGIN, "http://192.0.2.10:2056", "http://localhost:2056",
+          "http://z2m:2056", "http://collector.lan:2056"]),
+        (("fd00::5", 80, ("flows.example.com",), None, None),
+         ["http://[fd00::5]:80", "http://localhost:80",
+          "http://flows.example.com:80", "http://[fd00::5]",
+          "http://localhost", "http://flows.example.com"]),
+        (("192.0.2.10", 2056, (), ANY, ORIGIN),
+         [ORIGIN, "http://anything.example:2056"]),
+        (("192.0.2.10", 80, (), "anything.example:80", None),
+         ["http://anything.example:80", "http://anything.example"])):
+    listed = origin_candidates(*args)
+    check("the origins listed for %r are the ones a browser sends" % (args,),
+          listed == expected, repr(listed))
+check("an IPv6 bind on port 80 takes its own address with no port",
+      origin_allowed("http://[fd00::5]", "fd00::5", 80, ("flows.example.com",))
+      is True)
+check("a non-ascii Host lists no origin of its own",
+      origin_candidates("192.0.2.10", 2056, (), "café:2056", None) == [])
+
+# What the note does with text off the wire. A header is whatever whoever
+# reached the port sent, so nothing in it may reach the terminal as a control
+# sequence, and its length is bounded.
+check("printable ascii is shown as sent",
+      wire_text("http://flowbox:2056") == "http://flowbox:2056")
+check("an escape is not", "" not in wire_text("http://a]0;xb"))
+check("nor anything past ascii", wire_text("http://café") == "http://caf?")
+check("a long header is cut short", len(wire_text("a" * 1000)) < 130)
+check("a missing Host is said to be missing", wire_text(None) == "(none)")
+
+note = web_origin_note("http://flowbox:2056", "nettail.example.com:2056",
+                       ["http://nettail.example.com:2056"], "key")
+check("the note names the origin sent and the one taken",
+      "http://flowbox:2056" in note
+      and "It takes http://nettail.example.com:2056." in note, note)
+check("and, in the open case, the Host they had to agree with",
+      "which was nettail.example.com:2056" in note, note)
+check("and points at --web-url when none was given", "--web-url" in note)
+check("and the route the page asked on", "to /key was refused" in note, note)
+check("and says how later refusals are reported",
+      "Later refusals are reported in one line each, up to %d every %g "
+      "seconds" % (ORIGIN_LINES, ORIGIN_WINDOW) in note, note)
+behind_note = plain(web_origin_note(
+    "https://flows.example.com", None, ["http://flows.example.com"], "key",
+    public="http://flows.example.com"))
+check("behind --web-url the note says the flag may not be the address opened",
+      "--web-url (http://flows.example.com) is not the address the browser "
+      "opened" in behind_note, behind_note)
+
+# A header may be most of 64 KB. Only the start of it is printed, and only the
+# start is cleaned, so a long one costs what a short one does.
+long_origin = "http://" + "a" * 65000
+check("a long header is cut before it is printed",
+      wire_text(long_origin) == long_origin[:120] + "...")
+check("and one exactly at the limit is not marked as cut",
+      wire_text("b" * 120) == "b" * 120)
+
+# How refusals reach stderr. A watcher given a --web-readonly URL holds the
+# token, and every request they send with a foreign Origin is refused, so the
+# lines printed are limited over time and the rest counted. Driven with a
+# clock that only moves when told to.
+class _Clock:
+    now = 100.0
+
+    def __call__(self):
+        return self.now
+
+
+def _refusal(i):
+    return ("http://flood%d" % i, None, ["http://localhost:2056"], "key")
+
+
+clock = _Clock()
+sink = io.StringIO()
+reports = OriginReports(clock=clock, out=sink)
+reports.report([_refusal(i) for i in range(40)], 7)
+said = plain(sink.getvalue())
+check("the first refusal of a flood is explained in full",
+      said.count("was refused with 403") == 1, said[:300])
+check("and a few after it get a line each",
+      said.count("refused origin ") == ORIGIN_LINES,
+      str(said.count("refused origin ")))
+check("and nothing is said yet about the rest", "more refused" not in said)
+clock.now += ORIGIN_WINDOW
+reports.report([], 0)
+said = plain(sink.getvalue())
+held = 40 - 1 - ORIGIN_LINES + 7
+check("once the stretch ends the rest are counted in one line",
+      "and %d more refused for their origin" % held in said, said[-200:])
+reports.report([_refusal(99)], 0)
+said = plain(sink.getvalue())
+check("and the next stretch shows lines again",
+      "refused origin http://flood99 on /key (403)" in said)
+check("without explaining a second time",
+      said.count("was refused with 403") == 1)
+reports.report([_refusal(i) for i in range(ORIGIN_LINES + 3)], 0)
+reports.flush()
+said = plain(sink.getvalue())
+check("flush reports what the stretch held back",
+      said.rstrip().endswith("and 4 more refused for their origin, counted "
+                             "rather than shown one by one"), said[-200:])
+quiet = io.StringIO()
+OriginReports(clock=clock, out=quiet).flush()
+check("and says nothing when nothing was held back", quiet.getvalue() == "")
+lines = OriginReports(clock=clock, out=io.StringIO())
+for _second in range(60):
+    clock.now += 1.0
+    lines.report([_refusal(i) for i in range(500)], 0)
+check("a minute of flooding prints a bounded number of lines",
+      lines.out.getvalue().count("\n") <= 1 + (60 / ORIGIN_WINDOW + 1)
+      * (ORIGIN_LINES + 1), str(lines.out.getvalue().count("\n")))
+check("a later refusal is one line naming the origin and the route",
+      plain(web_origin_line("http://flowbox:2056", "detail"))
+      == "refused origin http://flowbox:2056 on /detail (403)")
+
+# The queue between the request threads and the receive loop is bounded, and
+# what does not fit is counted rather than kept or waited for.
+spill = WebInterface(Feed(), queue.Queue(), set(), bind="127.0.0.1", port=2056)
+for i in range(ORIGIN_NOTICE_MAX + 5):
+    spill.note_origin(("http://o%d" % i, None, [], "key"))
+taken, unkept = spill.take_origin_notices()
+check("refusals up to the bound are kept, oldest first",
+      len(taken) == ORIGIN_NOTICE_MAX and taken[0][0] == "http://o0",
+      str(len(taken)))
+check("and the rest are counted", unkept == 5, str(unkept))
+check("and taking them empties both",
+      spill.take_origin_notices() == ([], 0))
+restricted_note = web_origin_note("https://evil.example.com", None,
+                                  ["https://flows.example.com"], "detail",
+                                  public="https://flows.example.com")
+check("a restricted view's note names no Host",
+      "Host, which was" not in restricted_note, restricted_note)
+check("and one already behind --web-url does not suggest it again",
+      "pass --web-url" not in restricted_note, restricted_note)
+hostile = web_origin_note("http://x[2J", "y[H:2056", ["http://z"],
+                          "key") + web_origin_line("http://w[2J", "key")
+# The note's own colour is SGR and is taken out first; what is left must hold
+# no escape and no bell, since every one of those came from the request.
+bare = plain(hostile)
+check("nothing from the request reaches the terminal as a control",
+      "" not in bare and "" not in bare, "%a" % bare)
+
+# Naming a proxy narrows a routable bind as --web-host does, so a view behind
+# one answers to its own address and that name rather than to anything.
+proxied = WebInterface(Feed(), queue.Queue(), set(), bind="0.0.0.0", port=2056,
+                       public="https://Flows.Example.com/")
+check("a routable bind behind a named proxy is restricted",
+      proxied.restricted is True)
+check("the proxy's name is among the view's names",
+      "flows.example.com" in proxied.hosts, repr(proxied.hosts))
+check("an origin given directly is reduced as the flag reduces it",
+      proxied.public == "https://flows.example.com", repr(proxied.public))
+spaced = WebInterface(Feed(), queue.Queue(), set(), bind="127.0.0.1",
+                      port=2056, public="https://flows.example.com ")
+check("and its endpoint is taken from the reduced form",
+      spaced.public_endpoint == ("flows.example.com", 443),
+      repr(spaced.public_endpoint))
+
+# Naming a proxy makes an IPv6 bind compare names, and the origin it then
+# takes for its own address has to be bracketed, as a browser writes it, or a
+# page opened directly by that address can press no key at all.
+v6 = WebInterface(Feed(), queue.Queue(), set(), bind="fd00::5", port=2056,
+                  public="https://flows.example.com")
+check("an IPv6 bind behind --web-url still takes its own address's origin",
+      origin_allowed("http://[fd00::5]:2056", "fd00::5", 2056, v6.hosts, None,
+                     v6.public) is True)
+check("and never the unbracketed spelling no browser sends",
+      "http://fd00::5:2056" not in origin_candidates(
+          "fd00::5", 2056, v6.hosts, None, v6.public))
+check("and the printed url is the proxy's, with no port of this server's",
+      proxied.url == "https://flows.example.com/t/%s/" % proxied.token,
+      proxied.url)
+
+helped_url = "--web-url" in helped.stdout
+check("--web-url is in the help", helped_url)
+bad_url = subprocess.run([sys.executable, "-m", "nettail", "--web-url",
+                          "https://flows.example.com/nettail"],
+                         capture_output=True, text=True)
+check("a --web-url with a path stops the program at parse",
+      bad_url.returncode == 2, "exit %d" % bad_url.returncode)
 
 # -- the address a request is judged against ------------------------------
 #
@@ -760,6 +1113,111 @@ try:
         check("so exactly one key was queued", named_keys.qsize() == 1)
     finally:
         named.stop(timeout=1.0)
+
+    # -- behind a proxy ---------------------------------------------------
+    #
+    # What a reverse proxy terminating TLS hands this server: the browser's
+    # own Host, which names the proxy and usually no port, and the browser's
+    # Origin, which says https. Each was refused before --web-url, the first
+    # as a 404 and the second as a 403 on every key press.
+    proxy_keys = queue.Queue(maxsize=8)
+    behind = WebInterface(Feed(), proxy_keys, {"e"}, bind="127.0.0.1", port=0,
+                          public="https://flows.example.com")
+    behind.start()
+    behind_url = "http://127.0.0.1:%d/t/%s/" % (behind.port, behind.token)
+    try:
+        check("the page is served under the proxy's bare name",
+              fetch(behind_url, host_header="flows.example.com") == 200)
+        check("and with its default port written in",
+              fetch(behind_url, host_header="flows.example.com:443") == 200)
+        check("and still to this machine directly",
+              fetch(behind_url, host_header="127.0.0.1:%d" % behind.port)
+              == 200)
+        check("but not under some other bare name",
+              fetch(behind_url, host_header="other.example.com") == 404)
+        check("nor without the token",
+              fetch("http://127.0.0.1:%d/t/%s/" % (behind.port, "x" * 32),
+                    host_header="flows.example.com") == 404)
+        body = json.dumps({"key": "e"}).encode("utf-8")
+        check("a key press from the proxy's https origin is accepted",
+              fetch(behind_url + "key", host_header="flows.example.com",
+                    method="POST", body=body,
+                    origin="https://flows.example.com") == 200)
+        check("and one from another https origin is not",
+              fetch(behind_url + "key", host_header="flows.example.com",
+                    method="POST", body=body,
+                    origin="https://evil.example.com") == 403)
+        check("so exactly one key was queued behind the proxy",
+              proxy_keys.qsize() == 1)
+
+        # The refusal leaves the receive loop what it needs to explain it,
+        # and an accepted request leaves nothing. Loopback is restricted, so
+        # there is no Host to have been judged against.
+        taken, unkept = behind.take_origin_notices()
+        refused = taken[0] if len(taken) == 1 else None
+        check("a refused origin is noted for the receive loop, once",
+              refused is not None and refused[0] == "https://evil.example.com"
+              and refused[1] is None and unkept == 0, repr((taken, unkept)))
+        check("with the origins that would have been taken, the proxy's first",
+              refused is not None
+              and refused[2][0] == "https://flows.example.com", repr(refused))
+        check("and the route it was refused on",
+              refused is not None and refused[3] == "key", repr(refused))
+        fetch(behind_url + "key", host_header="flows.example.com",
+              method="POST", body=body, origin="https://flows.example.com")
+        check("and an accepted one notes nothing",
+              behind.take_origin_notices() == ([], 0))
+        fetch(behind_url + "key", host_header="flows.example.com",
+              method="POST", body=body, origin="https://" + "x" * 5000)
+        taken, _unkept = behind.take_origin_notices()
+        check("a long origin is kept only to its start",
+              len(taken) == 1 and len(taken[0][0]) == WIRE_KEPT,
+              repr([len(r[0]) for r in taken]))
+        # The answer reaches the client before its thread has finished
+        # closing the connection, so the thread is given a moment to end
+        # before the set is looked at. What is pinned is that a thread that
+        # has ended is let go, not how quickly it ends.
+        for thread in list(behind.handlers):
+            thread.join(2.0)
+        check("and the handler threads are let go once answered",
+              not behind.handlers, repr(behind.handlers))
+
+        # The open case, where the origin is judged against the request's own
+        # Host and that Host is kept for the report. Only a routable bind with
+        # no names reaches it and a suite has only loopback, so the decision
+        # the bind would have made is set by hand on a running server.
+        open_site = WebInterface(Feed(), queue.Queue(maxsize=8), {"e"},
+                                 bind="127.0.0.1", port=0)
+        open_site.start()
+        try:
+            open_site.restricted = False
+            long_host = "h" * 5000 + ":%d" % open_site.port
+            open_url = "http://127.0.0.1:%d/t/%s/key" % (open_site.port,
+                                                        open_site.token)
+            status = fetch(open_url, host_header=long_host, method="POST",
+                           body=body, origin="http://elsewhere.example")
+            taken, _unkept = open_site.take_origin_notices()
+            check("in the open case a refusal keeps the Host it was judged by",
+                  status == 403 and len(taken) == 1
+                  and taken[0][1] is not None, repr((status, len(taken))))
+            check("and keeps only its start",
+                  len(taken) == 1 and len(taken[0][1]) == WIRE_KEPT,
+                  repr([len(r[1] or "") for r in taken]))
+            check("as does the origin listed from it",
+                  len(taken) == 1
+                  and taken[0][2] == ["http://" + "h" * WIRE_KEPT],
+                  repr([c[:20] for c in taken[0][2]] if taken else None))
+        finally:
+            open_site.stop(timeout=1.0)
+        for _ in range(3):
+            fetch(behind_url + "detail", host_header="flows.example.com",
+                  method="POST", body=b"{}", origin="https://evil.example.com")
+        taken, unkept = behind.take_origin_notices()
+        check("every refusal is noted, not only the latest",
+              [r[3] for r in taken] == ["detail"] * 3 and unkept == 0,
+              repr((taken, unkept)))
+    finally:
+        behind.stop(timeout=1.0)
 
     # -- the token --------------------------------------------------------
 

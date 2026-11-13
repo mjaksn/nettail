@@ -2,7 +2,7 @@
 
 An exporter says what its records look like before it sends any, and every
 field read afterwards is read through that. Printing it is this program's
-work: netflume learns the template and raises nothing about it, so the store
+work: netflume raises nothing for a template resent unchanged, so the store
 this suite exercises is the seam. The shape once, a line for each refresh
 after that, the shape again when the fields change under an ID already in
 use, and none of it without --templates.

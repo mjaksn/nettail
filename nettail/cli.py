@@ -96,6 +96,7 @@ from .web import (
     unpad,
     web_host_arg,
     web_token_arg,
+    web_url_arg,
 )
 
 
@@ -380,11 +381,12 @@ def _endpoints(left, arrow, right, column):
 class WatchedTemplates(TemplateStore):
     """A template store that remembers every template it was handed.
 
-    netflume raises an object for a sampling rate, an export gap and a
-    datagram it could not read, and a template it has just learned is not one
-    of them. The fact exists in exactly one place, which is `put` returning
-    True, so standing a subclass in the decoder's way is how this program
-    hears about it without parsing the datagram a second time.
+    netflume raises an object for a sampling rate, an export gap, a datagram
+    it could not read and a template that is new or changed, but not for one
+    resent unchanged. The whole fact, resends included, exists in one place,
+    which is `put`, returning True for a template that is new or changed and
+    False for a resend, so standing a subclass in the decoder's way is how
+    this program hears about it without parsing the datagram a second time.
 
     netflume 0.3.0 raises a `TemplateLearned`, which is the better home this
     note used to say it was waiting for, and this has not moved onto it. The
@@ -941,6 +943,11 @@ def web_bind_warning(bind, port, contained=None):
     on this network talked to whom on an address other machines can reach, over
     plain HTTP, guarded by a token that travels in the clear beside it.
 
+    A specific address in a container is the exception, and gets its own
+    line: under host networking it is one of the host's own addresses, which
+    no publish guards, and that is the bind the compose file suggests for a
+    proxy in a container of its own.
+
     In a container the same bind means something else entirely. Loopback inside
     the container's own namespace is unreachable from a published port, so the
     image asks for 0.0.0.0 every time it starts, and the alarming version of
@@ -955,6 +962,18 @@ def web_bind_warning(bind, port, contained=None):
     """
     if contained is None:
         contained = in_container()
+    if contained and bind not in ("0.0.0.0", "::", ""):
+        # A specific address in a container is the container's own, reached
+        # through a publish, or under host networking one of the host's,
+        # which nothing published stands in front of. This cannot tell which,
+        # so it says what the second means rather than promising the first.
+        return (f"{C.YELLOW}the web interface is bound to {bind}. If that is "
+                f"this container's own address, a published port reaches it "
+                f"and the publish decides what is exposed. Under host "
+                f"networking it is an address of the host itself and nothing "
+                f"is published: anything that can reach {bind}, every other "
+                f"container on the host included, can reach the view, with "
+                f"only the token to stop it, over plain HTTP.{C.RESET}")
     if contained:
         return (f"the web interface is bound to {bind}, which is how a "
                 f"published port reaches it from outside this container. What "
@@ -970,7 +989,7 @@ def web_bind_warning(bind, port, contained=None):
             f"everything it fetches.{C.RESET}")
 
 
-def web_port_note(asked, port, contained=None):
+def web_port_note(asked, port, contained=None, public=None):
     """What to say when a request named a port this is not listening on.
 
     The refusal itself is right and stays as it is: a `Host` naming another
@@ -982,22 +1001,183 @@ def web_port_note(asked, port, contained=None):
 
     A published port mapped to a different number is how this is nearly always
     reached, so in a container the line says so in those terms and hands over
-    the flag that fixes it. On a host the same mismatch means a proxy in front,
-    or a tunnel, and the same flag is still the answer, so the difference is
-    only in which arrangement is named.
+    the flag that fixes it. On a host the same mismatch means a tunnel or a
+    proxy in front. A tunnel that forwards bytes untouched is answered by the
+    same flag, but a reverse proxy is not: it connects to this port whatever
+    the browser named, and what it needs is `--web-url`. A container can sit
+    behind one as easily as a host can, so both lines name it, since nothing
+    here can tell a proxy from either of the other two.
+
+    `public` is the origin `--web-url` gave. A run that has one needs no
+    telling to pass it, so it is told instead that the flag may not name the
+    address the browser opened: the name it gave is taken with its own port
+    or none, and a request naming any other port arrives here as a tunnel's
+    would. `web_origin_note` drops its advice about the flag in the same case.
 
     `contained` is for the tests. Left as None it asks the environment.
     """
     if contained is None:
         contained = in_container()
     where = ("a published port mapped to a different number on the host"
-             if contained else "a proxy or a tunnel in front of this")
-    return (f"{C.YELLOW}a request asked for port {asked} and this is "
-            f"listening on {port}, so it was refused, and it was refused with "
-            f"the same 404 a wrong token gets. {where.capitalize()} is the "
-            f"usual reason. The port in the address bar has to be the port "
+             if contained else "a tunnel in front of this")
+    opening = (f"{C.YELLOW}a request asked for port {asked} and this is "
+               f"listening on {port}, so it was refused, and it was refused "
+               f"with the same 404 a wrong token gets. {where.capitalize()} "
+               f"is the usual reason.")
+    if public is not None:
+        return (f"{opening} The port in the address bar has to be the port "
+                f"this was told to serve, or, through the proxy, the port in "
+                f"--web-url ({public}) or none. If the browser opened this "
+                f"through the proxy, --web-url does not match the address it "
+                f"opened, so give --web-url that address; otherwise pass "
+                f"--web-port {asked} to match, or move the other side to "
+                f"{port}. Said once.{C.RESET}")
+    proxy = (" Behind a reverse proxy, pass --web-url with the address the "
+             "browser opens instead.")
+    return (f"{opening} The port in the address bar has to be the port "
             f"this was told to serve, so pass --web-port {asked} to match, or "
-            f"move the other side to {port}. Said once.{C.RESET}")
+            f"move the other side to {port}.{proxy} Said once.{C.RESET}")
+
+
+def wire_text(text, limit=120):
+    """Text a request sent, made fit to print on this terminal.
+
+    A header is whatever whoever reached the port chose to send, decoded as
+    latin-1, so it may hold an escape sequence that would move the cursor or
+    retitle the window. Everything outside printable ascii is shown as a
+    question mark, and the length is bounded so a header cannot fill the
+    screen. It is cut to length before it is cleaned, so that a header of
+    most of 64 KB costs no more to print than one of a hundred characters.
+    Only a request carrying the token reaches the origin check, so only
+    somebody holding the URL can make these lines appear at all, which
+    includes a watcher given a --web-readonly one; `OriginReports` is what
+    limits how many they can make.
+    """
+    if text is None:
+        return "(none)"
+    shown = "".join(ch if " " <= ch <= "~" else "?" for ch in text[:limit])
+    if len(text) > limit:
+        shown += "..."
+    return shown
+
+
+def web_origin_note(origin, host, candidates, route, public=None):
+    """What to say the first time a page's request is refused for its `Origin`.
+
+    The browser is told "bad origin" and nothing else, for the reason a
+    refused `Host` gets the bare 404. The reader at the terminal is owed the
+    rest, because the ordinary way to arrive here is a proxy in front whose
+    `Host` and `Origin` disagree, and that is invisible from either end: both
+    tabs of a page send the same origin, and only the one through the proxy
+    is refused. So this names what was sent and what would have been taken,
+    which are the two things that have to be compared to see it.
+
+    `host` is the `Host` the origin was judged against, which is only the
+    case when the view answers to any name, and None otherwise. Every value
+    from the request goes through `wire_text` on its way out.
+
+    Only the first refusal of a run is told all of this. A page behind a
+    misconfigured proxy asks again on its own, a details dialog every few
+    seconds, so the explanation in full every time would bury the flows it is
+    printed between; later refusals get `web_origin_line`, as many as
+    `OriginReports` allows, and a count for the rest.
+
+    With `--web-url` given there is no flag to suggest, and the likeliest
+    trouble left is that it is not quite the address the browser opened, a
+    scheme or a port apart, so that is what the note says instead.
+    """
+    taken = ", ".join(wire_text(c) for c in candidates) or "none"
+    line = (f"{C.YELLOW}a request from a browser page to /{wire_text(route)} "
+            f"was refused with 403 because its Origin, {wire_text(origin)}, "
+            f"is not one this view takes. It takes {taken}.")
+    if host is not None:
+        line += (f" This view answers to whatever name a request carries, so "
+                 f"the origin has to name the same host and port as the "
+                 f"request's own Host, which was {wire_text(host)}. Behind a "
+                 f"proxy, the Host it sends and the Origin it passes on have "
+                 f"to agree.")
+    if public is None:
+        line += (" Behind a reverse proxy, pass --web-url with the address "
+                 "the browser opens.")
+    else:
+        line += (f" If the page was opened through the proxy, --web-url "
+                 f"({public}) is not the address the browser opened: its "
+                 f"scheme, name and port have to be exactly that address's.")
+    return (line + f" Later refusals are reported in one line each, up to "
+            f"{ORIGIN_LINES} every {ORIGIN_WINDOW:g} seconds, and the rest "
+            f"are counted.{C.RESET}")
+
+
+def web_origin_line(origin, route):
+    """One line for a refusal after the first, which said why, while
+    `OriginReports` still has lines to give in the current stretch."""
+    return (f"{C.YELLOW}refused origin {wire_text(origin)} on "
+            f"/{wire_text(route)} (403){C.RESET}")
+
+
+# How many refusals after the first are printed one by one in a stretch of
+# this many seconds. A page behind a broken proxy asks a few times a minute;
+# a watcher holding a --web-readonly URL could ask a thousand times a second,
+# and every one of those would otherwise be a line scrolling the flows away.
+ORIGIN_LINES = 5
+ORIGIN_WINDOW = 10.0
+
+
+class OriginReports:
+    """Puts refused origins on stderr: the first in full, then a few, then a
+    count.
+
+    Written for the receive loop, which hands over what `take_origin_notices`
+    returned on every turn whether it holds anything or not, since a turn is
+    also how a stretch of time ends. Every refusal is accounted for. The first
+    of a run is explained by `web_origin_note`; up to `ORIGIN_LINES` after it
+    in each `ORIGIN_WINDOW` get a line of their own; the rest, and any the
+    server could not keep, are counted and reported in one line when the
+    stretch ends, or by `flush` at the end of the run.
+
+    `clock` is for the tests. `out` is looked up at each print when left as
+    None, because `main` wraps stderr after this may have been built.
+    """
+
+    def __init__(self, public=None, clock=time.monotonic, out=None):
+        self.public = public
+        self.clock = clock
+        self.out = out
+        self.explained = False
+        self.started = None
+        self.shown = 0
+        self.held = 0
+
+    def _print(self, text):
+        print(text, file=self.out if self.out is not None else sys.stderr)
+
+    def report(self, refusals, unkept=0):
+        now = self.clock()
+        if self.started is None:
+            self.started = now
+        elif now - self.started >= ORIGIN_WINDOW:
+            self.flush()
+            self.started = now
+            self.shown = 0
+        for origin, host, candidates, route in refusals:
+            if not self.explained:
+                self.explained = True
+                self._print(web_origin_note(origin, host, candidates, route,
+                                            public=self.public))
+            elif self.shown < ORIGIN_LINES:
+                self.shown += 1
+                self._print(web_origin_line(origin, route))
+            else:
+                self.held += 1
+        self.held += unkept
+
+    def flush(self):
+        """Report the refusals counted and not shown, if there were any."""
+        if self.held:
+            self._print(f"{C.YELLOW}and {self.held} more refused for their "
+                        f"origin, counted rather than shown one by one"
+                        f"{C.RESET}")
+            self.held = 0
 
 
 def web_reach_note(bound_addr, hosts, contained=None):
@@ -1006,9 +1186,9 @@ def web_reach_note(bound_addr, hosts, contained=None):
     Under a wildcard bind the printed URL names 127.0.0.1, which is right for
     this machine and wrong for every other, and the reader has to know to
     substitute. This says so once, on the way in. A specific routable bind
-    prints its own address, a name given with --web-host is what the URL
-    carries, and a loopback bind is reachable from nowhere else, so none of
-    those needs it.
+    prints its own address, a name given with --web-host or the address given
+    with --web-url is what the URL carries, and a loopback bind is reachable
+    from nowhere else, so none of those needs it.
 
     Nor does a container, where the image binds 0.0.0.0 on every start and
     the printed 127.0.0.1 is exactly right through a published port. The
@@ -1391,7 +1571,8 @@ def build_parser():
                          metavar="PORT",
                          help=f"port for the web interface (default "
                               f"{DEFAULT_WEB_PORT}; 0 picks a free one, which "
-                              f"the printed URL names)")
+                              f"the printed URL names unless --web-url gave "
+                              f"it)")
     web_grp.add_argument("--web-bind", default="127.0.0.1", metavar="ADDR",
                          help="address for the web interface (default "
                               "127.0.0.1, and anything else exposes this "
@@ -1403,6 +1584,18 @@ def build_parser():
                               "another --web-bind, which otherwise answers to "
                               "any name, it restricts the view to the names "
                               "given. May be repeated")
+    web_grp.add_argument("--web-url", type=web_url_arg, default=None,
+                         metavar="URL",
+                         help="the address a browser opens when a reverse "
+                              "proxy stands in front of the view, such as "
+                              "https://flows.example.com. The view answers to "
+                              "that name with no port or with the URL's own "
+                              "and takes the page's requests (key presses, "
+                              "row clicks, filters and scrolling back) from "
+                              "that origin, the printed URL becomes it, and "
+                              "the name narrows the view as --web-host does. "
+                              "The proxy serves the view from the root of "
+                              "that name")
     web_grp.add_argument("--web-token", type=web_token_arg, default=None,
                          metavar="TOKEN",
                          help="use this token in the URL instead of a fresh "
@@ -1941,11 +2134,11 @@ def main():
         """The ? listing, to each view with the keys that view can press.
 
         The one place the two are deliberately shown different text rather than
-        the same characters. A browser can press neither the escape key nor the
-        QR key, so a listing offering either would advertise something the
-        control route then refuses. Everything else it can press, this key
-        included, which has no button of its own precisely because the drawer
-        is already the list.
+        the same characters. A browser can press none of the escape key, the QR
+        key and the sticky header key, so a listing offering any of them would
+        advertise something the control route then refuses. Everything else it
+        can press, this key included, which has no button of its own precisely
+        because the drawer is already the list.
 
         It goes straight at stderr rather than through `controls.out`, which is
         a tee: a listing written there would be published a line at a time,
@@ -1968,6 +2161,9 @@ def main():
     # for the reason `shown_flows` below is: the receive loop writes it and it
     # is read in the same nested scope.
     port_told = [False]
+    # Refused origins on their way to stderr. The flag's value is the origin
+    # the server holds, both having been through `web_url_arg`.
+    origin_reports = OriginReports(public=args.web_url)
 
     # Flows that have passed the display filter. In a one element list rather
     # than a bare integer because `web_status` below reads it and the receive
@@ -2153,7 +2349,7 @@ def main():
         web = WebInterface(bus, key_queue, web_keyset, bind=args.web_bind,
                            port=args.web_port, token=args.web_token,
                            readonly=args.web_readonly, hosts=args.web_host,
-                           asks=ask_queue,
+                           public=args.web_url, asks=ask_queue,
                            # Only with a store to answer from. The queue is
                            # what tells the server there is one, and handed
                            # over regardless it advertised a replay and a
@@ -2211,7 +2407,9 @@ def main():
               f"{C.RESET}", file=out)
         if web_url:
             print(f"{C.BOLD}Web interface: {web_url}{C.RESET}", file=out)
-            reach = web_reach_note(web.bound_addr, args.web_host)
+            # The server's names rather than the flag's, since a name from
+            # --web-url is among them and is what the URL carries then.
+            reach = web_reach_note(web.bound_addr, web.hosts)
             if reach:
                 print(f"{C.GREY}{reach}{C.RESET}", file=out)
             if qr_key:
@@ -2593,7 +2791,14 @@ def main():
                 asked, web.port_notice = web.port_notice, None
                 if not port_told[0]:
                     port_told[0] = True
-                    print(web_port_note(asked, web.port), file=sys.stderr)
+                    print(web_port_note(asked, web.port, public=web.public),
+                          file=sys.stderr)
+            if web is not None:
+                # Every refusal is accounted for, unlike the port, and how
+                # many are printed is limited by time rather than to one: a
+                # refusal needs the token, but --web-readonly hands the token
+                # to people who are only meant to watch.
+                origin_reports.report(*web.take_origin_notices())
             if controls.quit:
                 break
             if not controls.paused and controls.held:
@@ -2778,3 +2983,8 @@ def main():
             # joins nothing, so without this the interpreter is free to exit
             # while a writer is halfway through the summary it was just handed.
             web.stop()
+            # The server answered right up to that point, after the receive
+            # loop's last turn, so whatever it refused since is reported here
+            # rather than lost, along with anything counted and not shown.
+            origin_reports.report(*web.take_origin_notices())
+            origin_reports.flush()

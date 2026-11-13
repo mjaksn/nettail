@@ -31,6 +31,7 @@ from nettail.keys import (
     web_buttons,
     web_keys,
 )
+from nettail.web import in_container, url_endpoint, web_url_arg
 
 V5_HDR = struct.Struct("!HHIIIIBBH")
 V5_REC = struct.Struct("!4s4s4sHHIIIIHHBBBBHHBBH")
@@ -71,7 +72,8 @@ check("the terminal listing still shows every key, browser or not",
 
 
 def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
-        keyboard=None, presses=(), window=None, port_notices=(), asks=(),
+        keyboard=None, presses=(), window=None, port_notices=(),
+        origin_notices=(), late_origins=(), asks=(),
         filters=(), restore_after=None, history_before=None,
         history_term=""):
     """Drive main() with keys arriving as if from a browser.
@@ -107,6 +109,12 @@ def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
     request whose Host named another port, which cannot be made to arrive
     here: the fake interface answers nothing.
 
+    `origin_notices` are the same for a refused `Origin`, as (after_n_polls,
+    (origin, host, candidates, route)), the record a request thread would
+    leave, and an (after_n_polls, count) pair in place of the record stands
+    for that many refusals that did not fit the queue. `late_origins` are
+    records the server notes as it is stopped, after the loop has ended.
+
     `window` is a (columns, lines) pair to run with, set through the two
     environment variables `shutil.get_terminal_size` reads before it asks the
     operating system anything. A suite has no terminal, so anything that
@@ -134,6 +142,7 @@ def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
     asked = list(asks)
     filtering = list(filters)
     noticed = list(port_notices)
+    refusals = list(origin_notices)
     waiting = list(packets)
     seen = {}
 
@@ -173,6 +182,13 @@ def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
                 if note[0] <= FakeSocket.calls:
                     noticed.remove(note)
                     seen["site"].port_notice = note[1]
+            for refusal in list(refusals):
+                if refusal[0] <= FakeSocket.calls:
+                    refusals.remove(refusal)
+                    if isinstance(refusal[1], int):
+                        seen["site"].origins_unkept += refusal[1]
+                    else:
+                        seen["site"].origin_notices.append(refusal[1])
             if gap is not None:
                 bus = seen["site"].bus
                 if FakeSocket.calls == gap[0] - 1:
@@ -240,9 +256,19 @@ def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
             self.url = "http://127.0.0.1:2056/t/test-token/"
             self.asked_for = kw.get("bind", "127.0.0.1")
             self.bound_addr = self.asked_for
+            # The names the banner's reach note is asked about, which the
+            # real server holds with the name from --web-url among them.
+            public = kw.get("public")
+            named = list(kw.get("hosts", ()))
+            if public:
+                named.append(url_endpoint(web_url_arg(public))[0])
+            self.hosts = tuple(named)
             self.stopped = False
             self.serving = False
             self.port_notice = None
+            self.origin_notices = []
+            self.origins_unkept = 0
+            self.public = kw.get("public")
             # The third, where a tab back from the background asks for the
             # flows it missed and a tab scrolling up asks for older ones. The
             # receive loop answers both from the store, which is that
@@ -250,6 +276,11 @@ def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
             self.lookups = kw.get("lookups")
             self.store_enabled = self.lookups is not None
             seen["site"] = self
+
+        def take_origin_notices(self):
+            taken, self.origin_notices = self.origin_notices, []
+            unkept, self.origins_unkept = self.origins_unkept, 0
+            return taken, unkept
 
         # Bound and serving are two steps for a reason: the greeting has to be
         # set between them, so a browser can never arrive before there is one.
@@ -278,6 +309,10 @@ def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
 
         def stop(self, timeout=2.0):
             self.stopped = True
+            # A refusal noted while the server was still answering, after
+            # the receive loop's last turn, which only the report made after
+            # stop can catch.
+            self.origin_notices.extend(late_origins)
 
     typed = list(presses)
 
@@ -488,9 +523,105 @@ check("three refusals are still reported once",
 check("and it is the first of them that is reported",
       "asked for port 9000" in err and "9001" not in err)
 
+# Behind --web-url the receive loop hands the flag's value to the note, which
+# then asks whether it names the address opened instead of suggesting it.
+result = run([], [v5_packet(0)] * 4,
+             argv=["--web-url", "https://flows.example.com"],
+             port_notices=[(2, 9000)])
+err = plain(result["err"])
+check("a port mismatch behind --web-url quotes the flag's value",
+      "--web-url (https://flows.example.com)" in err, repr(err[-400:]))
+check("and does not tell the reader to pass it", "pass --web-url" not in err)
+
 result = run([], [v5_packet(0)] * 4)
 check("a run nothing was refused in says nothing",
       "asked for port" not in plain(result["err"]))
+check("about an origin either",
+      "Origin" not in plain(result["err"])
+      and "refused origin" not in plain(result["err"]))
+
+# A refused Origin is reported on stderr as a refused port is, and unlike
+# the port it is reported more than once a run. The first is explained in
+# full, with what was sent and what would have been taken; a few after it get
+# a line each in every stretch of ORIGIN_WINDOW seconds and the rest are
+# counted, because the token a refusal needs is also held by a --web-readonly
+# watcher. The case that prompted it is a proxy whose Host and Origin
+# disagree, so the open case, with the Host the origin was judged against, is
+# the one driven.
+PROXY_REFUSAL = ("http://flowbox:2056", "nettail.example.com:2056",
+                 ["http://nettail.example.com:2056"], "key")
+result = run([], [v5_packet(0)] * 10,
+             origin_notices=[(2, PROXY_REFUSAL), (4, PROXY_REFUSAL),
+                             (6, ("http://later:2056", None, [], "detail")),
+                             (8, 5)])
+err = plain(result["err"])
+check("a refused origin is reported on stderr",
+      "its Origin, http://flowbox:2056," in err, repr(err[-600:]))
+check("with the route it was refused on", "to /key was refused" in err)
+check("naming the origin that would have been taken",
+      "It takes http://nettail.example.com:2056." in err)
+check("and the Host it was judged against",
+      "which was nettail.example.com:2056" in err)
+check("and the flag for a proxy, with none given", "--web-url" in err)
+check("the explanation is given once",
+      err.count("was refused with 403") == 1,
+      str(err.count("was refused with 403")))
+check("and every later refusal gets a line of its own",
+      "refused origin http://flowbox:2056 on /key (403)" in err
+      and "refused origin http://later:2056 on /detail (403)" in err, err)
+check("so three refusals make one explanation and two lines",
+      err.count("refused origin ") == 2, str(err.count("refused origin ")))
+check("and refusals that did not fit the queue are counted, not lost",
+      "and 5 more refused for their origin" in err, repr(err[-300:]))
+check("nothing about it reaches stdout", "flowbox" not in result["out"])
+check("nor the browser, which was told bad origin and nothing else",
+      not any("flowbox" in text for _kind, text in result["prose"]))
+
+# Two places report refusals and each is pinned on its own. The receive loop
+# reports while the run is going, so its note comes before the exit summary;
+# the report after the server stops catches what arrived after the loop's last
+# turn, so that note comes after it.
+SUMMARY = "Summary"
+result = run([], [v5_packet(0)] * 4, origin_notices=[(2, PROXY_REFUSAL)])
+err = plain(result["err"])
+check("a refusal during the run is reported before the summary",
+      SUMMARY in err and 0 <= err.find("was refused with 403") < err.find(SUMMARY),
+      repr(err[-600:]))
+result = run([], [v5_packet(0)] * 4, late_origins=[PROXY_REFUSAL])
+err = plain(result["err"])
+check("one noted as the server stops is reported after it",
+      SUMMARY in err and err.find("was refused with 403") > err.find(SUMMARY),
+      repr(err[-600:]))
+
+# The receive loop hands --web-url to the note, so a run already behind one is
+# not told to pass it, and is told instead that it may not be the address the
+# browser opened.
+result = run([], [v5_packet(0)] * 4,
+             argv=["--web-url", "https://flows.example.com"],
+             origin_notices=[(2, ("https://other.example.com", None,
+                                  ["https://flows.example.com"], "key"))])
+err = plain(result["err"])
+check("behind --web-url a refused origin is not told to pass it",
+      "was refused with 403" in err and "pass --web-url" not in err,
+      repr(err[-400:]))
+check("and is told the flag may not be the address opened",
+      "--web-url (https://flows.example.com) is not the address" in err)
+
+# The banner's line about putting this machine's address in place of
+# 127.0.0.1 is asked about the server's names, which hold the --web-url name,
+# so a wildcard bind behind a proxy prints the proxy's address and nothing
+# about substituting one. Without the flag the line is there, outside a
+# container, which is the one place it is meant to be left out.
+REACH = "put this machine's address or name in place of 127.0.0.1"
+plain_run = plain(run([], [v5_packet(0)] * 2,
+                      argv=["--web-bind", "0.0.0.0"])["err"])
+check("a wildcard bind with no name says how to reach it from elsewhere",
+      (REACH in plain_run) != in_container(), repr(plain_run[:400]))
+proxied_run = plain(run([], [v5_packet(0)] * 2,
+                        argv=["--web-bind", "0.0.0.0", "--web-url",
+                              "https://flows.example.com"])["err"])
+check("and behind --web-url it does not", REACH not in proxied_run,
+      repr(proxied_run[:400]))
 
 
 # -- and pressing it draws the symbol, on the terminal only --------------

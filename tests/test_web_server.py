@@ -675,8 +675,8 @@ try:
             asks.get_nowait()
 
         # And an unknown route under a good token is still a 404, so the
-        # branches that added the detail and filter routes did not open the
-        # door to anything else.
+        # branches that added the detail, filter and history routes did not
+        # open the door to anything else.
         check("no other control route appeared",
               post("anything", {"ask": 1}) == 404)
 

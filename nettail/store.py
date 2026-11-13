@@ -1,11 +1,11 @@
 """Durable flow history on the local machine.
 
-Phase 1 is a write path and nothing more: one row per shown flow, written as it
-arrives, with enough indexed facts to support later replay and time-window
-queries without freezing any browser shape into the database. The collector is
-the one writer and the receive loop is where that writing happens, so this
-module owns the file, the schema and the retention pass and answers ordinary
-Python methods rather than exposing SQL around the program.
+One row per shown flow, written as it arrives, with enough indexed facts to
+answer the replay a tab back from the background gets and the older rows a tab
+scrolling up asks for, without freezing any browser shape into the database.
+The collector is the one writer and the receive loop is where that writing
+happens, so this module owns the file, the schema and the retention pass and
+answers ordinary Python methods rather than exposing SQL around the program.
 """
 
 import argparse
@@ -247,7 +247,7 @@ class FlowStore:
         return int(self._db.execute("SELECT COUNT(*) FROM flows").fetchone()[0])
 
     def latest(self):
-        """The newest row, for tests and startup notes."""
+        """The newest row, for the tests."""
         row = self._db.execute(
             """
             SELECT ingest_id, received, exporter, src_addr, dst_addr, record_json
