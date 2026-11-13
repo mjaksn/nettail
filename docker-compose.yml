@@ -82,7 +82,10 @@ services:
       # from an https page, and the printed URL becomes it. A proxy in a
       # container of its own cannot reach the host's loopback, so change
       # --web-bind above to the gateway of the proxy's Docker network and
-      # forward to that. See "Behind a reverse proxy" in the README.
+      # forward to that. Under host networking that gateway is one of the
+      # host's own addresses with nothing published in front of it, so every
+      # container on the host can reach the view there, guarded by the token
+      # alone. See "Behind a reverse proxy" in the README.
       #- --web-url
       #- https://flows.example.com
       # Serve the display but accept no keys from the browser.

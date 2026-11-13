@@ -1183,9 +1183,10 @@ Four things about it are easy to break and quiet when broken.
 - **A symbol that will not fit is not drawn at all**, and three separate
   things go into deciding that. `fits` counts the URL at the rows it really
   wraps into rather than at one, because a name from `--web-host` or an
-  address from `--web-url` makes a URL wider than the symbol above it easy and
-  the block then scrolls its own top away. `cli.main` measures the scroll region rather than the window, because
-  a sticky header and a status bar have taken rows off either end. And the
+  address from `--web-url` makes a URL wider than the symbol above it easy
+  and the block then scrolls its own top away. `cli.main` measures the scroll
+  region rather than the window, because a sticky header and a status bar
+  have taken rows off either end. And the
   window measured is the one the block is going to: `qr.window` asks about the
   stream it is handed, where `shutil.get_terminal_size` asks about stdout
   whatever it is handed, so `nettail --web > flows.txt` would otherwise

@@ -73,7 +73,7 @@ check("the terminal listing still shows every key, browser or not",
 
 def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
         keyboard=None, presses=(), window=None, port_notices=(),
-        origin_notices=(), asks=(),
+        origin_notices=(), late_origins=(), asks=(),
         filters=(), restore_after=None, history_before=None,
         history_term=""):
     """Drive main() with keys arriving as if from a browser.
@@ -112,7 +112,8 @@ def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
     `origin_notices` are the same for a refused `Origin`, as (after_n_polls,
     (origin, host, candidates, route)), the record a request thread would
     leave, and an (after_n_polls, count) pair in place of the record stands
-    for that many refusals that did not fit the queue.
+    for that many refusals that did not fit the queue. `late_origins` are
+    records the server notes as it is stopped, after the loop has ended.
 
     `window` is a (columns, lines) pair to run with, set through the two
     environment variables `shutil.get_terminal_size` reads before it asks the
@@ -308,6 +309,10 @@ def run(web_presses, packets, argv=(), rounds=400, settle=0.0, gap=None,
 
         def stop(self, timeout=2.0):
             self.stopped = True
+            # A refusal noted while the server was still answering, after
+            # the receive loop's last turn, which only the report made after
+            # stop can catch.
+            self.origin_notices.extend(late_origins)
 
     typed = list(presses)
 
@@ -536,13 +541,13 @@ check("about an origin either",
       and "refused origin" not in plain(result["err"]))
 
 # A refused Origin is reported on stderr as a refused port is, and unlike
-# the port it is reported every time: a request is only refused for its origin
-# once it has shown the token, so nobody without the URL can write here. The
-# first is explained in full, with what was sent and what would have been
-# taken; each after it is one line, since a page behind a broken proxy asks
-# again on its own every few seconds. The case that prompted it is a proxy
-# whose Host and Origin disagree, so the open case, with the Host the origin
-# was judged against, is the one driven.
+# the port it is reported more than once a run. The first is explained in
+# full, with what was sent and what would have been taken; a few after it get
+# a line each in every stretch of ORIGIN_WINDOW seconds and the rest are
+# counted, because the token a refusal needs is also held by a --web-readonly
+# watcher. The case that prompted it is a proxy whose Host and Origin
+# disagree, so the open case, with the Host the origin was judged against, is
+# the one driven.
 PROXY_REFUSAL = ("http://flowbox:2056", "nettail.example.com:2056",
                  ["http://nettail.example.com:2056"], "key")
 result = run([], [v5_packet(0)] * 10,
@@ -571,6 +576,22 @@ check("and refusals that did not fit the queue are counted, not lost",
 check("nothing about it reaches stdout", "flowbox" not in result["out"])
 check("nor the browser, which was told bad origin and nothing else",
       not any("flowbox" in text for _kind, text in result["prose"]))
+
+# Two places report refusals and each is pinned on its own. The receive loop
+# reports while the run is going, so its note comes before the exit summary;
+# the report after the server stops catches what arrived after the loop's last
+# turn, so that note comes after it.
+SUMMARY = "Summary"
+result = run([], [v5_packet(0)] * 4, origin_notices=[(2, PROXY_REFUSAL)])
+err = plain(result["err"])
+check("a refusal during the run is reported before the summary",
+      SUMMARY in err and 0 <= err.find("was refused with 403") < err.find(SUMMARY),
+      repr(err[-600:]))
+result = run([], [v5_packet(0)] * 4, late_origins=[PROXY_REFUSAL])
+err = plain(result["err"])
+check("one noted as the server stops is reported after it",
+      SUMMARY in err and err.find("was refused with 403") > err.find(SUMMARY),
+      repr(err[-600:]))
 
 # The receive loop hands --web-url to the note, so a run already behind one is
 # not told to pass it, and is told instead that it may not be the address the

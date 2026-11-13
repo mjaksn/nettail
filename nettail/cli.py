@@ -943,6 +943,11 @@ def web_bind_warning(bind, port, contained=None):
     on this network talked to whom on an address other machines can reach, over
     plain HTTP, guarded by a token that travels in the clear beside it.
 
+    A specific address in a container is the exception, and gets its own
+    line: under host networking it is one of the host's own addresses, which
+    no publish guards, and that is the bind the compose file suggests for a
+    proxy in a container of its own.
+
     In a container the same bind means something else entirely. Loopback inside
     the container's own namespace is unreachable from a published port, so the
     image asks for 0.0.0.0 every time it starts, and the alarming version of
@@ -957,6 +962,18 @@ def web_bind_warning(bind, port, contained=None):
     """
     if contained is None:
         contained = in_container()
+    if contained and bind not in ("0.0.0.0", "::", ""):
+        # A specific address in a container is the container's own, reached
+        # through a publish, or under host networking one of the host's,
+        # which nothing published stands in front of. This cannot tell which,
+        # so it says what the second means rather than promising the first.
+        return (f"{C.YELLOW}the web interface is bound to {bind}. If that is "
+                f"this container's own address, a published port reaches it "
+                f"and the publish decides what is exposed. Under host "
+                f"networking it is an address of the host itself and nothing "
+                f"is published: anything that can reach {bind}, every other "
+                f"container on the host included, can reach the view, with "
+                f"only the token to stop it, over plain HTTP.{C.RESET}")
     if contained:
         return (f"the web interface is bound to {bind}, which is how a "
                 f"published port reaches it from outside this container. What "

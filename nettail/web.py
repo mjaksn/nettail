@@ -656,7 +656,9 @@ def web_url_arg(text):
     A path is refused rather than honoured. The routes start at the root, a
     proxy that serves the view under a prefix may or may not strip it before
     passing the request on, and guessing which would be a route that works
-    behind one proxy and answers 404 behind the next. A name with characters
+    behind one proxy and answers 404 behind the next. A trailing dot on the
+    host is refused for a similar reason: nginx drops it from the `Host` it
+    forwards, so the name stored with it would never be matched. A name with characters
     beyond ascii is refused before it gets that far and has to be given in its
     punycode form, which is what a browser sends anyway. A pattern is refused
     here too, in words about a URL rather than about `--web-host`, since what
@@ -686,7 +688,14 @@ def web_url_arg(text):
         raise argparse.ArgumentTypeError(
             "a web url cannot hold %s; a browser would not keep it in the "
             "address it opens" % ", ".join(sorted(set(map(repr, bad)))))
-    parts = urlsplit(raw)
+    try:
+        parts = urlsplit(raw)
+    except ValueError:
+        # Unbalanced brackets, or brackets round something that is not an
+        # IPv6 address, which urlsplit refuses itself on newer interpreters.
+        raise argparse.ArgumentTypeError(
+            "a web url's brackets hold an IPv6 address and nothing else, "
+            "as in https://[fd00::1]") from None
     scheme = parts.scheme.lower()
     if scheme not in ("http", "https"):
         raise argparse.ArgumentTypeError(
@@ -713,6 +722,18 @@ def web_url_arg(text):
             "a web url's port has to be a number from 1 to 65535")
     if not parts.hostname:
         raise argparse.ArgumentTypeError("a web url has to name a host")
+    if "[" in parts.netloc and ":" not in parts.hostname:
+        # An IPvFuture literal, or a name someone bracketed. Older urlsplit
+        # lets it through and drops the brackets, which would store a name
+        # nobody typed.
+        raise argparse.ArgumentTypeError(
+            "a web url's brackets hold an IPv6 address and nothing else, "
+            "as in https://[fd00::1]")
+    if parts.hostname.endswith("."):
+        raise argparse.ArgumentTypeError(
+            "a web url's host cannot end in a dot; a proxy passes the name on "
+            "without it, so the view would never recognise the address, and "
+            "the name without the dot is the one to give")
     if "*" in parts.hostname:
         raise argparse.ArgumentTypeError(
             "a web url names one site, not a pattern; it is the single "
@@ -740,10 +761,7 @@ def canonical_host(name):
                 "a web url's host is an IPv4 address mapped into IPv6; give "
                 "the IPv4 address itself, %s" % address.ipv4_mapped)
         return str(address)
-    labels = name.split(".")
-    if len(labels) > 1 and labels[-1] == "":
-        labels = labels[:-1]
-    last = labels[-1]
+    last = name.split(".")[-1]
     numeric = last.isdigit() or (
         last[:2] == "0x" and all(ch in "0123456789abcdef" for ch in last[2:]))
     if not numeric:
@@ -1471,6 +1489,27 @@ class _Server(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
+    def process_request(self, request, client_address):
+        """Start a thread for one connection, and note it before it starts.
+
+        `ThreadingMixIn` keeps no list of its threads when they are daemons,
+        and `stop` needs one: a request being refused for its origin as the
+        run ends notes the refusal after the receive loop's last turn, and
+        only a join tells the final report it has everything. Noted here, on
+        the serving thread and before `start`, so a thread cannot be running
+        and unnoted at the moment `shutdown` returns.
+        """
+        thread = threading.Thread(target=self.process_request_thread,
+                                  args=(request, client_address), daemon=True)
+        self.site.track(thread)
+        thread.start()
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self.site.untrack(threading.current_thread())
+
     def handle_error(self, request, client_address):
         """Say nothing about a request that raised.
 
@@ -1558,6 +1597,10 @@ class WebInterface:
         self.font = load_font()
         self.policy = content_policy(self.page)
         self.watching = set()
+        # Every thread answering a connection, streams included, so that
+        # `stop` can wait for the requests still in flight when it is called.
+        self.handlers = set()
+        self._handlers_lock = threading.Lock()
         # A port some request named in its `Host` header that is not the one
         # this is listening on. Written by a request thread and read and
         # cleared by the receive loop, and that is the whole of the traffic on
@@ -1579,6 +1622,14 @@ class WebInterface:
         self._unkept_lock = threading.Lock()
         self._httpd = None
         self._thread = None
+
+    def track(self, thread):
+        with self._handlers_lock:
+            self.handlers.add(thread)
+
+    def untrack(self, thread):
+        with self._handlers_lock:
+            self.handlers.discard(thread)
 
     def note_origin(self, refusal):
         """Leave a refused origin for the receive loop. Never blocks."""
@@ -1686,3 +1737,14 @@ class WebInterface:
             self._httpd.server_close()
         if self._thread is not None:
             self._thread.join(1.0)
+        # Nothing new is accepted now, so wait for what was already being
+        # answered, within the same deadline. A request refused for its
+        # origin during this notes it before its thread ends, which is what
+        # lets the report made after this call be the last word.
+        with self._handlers_lock:
+            answering = list(self.handlers)
+        for thread in answering:
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                break
+            thread.join(remaining)

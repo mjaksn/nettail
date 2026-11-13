@@ -1388,6 +1388,13 @@ network instead and forward to that:
 docker network inspect <proxy-network> -f '{{(index .IPAM.Config 0).Gateway}}'
 ```
 
+Under host networking that gateway is an address of the host itself, and
+nothing is published in front of it. Every container on the host can reach it,
+whichever network it is on, and so can any machine with a route to it; the
+token is the only guard, and the hop from the proxy is plain HTTP. The
+collector says as much at startup. A proxy running on the host itself, or with
+host networking of its own, can reach `127.0.0.1` and needs none of this.
+
 The token is in the URL, so pin it with `NETTAIL_WEB_TOKEN` or a restart
 prints an address the bookmark no longer matches.
 
@@ -2947,7 +2954,7 @@ python tests/run.py tally keys    # only suites whose name contains either
 python tests/run.py -v            # print every check, not only failures
 ```
 
-2752 checks across 42 suites, in about a minute and a half. No test
+2775 checks across 42 suites, in about a minute and a half. No test
 dependencies and no test runner to learn: the suites need only netflume and
 lanname, the same as the collector.
 

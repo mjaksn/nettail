@@ -363,6 +363,29 @@ for bad, why in (("https://127.000.0.1", "a zero-padded IPv4 address"),
         refused = True
     check("a web url is refused for %s" % why, refused, "%a" % bad)
 
+# A trailing dot is refused, since nginx's $host drops it and the stored
+# name would never be matched; brackets hold IPv6 and nothing else, and a
+# malformed pair is refused with a reason rather than argparse's generic line.
+for bad, why in (("https://flows.example.com.", "a trailing dot"),
+                 ("https://[fd00::1", "an unclosed bracket"),
+                 ("https://fd00::1]", "a stray closing bracket"),
+                 ("https://[v1.x]", "an IPvFuture literal"),
+                 ("https://[flows.example.com]", "a bracketed name")):
+    try:
+        web_url_arg(bad)
+        reason = None
+    except argparse.ArgumentTypeError as exc:
+        reason = str(exc)
+    check("a web url is refused for %s" % why, reason is not None, bad)
+    check("with a reason in words for %s" % why,
+          reason is not None and reason.startswith("a web url"), repr(reason))
+bracketed = subprocess.run([sys.executable, "-m", "nettail", "--web-url",
+                            "https://[fd00::1"], capture_output=True, text=True)
+check("a malformed bracket is explained at the command line, not as a value",
+      "brackets hold an IPv6 address" in bracketed.stderr
+      and "invalid web_url_arg value" not in bracketed.stderr,
+      bracketed.stderr[-200:])
+
 # A wildcard is refused in words about a URL rather than in --web-host's,
 # which talk about --web-bind and would send the reader to the wrong flag.
 try:
@@ -427,17 +450,29 @@ check("and an https origin is still refused with no --web-url",
       origin_allowed(ORIGIN, "127.0.0.1", 2056, ("flows.example.com",))
       is False)
 
-# The note explaining a refusal lists origin_candidates, so every one of them
-# has to be an origin the check takes, or the note would advise something
-# that is then refused as well.
-for args in (("127.0.0.1", 2056, (), None, None),
-             ("192.0.2.10", 2056, NAMES, None, ORIGIN),
-             ("192.0.2.10", 80, NAMES, None, None),
-             ("192.0.2.10", 2056, (), ANY, ORIGIN),
-             ("192.0.2.10", 80, (), "anything.example:80", None)):
+# The note explaining a refusal lists origin_candidates, and the check takes
+# exactly those, so the list is held here to what a browser sends, written
+# out by hand rather than read back from the function under test.
+for args, expected in (
+        (("127.0.0.1", 2056, (), None, None),
+         ["http://127.0.0.1:2056", "http://localhost:2056"]),
+        (("192.0.2.10", 2056, NAMES, None, ORIGIN),
+         [ORIGIN, "http://192.0.2.10:2056", "http://localhost:2056",
+          "http://z2m:2056", "http://collector.lan:2056"]),
+        (("fd00::5", 80, ("flows.example.com",), None, None),
+         ["http://[fd00::5]:80", "http://localhost:80",
+          "http://flows.example.com:80", "http://[fd00::5]",
+          "http://localhost", "http://flows.example.com"]),
+        (("192.0.2.10", 2056, (), ANY, ORIGIN),
+         [ORIGIN, "http://anything.example:2056"]),
+        (("192.0.2.10", 80, (), "anything.example:80", None),
+         ["http://anything.example:80", "http://anything.example"])):
     listed = origin_candidates(*args)
-    check("every origin listed for %r is taken" % (args,),
-          listed and all(origin_allowed(o, *args) for o in listed), repr(listed))
+    check("the origins listed for %r are the ones a browser sends" % (args,),
+          listed == expected, repr(listed))
+check("an IPv6 bind on port 80 takes its own address with no port",
+      origin_allowed("http://[fd00::5]", "fd00::5", 80, ("flows.example.com",))
+      is True)
 check("a non-ascii Host lists no origin of its own",
       origin_candidates("192.0.2.10", 2056, (), "café:2056", None) == [])
 
@@ -1138,6 +1173,36 @@ try:
         check("a long origin is kept only to its start",
               len(taken) == 1 and len(taken[0][0]) == WIRE_KEPT,
               repr([len(r[0]) for r in taken]))
+        check("and the handler threads are let go once answered",
+              not behind.handlers, repr(behind.handlers))
+
+        # The open case, where the origin is judged against the request's own
+        # Host and that Host is kept for the report. Only a routable bind with
+        # no names reaches it and a suite has only loopback, so the decision
+        # the bind would have made is set by hand on a running server.
+        open_site = WebInterface(Feed(), queue.Queue(maxsize=8), {"e"},
+                                 bind="127.0.0.1", port=0)
+        open_site.start()
+        try:
+            open_site.restricted = False
+            long_host = "h" * 5000 + ":%d" % open_site.port
+            open_url = "http://127.0.0.1:%d/t/%s/key" % (open_site.port,
+                                                        open_site.token)
+            status = fetch(open_url, host_header=long_host, method="POST",
+                           body=body, origin="http://elsewhere.example")
+            taken, _unkept = open_site.take_origin_notices()
+            check("in the open case a refusal keeps the Host it was judged by",
+                  status == 403 and len(taken) == 1
+                  and taken[0][1] is not None, repr((status, len(taken))))
+            check("and keeps only its start",
+                  len(taken) == 1 and len(taken[0][1]) == WIRE_KEPT,
+                  repr([len(r[1] or "") for r in taken]))
+            check("as does the origin listed from it",
+                  len(taken) == 1
+                  and taken[0][2] == ["http://" + "h" * WIRE_KEPT],
+                  repr([c[:20] for c in taken[0][2]] if taken else None))
+        finally:
+            open_site.stop(timeout=1.0)
         for _ in range(3):
             fetch(behind_url + "detail", host_header="flows.example.com",
                   method="POST", body=b"{}", origin="https://evil.example.com")

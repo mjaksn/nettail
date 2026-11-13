@@ -71,6 +71,26 @@ check("the port is taken from the argument, not hardcoded",
       "-p 127.0.0.1:9999:9999" in plain(
           web_bind_warning("0.0.0.0", 9999, contained=True)))
 
+# A specific address in a container is either the container's own, behind a
+# publish, or under host networking one of the host's, with nothing published
+# in front of it. That second case is the bind the compose file suggests for a
+# proxy in a container of its own, so the line must not promise that a publish
+# keeps it private, and is coloured, since it may well be exposed.
+gateway = plain(web_bind_warning("172.18.0.1", 2056, contained=True))
+check("a specific address in a container is named",
+      "172.18.0.1" in gateway, gateway)
+check("and is not said to be settled by a publish",
+      "settled by the publish" not in gateway
+      and "-p 127.0.0.1:2056:2056" not in gateway, gateway)
+check("it says what host networking exposes",
+      "host networking" in gateway and "every other container" in gateway,
+      gateway)
+check("and is coloured, because it may be exposed",
+      web_bind_warning("172.18.0.1", 2056, contained=True) != gateway)
+check("a wildcard bind in a container keeps the quiet line",
+      "settled by the publish" in plain(
+          web_bind_warning("::", 2056, contained=True)))
+
 # -- the note about reaching the view from elsewhere -----------------------
 #
 # Under a wildcard bind the printed URL says 127.0.0.1, which is right here and
