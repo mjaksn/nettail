@@ -381,11 +381,12 @@ def _endpoints(left, arrow, right, column):
 class WatchedTemplates(TemplateStore):
     """A template store that remembers every template it was handed.
 
-    netflume raises an object for a sampling rate, an export gap and a
-    datagram it could not read, and a template it has just learned is not one
-    of them. The fact exists in exactly one place, which is `put` returning
-    True, so standing a subclass in the decoder's way is how this program
-    hears about it without parsing the datagram a second time.
+    netflume raises an object for a sampling rate, an export gap, a datagram
+    it could not read and a template that is new or changed, but not for one
+    resent unchanged. The whole fact, resends included, exists in one place,
+    which is `put` returning True, so standing a subclass in the decoder's way
+    is how this program hears about it without parsing the datagram a second
+    time.
 
     netflume 0.3.0 raises a `TemplateLearned`, which is the better home this
     note used to say it was waiting for, and this has not moved onto it. The
@@ -971,7 +972,7 @@ def web_bind_warning(bind, port, contained=None):
             f"everything it fetches.{C.RESET}")
 
 
-def web_port_note(asked, port, contained=None):
+def web_port_note(asked, port, contained=None, public=None):
     """What to say when a request named a port this is not listening on.
 
     The refusal itself is right and stays as it is: a `Host` naming another
@@ -990,18 +991,33 @@ def web_port_note(asked, port, contained=None):
     behind one as easily as a host can, so both lines name it, since nothing
     here can tell a proxy from either of the other two.
 
+    `public` is the origin `--web-url` gave. A run that has one needs no
+    telling to pass it, so it is told instead that the flag may not name the
+    address the browser opened: the name it gave is taken with its own port
+    or none, and a request naming any other port arrives here as a tunnel's
+    would. `web_origin_note` drops its advice about the flag in the same case.
+
     `contained` is for the tests. Left as None it asks the environment.
     """
     if contained is None:
         contained = in_container()
     where = ("a published port mapped to a different number on the host"
              if contained else "a tunnel in front of this")
+    opening = (f"{C.YELLOW}a request asked for port {asked} and this is "
+               f"listening on {port}, so it was refused, and it was refused "
+               f"with the same 404 a wrong token gets. {where.capitalize()} "
+               f"is the usual reason.")
+    if public is not None:
+        return (f"{opening} The port in the address bar has to be the port "
+                f"this was told to serve, or, through the proxy, the port in "
+                f"--web-url ({public}) or none. If the browser opened this "
+                f"through the proxy, --web-url does not match the address it "
+                f"opened, so give --web-url that address; otherwise pass "
+                f"--web-port {asked} to match, or move the other side to "
+                f"{port}. Said once.{C.RESET}")
     proxy = (" Behind a reverse proxy, pass --web-url with the address the "
              "browser opens instead.")
-    return (f"{C.YELLOW}a request asked for port {asked} and this is "
-            f"listening on {port}, so it was refused, and it was refused with "
-            f"the same 404 a wrong token gets. {where.capitalize()} is the "
-            f"usual reason. The port in the address bar has to be the port "
+    return (f"{opening} The port in the address bar has to be the port "
             f"this was told to serve, so pass --web-port {asked} to match, or "
             f"move the other side to {port}.{proxy} Said once.{C.RESET}")
 
@@ -1013,7 +1029,8 @@ def wire_text(text, limit=120):
     latin-1, so it may hold an escape sequence that would move the cursor or
     retitle the window. Everything outside printable ascii is shown as a
     question mark, and the length is bounded so a header cannot fill the
-    screen. The line it goes into is said once a run, which bounds the rest.
+    screen. Only a request carrying the token reaches the origin check, so only
+    somebody holding the URL can make these lines appear at all.
     """
     if text is None:
         return "(none)"
@@ -1040,9 +1057,8 @@ def web_origin_note(origin, host, candidates, route, public=None):
 
     Only the first refusal of a run is told all of this. A page behind a
     misconfigured proxy asks again on its own, a details dialog every few
-    seconds and a refused filter after a short wait, so the explanation in
-    full every time would bury the flows it is printed between; every later
-    refusal gets `web_origin_line` instead.
+    seconds, so the explanation in full every time would bury the flows it is
+    printed between; every later refusal gets `web_origin_line` instead.
     """
     taken = ", ".join(wire_text(c) for c in candidates) or "none"
     line = (f"{C.YELLOW}a request from a browser page to /{wire_text(route)} "
@@ -1073,9 +1089,9 @@ def web_reach_note(bound_addr, hosts, contained=None):
     Under a wildcard bind the printed URL names 127.0.0.1, which is right for
     this machine and wrong for every other, and the reader has to know to
     substitute. This says so once, on the way in. A specific routable bind
-    prints its own address, a name given with --web-host is what the URL
-    carries, and a loopback bind is reachable from nowhere else, so none of
-    those needs it.
+    prints its own address, a name given with --web-host or the address given
+    with --web-url is what the URL carries, and a loopback bind is reachable
+    from nowhere else, so none of those needs it.
 
     Nor does a container, where the image binds 0.0.0.0 on every start and
     the printed 127.0.0.1 is exactly right through a published port. The
@@ -1476,11 +1492,13 @@ def build_parser():
                          help="the address a browser opens when a reverse "
                               "proxy stands in front of the view, such as "
                               "https://flows.example.com. The view answers to "
-                              "that name with or without a port and takes "
-                              "key presses from that origin, the printed URL "
-                              "becomes it, and the name narrows the view as "
-                              "--web-host does. The proxy serves the view "
-                              "from the root of that name")
+                              "that name with no port or with the URL's own "
+                              "and takes the page's requests (key presses, "
+                              "row clicks, filters and scrolling back) from "
+                              "that origin, the printed URL becomes it, and "
+                              "the name narrows the view as --web-host does. "
+                              "The proxy serves the view from the root of "
+                              "that name")
     web_grp.add_argument("--web-token", type=web_token_arg, default=None,
                          metavar="TOKEN",
                          help="use this token in the URL instead of a fresh "
@@ -2019,11 +2037,11 @@ def main():
         """The ? listing, to each view with the keys that view can press.
 
         The one place the two are deliberately shown different text rather than
-        the same characters. A browser can press neither the escape key nor the
-        QR key, so a listing offering either would advertise something the
-        control route then refuses. Everything else it can press, this key
-        included, which has no button of its own precisely because the drawer
-        is already the list.
+        the same characters. A browser can press none of the escape key, the QR
+        key and the sticky header key, so a listing offering any of them would
+        advertise something the control route then refuses. Everything else it
+        can press, this key included, which has no button of its own precisely
+        because the drawer is already the list.
 
         It goes straight at stderr rather than through `controls.out`, which is
         a tee: a listing written there would be published a line at a time,
@@ -2675,7 +2693,8 @@ def main():
                 asked, web.port_notice = web.port_notice, None
                 if not port_told[0]:
                     port_told[0] = True
-                    print(web_port_note(asked, web.port), file=sys.stderr)
+                    print(web_port_note(asked, web.port, public=web.public),
+                          file=sys.stderr)
             if web is not None:
                 # Every refusal, unlike the port: one is only possible with
                 # the token, so nobody without the URL can write here.

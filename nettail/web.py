@@ -47,15 +47,15 @@ are not optional.
   address is not enough, and `hosts_restricted` for where the rule is
   decided. A name from `--web-url` narrows it the same way, and is the one
   name accepted without this server's port, for the reason on `public_host`.
-- **An `Origin` check on the control route**, refusing a request that names an
-  origin other than this one. The one from `--web-url` is the only origin it
-  takes that may say https, and only exactly as given.
-- **Six routes and no seventh.** The page, the stream, the flags font, the
-  control route, the one that answers a question about a flow and the one
-  that sets a tab's filter. No
-  directory listing, no file handler, nothing that turns part of a request
-  into a path on disk. The page and the font are read once at startup and
-  live in memory.
+- **An `Origin` check on every route a browser posts to**, refusing a request
+  that names an origin other than this one. The one from `--web-url` is the
+  only origin it takes that may say https, and only exactly as given.
+- **Seven routes and no eighth.** The page, the stream, the flags font, the
+  control route, the one that answers a question about a flow, the one that
+  sets a tab's filter and the one that looks back through stored flows for a
+  tab scrolling up. No directory listing, no file handler, nothing that turns
+  part of a request into a path on disk. The page and the font are read once
+  at startup and live in memory.
 - **A cap on connected browsers.** Each stream holds a thread for as long as
   the tab is open, so the count is bounded rather than left to whoever is
   opening tabs. That cap covers the stream only, which is why there is also
@@ -121,6 +121,9 @@ ASK_QUEUE_MAX = 16
 # turns of the loop; past this many the rest are counted rather than kept, and
 # the count is reported in their place.
 ORIGIN_NOTICE_MAX = 32
+
+# How many stored flows a tab back from the background is replayed, at most,
+# before it is put on the live stream.
 RESTORE_MAX = 4000
 
 # How many stored flows one answer to a scroll up carries, and how many rows
@@ -321,8 +324,7 @@ def host_allowed(header, local_addr, port, names=(), restricted=True):
     them does not reopen the hole. Rebinding works by pointing a name the
     attacker controls at this address, and a name the operator typed on the
     command line is, by construction, not one of those. What it does mean is
-    that the operator is trusted to list only names that are theirs, which is
-    what the flag's help says.
+    that the operator is trusted to list only names that are theirs.
 
     `restricted` is False under a routable bind with no names given, and then
     every name passes once the port has. Rebinding is an attack on what only
@@ -469,10 +471,10 @@ def origin_candidates(local_addr, port, names=(), host=None, public=None):
     A function of its own so that the check and the line explaining a refusal
     of it read the one list: a note that described the rule in other words
     would be a second statement of it, free to drift from what is enforced.
-    A `host` that is not ascii gives no candidate, for the reason the ascii
-    check on an origin exists, and every other candidate is ascii already:
-    an address, `localhost`, and names `web_host_arg` and `web_url_arg` have
-    been through.
+    A `host` that is not ascii adds no candidate of its own, for the reason
+    the ascii check on an origin exists, and every other candidate is ascii
+    already: an address, `localhost`, and names `web_host_arg` and
+    `web_url_arg` have been through.
     """
     candidates = [public] if public is not None else []
     if host is not None:
@@ -644,10 +646,12 @@ def web_url_arg(text):
     A path is refused rather than honoured. The routes start at the root, a
     proxy that serves the view under a prefix may or may not strip it before
     passing the request on, and guessing which would be a route that works
-    behind one proxy and answers 404 behind the next. The host part goes
-    through `web_host_arg`, so a pattern, a non-ascii name and the rest are
-    refused for the reasons given there; a name with characters beyond ascii
-    is written in its punycode form, which is what a browser sends anyway.
+    behind one proxy and answers 404 behind the next. A name with characters
+    beyond ascii is refused before it gets that far and has to be given in its
+    punycode form, which is what a browser sends anyway. A pattern is refused
+    here too, in words about a URL rather than about `--web-host`, since what
+    this flag does is more than add a name. The host part then goes through
+    `web_host_arg`, so the rest are refused for the reasons given there.
     """
     raw = text.strip()
     if not raw:
@@ -683,6 +687,10 @@ def web_url_arg(text):
             "a web url's port has to be a number from 1 to 65535")
     if not parts.hostname:
         raise argparse.ArgumentTypeError("a web url has to name a host")
+    if "*" in parts.hostname:
+        raise argparse.ArgumentTypeError(
+            "a web url names one site, not a pattern; it is the single "
+            "address a browser opens through the proxy")
     name = web_host_arg(parts.hostname)
     if port is None or port == DEFAULT_PORTS[scheme]:
         return "%s://%s" % (scheme, in_url(name))
@@ -780,11 +788,12 @@ def _frame(event, payload):
 
 
 class _Handler(BaseHTTPRequestHandler):
-    """Six routes and nothing else.
+    """Seven routes and nothing else.
 
     The page, the stream, the flags font, one key press, one question about a
-    flow and one tab's filter. Matched exactly rather than by prefix, so a
-    path this does not name is a 404 and never a file on disk.
+    flow, one tab's filter and one ask for older stored flows. Matched exactly
+    rather than by prefix, so a path this does not name is a 404 and never a
+    file on disk.
     """
 
     # Named so that a response says as little about what is running as it can.
@@ -1166,7 +1175,7 @@ class _Handler(BaseHTTPRequestHandler):
         """One key press, on its way to the dispatch the terminal also uses."""
         # The readonly refusal lives here rather than beside the origin check,
         # because it is about changing what the collector is doing and the
-        # other route changes nothing. Asking what a flow was is reading, and
+        # other routes change nothing. Asking what a flow was is reading, and
         # a view served for watching is still a view somebody may want to
         # read properly.
         if self.site.readonly:
@@ -1375,7 +1384,7 @@ class _Handler(BaseHTTPRequestHandler):
         if origin_allowed(origin, local, self.site.port, self.site.hosts,
                           host, self.site.public):
             return True
-        # Refused with the same three words whatever the reason, and the
+        # Refused with the same two words whatever the reason, and the
         # browser is told nothing more. The reader at the terminal is told
         # the rest, out of band and by the receive loop, as a refused port
         # is: what was sent, and what would have been taken instead.
@@ -1444,7 +1453,8 @@ class WebInterface:
         self.bind_addr = bind
         self.port = port
         # The names the view answers to besides its address, in the order they
-        # were given, because the first one is the one the printed URL uses.
+        # were given, because the first one is the one the printed URL uses
+        # when there is no `--web-url`.
         # Reduced to the form the Host header is reduced to, lowercased and
         # without brackets, here as well as by the flag, for a caller that is
         # not the flag: a bracketed literal left as given would match nothing
@@ -1456,6 +1466,7 @@ class WebInterface:
         # its address, its names and the proxy's, rather than to anything at
         # all. It also lets the name reach this port directly, which is
         # `--web-host` behaviour and no wider than it.
+        #
         # Put through the flag's own reduction for a caller that is not the
         # flag, since an origin stored any other way matches nothing.
         self.public = web_url_arg(public) if public else None
@@ -1531,12 +1542,12 @@ class WebInterface:
         # the proxy's business and appears nowhere in it.
         if self.public:
             return "%s/t/%s/" % (self.public, self.token)
-        # A name given with --web-host is the one to print, because it was
-        # given so that this URL would work from another machine. Failing
-        # that, a wildcard bind is every address, which is no use in a URL, so
-        # the one printed names the loopback address: it is the one that
-        # certainly works and the one somebody on this machine should be using
-        # anyway.
+        # Otherwise a name given with --web-host is the one to print, because
+        # it was given so that this URL would work from another machine.
+        # Failing that, a wildcard bind is every address, which is no use in a
+        # URL, so the one printed names the loopback address: it is the one
+        # that certainly works and the one somebody on this machine should be
+        # using anyway.
         if self.hosts:
             shown = in_url(self.hosts[0])
         else:
