@@ -543,7 +543,7 @@ check("about an origin either",
 # again on its own every few seconds. The case that prompted it is a proxy
 # whose Host and Origin disagree, so the open case, with the Host the origin
 # was judged against, is the one driven.
-PROXY_REFUSAL = ("http://ha-sup:2056", "nettail.example.com:2056",
+PROXY_REFUSAL = ("http://flowbox:2056", "nettail.example.com:2056",
                  ["http://nettail.example.com:2056"], "key")
 result = run([], [v5_packet(0)] * 10,
              origin_notices=[(2, PROXY_REFUSAL), (4, PROXY_REFUSAL),
@@ -551,7 +551,7 @@ result = run([], [v5_packet(0)] * 10,
                              (8, 5)])
 err = plain(result["err"])
 check("a refused origin is reported on stderr",
-      "its Origin, http://ha-sup:2056," in err, repr(err[-600:]))
+      "its Origin, http://flowbox:2056," in err, repr(err[-600:]))
 check("with the route it was refused on", "to /key was refused" in err)
 check("naming the origin that would have been taken",
       "It takes http://nettail.example.com:2056." in err)
@@ -562,15 +562,15 @@ check("the explanation is given once",
       err.count("was refused with 403") == 1,
       str(err.count("was refused with 403")))
 check("and every later refusal gets a line of its own",
-      "refused origin http://ha-sup:2056 on /key (403)" in err
+      "refused origin http://flowbox:2056 on /key (403)" in err
       and "refused origin http://later:2056 on /detail (403)" in err, err)
 check("so three refusals make one explanation and two lines",
       err.count("refused origin ") == 2, str(err.count("refused origin ")))
 check("and refusals that did not fit the queue are counted, not lost",
       "and 5 more refused for their origin" in err, repr(err[-300:]))
-check("nothing about it reaches stdout", "ha-sup" not in result["out"])
+check("nothing about it reaches stdout", "flowbox" not in result["out"])
 check("nor the browser, which was told bad origin and nothing else",
-      not any("ha-sup" in text for _kind, text in result["prose"]))
+      not any("flowbox" in text for _kind, text in result["prose"]))
 
 # The receive loop hands --web-url to the note, so a run already behind one is
 # not told to pass it, and is told instead that it may not be the address the

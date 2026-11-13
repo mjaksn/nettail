@@ -445,16 +445,16 @@ check("a non-ascii Host lists no origin of its own",
 # reached the port sent, so nothing in it may reach the terminal as a control
 # sequence, and its length is bounded.
 check("printable ascii is shown as sent",
-      wire_text("http://ha-sup:2056") == "http://ha-sup:2056")
+      wire_text("http://flowbox:2056") == "http://flowbox:2056")
 check("an escape is not", "" not in wire_text("http://a]0;xb"))
 check("nor anything past ascii", wire_text("http://café") == "http://caf?")
 check("a long header is cut short", len(wire_text("a" * 1000)) < 130)
 check("a missing Host is said to be missing", wire_text(None) == "(none)")
 
-note = web_origin_note("http://ha-sup:2056", "nettail.example.com:2056",
+note = web_origin_note("http://flowbox:2056", "nettail.example.com:2056",
                        ["http://nettail.example.com:2056"], "key")
 check("the note names the origin sent and the one taken",
-      "http://ha-sup:2056" in note
+      "http://flowbox:2056" in note
       and "It takes http://nettail.example.com:2056." in note, note)
 check("and, in the open case, the Host they had to agree with",
       "which was nettail.example.com:2056" in note, note)
@@ -533,8 +533,8 @@ check("a minute of flooding prints a bounded number of lines",
       lines.out.getvalue().count("\n") <= 1 + (60 / ORIGIN_WINDOW + 1)
       * (ORIGIN_LINES + 1), str(lines.out.getvalue().count("\n")))
 check("a later refusal is one line naming the origin and the route",
-      plain(web_origin_line("http://ha-sup:2056", "detail"))
-      == "refused origin http://ha-sup:2056 on /detail (403)")
+      plain(web_origin_line("http://flowbox:2056", "detail"))
+      == "refused origin http://flowbox:2056 on /detail (403)")
 
 # The queue between the request threads and the receive loop is bounded, and
 # what does not fit is counted rather than kept or waited for.
