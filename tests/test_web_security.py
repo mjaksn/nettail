@@ -1173,6 +1173,12 @@ try:
         check("a long origin is kept only to its start",
               len(taken) == 1 and len(taken[0][0]) == WIRE_KEPT,
               repr([len(r[0]) for r in taken]))
+        # The answer reaches the client before its thread has finished
+        # closing the connection, so the thread is given a moment to end
+        # before the set is looked at. What is pinned is that a thread that
+        # has ended is let go, not how quickly it ends.
+        for thread in list(behind.handlers):
+            thread.join(2.0)
         check("and the handler threads are let go once answered",
               not behind.handlers, repr(behind.handlers))
 
