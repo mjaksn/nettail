@@ -384,9 +384,9 @@ class WatchedTemplates(TemplateStore):
     netflume raises an object for a sampling rate, an export gap, a datagram
     it could not read and a template that is new or changed, but not for one
     resent unchanged. The whole fact, resends included, exists in one place,
-    which is `put` returning True, so standing a subclass in the decoder's way
-    is how this program hears about it without parsing the datagram a second
-    time.
+    which is `put`, returning True for a template that is new or changed and
+    False for a resend, so standing a subclass in the decoder's way is how
+    this program hears about it without parsing the datagram a second time.
 
     netflume 0.3.0 raises a `TemplateLearned`, which is the better home this
     note used to say it was waiting for, and this has not moved onto it. The
