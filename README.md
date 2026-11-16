@@ -271,7 +271,7 @@ usage: nettail [-h] [--version] [--config FILE | --save-config [FILE]]
 | `--flow-retention-days DAYS` | `14` | How long to keep rows in the durable flow store. At least one day, and a value of 14 keeps the last two weeks unless you change it |
 | `--flow-prune-every SECONDS` | `43200` | How often old rows are pruned from the SQLite store. This is 12 hours by default, and it is a background maintenance pass rather than a freeze on the collector |
 | `--flow-commit-every SECONDS` | `1` | How often buffered writes are committed to the file. Lower values make the history more current, while higher values allow a little more batching |
-| `--resume` | off | Keep the session in the flow store and pick it up at the next start: the statistics behind the status bar, the summary and the details dialog, the templates exporters have sent, what the keys have set, and the flows a browser can click on. A browser left open reconnects to the same view, provided the token is the same. Needs the store, and the image, the compose file and the installer all turn it on. See [Resuming a session](#resuming-a-session) |
+| `--resume` | off | Keep the session in the flow store and pick it up at the next start: the statistics behind the status bar, the summary and the details dialog, the templates exporters have sent, what the keys have set, and the flows a browser can click on. A browser left open reconnects to the same view, provided the token is the same. Needs the store, and says so when the store is off; a run with a store and without this flag lets a saved session go. The image, the compose file and the installer all turn it on. See [Resuming a session](#resuming-a-session) |
 | `--resume-every SECONDS` | `60` | How often `--resume` saves the session while running, at least. A clean stop saves on the way out, so this is what a crash or a hard kill can lose. A save pauses the collector for as long as it takes, which grows with the tables, so one that took long puts the next further off |
 | `--colour WHEN` | `auto` | When to use ANSI colour **on this terminal**: `auto`, `always` or `never`. Under `auto` a terminal gets colour and a redirected stream does not, and `NO_COLOR` in the environment turns it off. The browser view has its own switch, `--web-colour`, and is not decided by this one. `--color` is accepted too |
 | `--no-color` | off | The same as `--colour never`, and like it, about this terminal |
@@ -1236,8 +1236,10 @@ That needs the address the tab holds to still work, and the token is in it. A
 token made up for the run is made up again at the next, so give the collector
 one with `NETTAIL_WEB_TOKEN` or `--web-token`; a run with `--resume` and no
 token of its own says at startup that a browser's URL will not survive a
-restart. A tab that meets a collector with a different token says so and stops
-trying, rather than waiting for ever.
+restart. A tab that meets a collector with a different token says so, once,
+and goes on asking every thirty seconds rather than stopping: a reverse proxy
+answering for a container that is restarting looks the same from the page, and
+in that case it reconnects by itself when the collector is back.
 
 A setting the command line or the settings file has changed since the last run
 is not overridden by a key pressed before the restart. Each setting is saved
@@ -1262,14 +1264,17 @@ seconds while it runs, which is what a crash or a hard kill can lose. A save
 pauses the collector for as long as it takes: milliseconds on a home network,
 and about two seconds with fifty thousand addresses and pairs, which is where
 their tables are capped, so a save that took long puts the next one further
-off. A session that cannot be read,
-from another build or a damaged file, is met with a line saying so and a new
-session, never with a run that refuses to start.
+off. A save with nothing new since the last, on a quiet network, is skipped. A
+session that cannot be read, from another build or a damaged file, is met with
+a line saying so and a new session, never with a run that refuses to start.
 
 `--resume` is off unless asked for, because a run at a terminal that is stopped
 and started again is usually meant to start afresh. The image, the compose file
-and the installer all turn it on. `--flow-store off` and `--resume` cannot be
-had together, since the session is kept in the store.
+and the installer all turn it on. A run with a store that is not asked to
+resume lets a saved session go, and says so, so that leaving the flag out
+means starting afresh for good rather than until the flag comes back. With
+`--flow-store off` there is nowhere to keep a session, and `--resume` says so
+at startup and the run goes on without one.
 
 ### Scrolling back in time
 
@@ -2774,8 +2779,8 @@ The compose file does this already. The image runs with `--resume`, so the
 volume holds the session as well as the flows, and a restart carries on
 counting where it stopped; see [Resuming a session](#resuming-a-session). Take
 `--resume` out of the command for a restart that starts counting again, as
-`Ctrl-C` and a fresh run do. `--flow-store off` keeps no history at all, and
-needs `--resume` gone with it.
+`Ctrl-C` and a fresh run do; the saved session is let go at that start.
+`--flow-store off` keeps no history at all, and no session either.
 
 A browser left open across a restart reconnects by itself only if the token
 in its URL still works, and one the collector made up is made up again at the

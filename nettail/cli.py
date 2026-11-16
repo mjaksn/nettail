@@ -1546,9 +1546,10 @@ def build_parser():
                          "set and the flows a browser can click on, so that a "
                          "restarted collector carries on where it stopped and "
                          "a browser left open reconnects to the same view. "
-                         "Needs the store. A browser's URL only survives a "
-                         "restart if the token does, so give --web-token or "
-                         "%s as well" % WEB_TOKEN_ENV)
+                         "Needs the store, and a run with a store and "
+                         "without this lets a saved session go. A browser's "
+                         "URL only survives a restart if the token does, so "
+                         "give --web-token or %s as well" % WEB_TOKEN_ENV)
     ap.add_argument("--resume-every", type=store.cadence_arg,
                     default=session.SAVE_EVERY, metavar="SECONDS",
                     help="how often --resume saves the session while running, "
@@ -1820,14 +1821,6 @@ def main():
         ap.error("--save-config and --update-country-db are both done instead "
                  "of collecting, so only one of them can be asked for")
 
-    # A session is kept in the flow store, beside the flows, so asking to
-    # resume one while turning the store off asks for two things that cannot
-    # both be had. Refused rather than quietly running without it, because a
-    # run that was asked to carry on and then started from nothing at every
-    # restart would say nothing about why until somebody missed the figures.
-    if args.resume and not store.enabled(args):
-        ap.error("--resume keeps the session in the flow store, so it cannot "
-                 "be used with --flow-store %s" % store.OFF)
 
     scale = SizeScale(
         top=DEFAULT_SIZE_SCALE_MAX if args.size_scale_max is None
@@ -2214,14 +2207,33 @@ def main():
     # is what the command line and the settings file said, which is what the
     # next restart compares against. Its line goes in the banner rather than
     # out now: starting the header clears the screen.
+    #
+    # A session is kept in the flow store, so `--resume` with the store off
+    # has nowhere to keep one. That is said and the run goes on without it,
+    # rather than refused, because the two can arrive from different places:
+    # `resume = true` in a settings file and `--flow-store off` typed for a
+    # throwaway run is the command line overriding the file, which is what it
+    # does everywhere else, and an error there would be the file winning.
+    #
+    # And a run with a store that was not asked to resume lets a saved session
+    # go, so that leaving the flag out means starting afresh for good. Kept,
+    # it would come back weeks stale the next time the flag was given, without
+    # the flows counted in between.
     resume = None
     resumed = False
     resume_line = None
-    if args.resume:
+    if args.resume and not store.enabled(args):
+        resume_line = ("--resume keeps the session in the flow store, which "
+                       "is off, so this run will not keep one")
+    elif args.resume:
         resume = session.Session(flow_store, args, decoder, tally, scale,
                                  resolver, controls, detail_ring, shown_flows,
                                  flow_serial, every=args.resume_every)
         resumed, resume_line = resume.restore()
+    elif flow_store.clear_session():
+        flow_store.flush()
+        resume_line = ("a session saved for --resume was let go, since this "
+                       "run was not asked to resume it")
 
     if not json_stdout:
         # Whether there is going to be a bar has to be settled before the
@@ -2426,7 +2438,8 @@ def main():
             # the token is in it. One made up for this run is made up again
             # at the next, and the tab is then refused however much of the
             # session came back, so a run asked to resume says so here.
-            if args.resume and args.web_token is None:
+            if (args.resume and store.enabled(args)
+                    and args.web_token is None):
                 web_warnings.append(
                     f"{C.YELLOW}the token in that URL was made up for this "
                     f"run, so a browser left open cannot reconnect after a "
@@ -2485,8 +2498,10 @@ def main():
             )
             print(f"{C.GREY}{note}{C.RESET}", file=out)
         if resume_line:
-            # Yellow when it came back with nothing it could use, since the
-            # figures starting from nothing is then the surprising outcome.
+            # Grey for a session picked up, and yellow for every way of
+            # starting from nothing that a line is written for: one that could
+            # not be read, one let go, or a store with nowhere to keep one.
+            # Starting afresh is the surprising outcome under either flag.
             print(f"{C.GREY if resumed else C.YELLOW}{resume_line}{C.RESET}",
                   file=out)
         for warning in web_warnings:
@@ -2908,9 +2923,9 @@ def main():
             bar.update(lambda s=snap: s if s is not None else take_snapshot())
             if flow_store.prune_due(now):
                 flow_store.prune(now=now)
-            # Before the flush rather than after it, so that the session goes
-            # to disk in the same commit as the flows it describes and a crash
-            # loses the two from one moment.
+            # A save commits, and commits the flows waiting beside it, so the
+            # session goes to disk in the same commit as the flows it
+            # describes and a crash loses the two from one moment.
             if resume is not None and resume.due(now):
                 trouble = resume.save(now=now)
                 if trouble:

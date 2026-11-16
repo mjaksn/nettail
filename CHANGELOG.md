@@ -29,7 +29,10 @@ parsed, and it is treated as public.
   only after less than half an hour down, because an exporter rebooted in the
   meantime may reuse a template ID for another layout. A session that cannot
   be read is met with a line and a new session rather than a refusal to start.
-  Off unless asked for, and refused beside `--flow-store off`.
+  Off unless asked for. A run with a store that is not asked to resume lets a
+  saved session go, so leaving the flag out means starting afresh for good,
+  and with `--flow-store off` the flag says it has nowhere to keep a session
+  and the run goes on without one.
 - **The image, the compose file and the installer resume by default.** The
   image's command is now `--web --web-bind 0.0.0.0 --resume`, and both the unit
   and the compose file the installer writes pass `--resume`.
@@ -43,11 +46,18 @@ parsed, and it is treated as public.
   takes.** It gave up after five failed reconnects, on the grounds that a
   restart changed the token, and a tab left open then had to be reloaded. It
   now retries for as long as nothing answers, says "waiting for the collector"
-  meanwhile, and stops only when the collector answers and refuses: with the
-  watcher cap full, as before, or because it has come back with another token,
-  which it now says in so many words. A restart is told apart from a dropped
+  meanwhile, and stops only when the collector answers and refuses with the
+  watcher cap full, as before. An address the collector no longer knows, which
+  is what another token looks like, is said once in so many words and then
+  tried every thirty seconds, since a reverse proxy answering for a container
+  that is down looks the same. A restart is told apart from a dropped
   connection and marked with one line in the table, since flows sent while the
   collector was down never arrived anywhere.
+- **The page retries a dropped stream itself, from where it is now.** The
+  browser's own retry reused the address the stream was opened with, which
+  carried the filter and the row the replay starts after as they were then.
+  The page corrected the filter and not the row, so a stream that dropped
+  could be replayed rows the page already had, or none of the ones it missed.
 - **Under `--resume` the exit summary goes to the terminal only.** A browser
   that is going to see the session carry on would otherwise have a summary put
   in the middle of its table at every restart. The `s` key still gives it one.

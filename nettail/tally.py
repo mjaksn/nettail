@@ -325,7 +325,13 @@ class Tally:
             setattr(tally, name, Counter(
                 {key: value for key, value in state["counters"][name]}))
         for name in cls.SCALARS:
-            setattr(tally, name, state["scalars"][name])
+            value = state["scalars"][name]
+            # Checked here, because a figure that is not a number would be
+            # taken now and fail later, in the middle of the run, on the first
+            # flow that added to it.
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError("%s is %r" % (name, value))
+            setattr(tally, name, value)
         tally.longest = [(duration, tick, tuple(details))
                          for duration, tick, details in state["longest"]]
         tally._events = [(when, rate) for when, rate in state["events"]]

@@ -136,8 +136,8 @@ services:
     # is what keeps them across a recreate: without one they go with the
     # container, and every `docker compose pull` starts them again from
     # nothing. Put `--flow-store off` in the command above to keep no history
-    # at all, and take --resume out with it, since the session has nowhere to
-    # go without the store and nettail refuses the pair.
+    # at all, which keeps no session either: --resume says so at startup and
+    # the run goes on without one.
     #
     # The same volume holds a country database fetched with
     # `--update-country-db`, as the note on `--country` above says. A run at a

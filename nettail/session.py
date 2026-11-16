@@ -10,8 +10,9 @@ reconnects finds its rows still mean what they meant.
 
 It lives in the flow store, beside the flows, so that the two are committed
 together and a crash loses both from the same moment rather than one from
-each. A run with no store has nowhere to keep it, which is why `--resume` asks
-for one.
+each. A run with no store has nowhere to keep it, and says so; a run with a
+store that was not asked to resume lets one go, so that leaving the flag out
+means starting afresh for good rather than until the flag comes back.
 
 Four things about it are worth knowing before changing it.
 
@@ -126,6 +127,32 @@ def _pairs(mapping):
             for key, value in mapping.items()]
 
 
+def _settled(counter, tries=5):
+    """A counter's items, read while another thread may be adding to it.
+
+    The resolver's statistics are counted by lanname's lookup threads, and a
+    key added while the save is walking them raises. Copying is over in
+    microseconds, so trying again is all it takes; a counter that changes
+    under every try is a save that fails and says so.
+    """
+    for attempt in range(tries):
+        try:
+            return dict(counter.items())
+        except RuntimeError:
+            if attempt == tries - 1:
+                raise
+    return {}
+
+
+def _finite(value, what):
+    """A number that came out of a saved session, or a raise saying which."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("%s is %r" % (what, value))
+    if value != value or value in (float("inf"), float("-inf")):
+        raise ValueError("%s is %r" % (what, value))
+    return value
+
+
 def _keyed(pairs):
     """`_pairs` back again, list keys as the tuples they were."""
     return [(tuple(key) if isinstance(key, list) else key, value)
@@ -162,9 +189,15 @@ class Session:
         # How long the last save took, in seconds, which sets how long the
         # next one waits; see `SAVE_SPACING`.
         self.cost = 0.0
-        # Whether a save has failed already, so that a store gone bad says so
-        # once rather than once a minute for the rest of the run.
+        # Whether the last save failed, so that a store gone bad says so once
+        # rather than once a minute for the rest of the run. Put back by the
+        # next save that works, so a later failure is told about too.
         self.complained = False
+        # What the session looked like at the last save, as cheaply as that
+        # can be said. A save that would write the same thing again is
+        # skipped: on a quiet network it is tens of megabytes rewritten and
+        # committed for nothing.
+        self._fingerprint = None
 
     # -- saving -------------------------------------------------------------
 
@@ -213,7 +246,7 @@ class Session:
                 "evicted": templates.evicted,
                 "dropped": templates.dropped,
             },
-            "resolver": _pairs(self.resolver.stats),
+            "resolver": _pairs(_settled(self.resolver.stats)),
             "tally": self.tally.state(),
             "ring": self.ring.state(),
         }
@@ -223,24 +256,55 @@ class Session:
         now = time.time() if now is None else now
         return now >= self._next
 
-    def save(self, clean=False, now=None):
-        """Write the session into the store's open transaction.
+    def fingerprint(self):
+        """What would change if anything worth saving had changed.
 
-        Answers None, or the reason it could not, the first time it could not.
-        The store's next commit is what puts it on disk, and closing the store
-        commits, which is what the save made on the way out relies on.
+        Every flow moves the serial or the decoder's counts, a key moves the
+        settings, the c key moves the start time, and a lookup moves the
+        resolver's counts. The rest of the session only changes alongside one
+        of those, which is what lets this stand in for comparing the text.
+        """
+        sampling = self.decoder.sampling
+        return (
+            tuple(sorted(self.decoder.stats.items())),
+            self.tally.flows, self.shown[0], self.serial[0],
+            self.controls.started, self.decoder.templates.learned,
+            None if sampling is None else tuple(sampling.rates.items()),
+            tuple(sorted(_settled(self.resolver.stats).items())),
+            json.dumps(settings(self.args, self.scale, self.resolver),
+                       sort_keys=True),
+        )
+
+    def save(self, clean=False, now=None):
+        """Write the session and commit it, with the flows waiting beside it.
+
+        Answers None, or the reason it could not, the first time it could not
+        since the last save that worked. Committed here rather than left to
+        the store's next flush, so that the time it takes, which is what sets
+        when the next one happens, includes putting it on disk.
+
+        A save while running that would write what the last one wrote is
+        skipped. The one on the way out never is, since what it adds is that
+        the stop was clean.
         """
         now = time.time() if now is None else now
         began = time.perf_counter()
         try:
+            mark = self.fingerprint()
+            if not clean and mark == self._fingerprint:
+                self._next = now + max(self.every, SAVE_SPACING * self.cost)
+                return None
             text = json.dumps(self.capture(now=now), separators=(",", ":"))
             self.store.save_session(text, clean=clean, now=now)
+            self.store.flush(now=now)
         except Exception as exc:  # reported, and never fatal
             self._next = now + self.every
             if self.complained:
                 return None
             self.complained = True
             return "the session could not be saved for --resume: %s" % (exc,)
+        self._fingerprint = mark
+        self.complained = False
         self.cost = time.perf_counter() - began
         self._next = now + max(self.every, SAVE_SPACING * self.cost)
         return None
@@ -268,20 +332,23 @@ class Session:
                 return False, ("the saved session was written by a build this "
                                "one cannot read, so this is a new one")
             built = self._build(state)
-        except (ValueError, TypeError, KeyError, AttributeError,
-                IndexError) as exc:
+            fresh = now - saved_at <= TEMPLATE_AGE
+            line = self._describe(state, clean, fresh, now)
+        except (ValueError, TypeError, KeyError, AttributeError, IndexError,
+                OverflowError) as exc:
             return False, ("the saved session could not be read, so this is a "
                            "new one: %s" % (exc,))
-        fresh = now - saved_at <= TEMPLATE_AGE
         self._apply(built, clean, fresh, now)
-        # From here this run numbers flows the saved session does not know
-        # about, so the session on disk is a crash's leftovers until this run
-        # saves its own. Said at once, since a kill may come before that.
-        try:
-            self.store.mark_unclean()
-        except Exception:  # the save on the way out says it again anyway
-            pass
-        return True, self._describe(state, clean, fresh, now)
+        # Saved again at once, unclean, with the serial as this run now has
+        # it. From here this run numbers flows the saved session knew nothing
+        # about, so if it is killed before its own first save the next run has
+        # to find a crash's leftovers, and it has to find them numbered past
+        # this run's skip rather than before it: otherwise two kills in a row
+        # hand out the same numbers twice.
+        trouble = self.save(now=now)
+        if trouble:
+            line += "; " + trouble
+        return True, line
 
     def _build(self, state):
         """Everything in `state` as the objects it describes, or a raise."""
@@ -299,9 +366,9 @@ class Session:
                 for name in ("learned", "evicted", "dropped")),
             "ring": [(int(serial), dict(rec), dict(hdr))
                      for serial, rec, hdr in state["ring"]],
-            "elapsed": float(state["elapsed"]),
-            "shown": int(state["shown"]),
-            "serial": int(state["serial"]),
+            "elapsed": float(_finite(state["elapsed"], "the elapsed time")),
+            "shown": int(_finite(state["shown"], "the flows shown")),
+            "serial": int(_finite(state["serial"], "the flow serial")),
             "start": dict(state["settings"]["start"]),
             "now": dict(state["settings"]["now"]),
         }
@@ -315,8 +382,14 @@ class Session:
         built["sampling"] = None if sampling is None else (
             OrderedDict(_keyed(sampling["rates"])), int(sampling["evicted"]))
         scale = state["scale"]
-        built["scale"] = (scale["top"], scale["largest"], int(scale["seen"]),
-                          [tuple(entry) for entry in scale["recent"]])
+        built["scale"] = (_finite(scale["top"], "the size scale's top"),
+                          _finite(scale["largest"], "the largest flow"),
+                          int(_finite(scale["seen"], "the flows seen")),
+                          [tuple(_finite(n, "a recent flow") for n in entry)
+                           for entry in scale["recent"]])
+        if built["scale"][0] <= 0:
+            raise ValueError("the size scale's top is %r" % (scale["top"],))
+        _finite(state["saved"], "when it was saved")
         # The settings are checked here rather than where they are applied,
         # because applying is meant to be the half that cannot fail: a raise
         # partway through it would leave a run with some of the old session
@@ -324,7 +397,7 @@ class Session:
         for name, value in built["now"].items():
             if name == "scale":
                 dynamic, fixed_top, _window = value
-                if not isinstance(fixed_top, (int, float)):
+                if _finite(fixed_top, "the size scale's top") <= 0:
                     raise ValueError("the size scale's top is %r" % (fixed_top,))
             elif name == "resolve":
                 if not isinstance(value, str):

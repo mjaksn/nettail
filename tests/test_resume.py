@@ -305,9 +305,11 @@ check("one saved on the way out carries on from where it was",
 clean.store.close()
 clean.close()
 
-# Picked up from a clean stop and then killed before saving anything of its
-# own: the run numbered flows the clean save knows nothing about, so the next
-# one has to treat what it finds as a crash's leftovers, not as a clean stop.
+# Picked up and then killed before saving anything of its own, twice over.
+# Each run numbered flows the session it picked up knows nothing about, so
+# the next one has to find a crash's leftovers rather than a clean stop, and
+# has to number past what the killed run handed out rather than past what it
+# was handed: two kills in a row must not reuse one range.
 killed = Collector(["--templates", "--size-scale-dynamic"],
                    store.FlowStore(path, retention_days=7))
 killed.session.restore()
@@ -317,10 +319,18 @@ next_one = Collector(["--templates", "--size-scale-dynamic"],
                      store.FlowStore(path, retention_days=7))
 next_one.session.restore()
 check("a run killed before its first save is not taken for a clean stop",
-      next_one.serial[0] == after.serial[0] + session.SERIAL_SKIP,
-      "%d from %d" % (next_one.serial[0], after.serial[0]))
-next_one.store.close()
+      next_one.serial[0] == killed.serial[0] + session.SERIAL_SKIP,
+      "%d after %d" % (next_one.serial[0], killed.serial[0]))
+next_one.store._db.close()        # and killed again
 next_one.close()
+third = Collector(["--templates", "--size-scale-dynamic"],
+                  store.FlowStore(path, retention_days=7))
+third.session.restore()
+check("and a second kill in a row does not hand out the same numbers again",
+      third.serial[0] == next_one.serial[0] + session.SERIAL_SKIP,
+      "%d after %d" % (third.serial[0], next_one.serial[0]))
+third.store.close()
+third.close()
 
 # What an exporter said about itself is trusted only from a session young
 # enough that the exporter is likely to be saying it still. Older than that,
@@ -349,11 +359,23 @@ def poisoned(value):
     return target
 
 
+whole = through_json(captured)
 for why, value in (
         ("text that is not JSON", "{not json"),
         ("a format from another build", json.dumps({"format": 999})),
-        ("a session cut short", json.dumps(dict(through_json(captured),
-                                                tally={"counters": {}})))):
+        ("a session cut short", json.dumps(dict(whole, tally={"counters": {}}))),
+        # Valid JSON holding something that is not a figure, in each of the
+        # places that used to be read after the check that catches them, or
+        # that would have been taken and failed later on every flow.
+        ("a serial of infinity", json.dumps(dict(whole, serial=float("inf")))),
+        ("a session with no time saved",
+         json.dumps({k: v for k, v in whole.items() if k != "saved"})),
+        ("a size scale whose top is text",
+         json.dumps(dict(whole, scale=dict(whole["scale"], top="big")))),
+        ("a tally whose count is text",
+         json.dumps(dict(whole, tally=dict(
+             whole["tally"], scalars=dict(whole["tally"]["scalars"],
+                                          flows="many")))))):
     where = poisoned(value)
     victim = Collector([], store.FlowStore(where, retention_days=7))
     victim.feed(datagrams(3))
@@ -426,6 +448,117 @@ check("while a quick one keeps to the interval it was given",
 slow.close()
 quick.close()
 
+
+# Nothing has changed since the last save, so there is nothing to write: on a
+# quiet network a save is otherwise tens of megabytes rewritten and committed
+# for nothing. The save on the way out is never skipped, since what it adds
+# is that the stop was clean.
+class CountingStore(store.DisabledStore):
+    def __init__(self):
+        self.writes = []
+
+    def save_session(self, text, clean=False, now=None):
+        self.writes.append(clean)
+
+
+counting = CountingStore()
+idle = Collector([], counting)
+idle.feed(datagrams(2))
+idle.session.save()
+idle.session.save()
+check("a save with nothing new since the last is skipped",
+      counting.writes == [False], repr(counting.writes))
+idle.feed(datagrams(1))
+idle.session.save()
+check("while one after more flows is written", counting.writes == [False] * 2,
+      repr(counting.writes))
+idle.controls.handle("v")
+idle.session.save()
+check("and so is one after a key", len(counting.writes) == 3,
+      repr(counting.writes))
+idle.session.save(clean=True)
+check("the save on the way out is written whatever has changed",
+      counting.writes[-1] is True, repr(counting.writes))
+idle.close()
+
+
+# The resolver's counts are kept by lanname's lookup threads, so a save can
+# meet one being added to. Trying again is all that takes.
+class Restless(dict):
+    def __init__(self, fails):
+        super().__init__(resolved=1)
+        self.fails = fails
+
+    def items(self):
+        if self.fails:
+            self.fails -= 1
+            raise RuntimeError("dictionary changed size during iteration")
+        return super().items()
+
+
+check("a counter another thread is adding to is read on a second try",
+      session._settled(Restless(2)) == {"resolved": 1})
+try:
+    session._settled(Restless(99))
+    check("and one that never settles fails the save rather than hanging",
+          False, "it was read")
+except RuntimeError:
+    check("and one that never settles fails the save rather than hanging", True)
+
+
+# A failed save is said once, and said again after a save has worked in
+# between, so a store that goes bad later in the run is not kept quiet.
+class Flaky(store.DisabledStore):
+    def __init__(self):
+        self.failing = True
+
+    def save_session(self, text, clean=False, now=None):
+        if self.failing:
+            raise OSError("disk full")
+
+
+flaky = Flaky()
+shaky = Collector([], flaky)
+first_said = shaky.session.save(clean=True)
+again_said = shaky.session.save(clean=True)
+flaky.failing = False
+shaky.session.save(clean=True)
+flaky.failing = True
+later_said = shaky.session.save(clean=True)
+check("a save that fails says so", first_said and "disk full" in first_said,
+      repr(first_said))
+check("once, not at every save after it", again_said is None, repr(again_said))
+check("and again when it fails after working",
+      later_said and "disk full" in later_said, repr(later_said))
+shaky.close()
+
+# -- every key setting is one a session keeps -------------------------------
+#
+# `SETTINGS` is written out by hand beside `KEYS` and `Controls.toggles`, and a
+# key added with its flag and left out of it would pass every other suite while
+# its setting quietly did not survive a restart. So each toggle a key shows is
+# named here against the setting a session keeps for it, and a toggle with no
+# entry fails until somebody says which setting it is.
+KEPT_BY = {
+    "b": "hide_status", "k": "sticky_header", "d": "scale",
+    "e": "external_only", "f": "fqdn", "g": "country", "h": "resolve",
+    "n": "named_hosts", "p": "show_macs", "t": "templates", "v": "verbose",
+}
+# Pause is an act rather than a setting, and its held flows are in memory.
+NOT_KEPT = {" "}
+probe = Collector()
+toggles = set(probe.controls.toggles())
+check("every key that shows as on is either kept or deliberately not",
+      toggles == set(KEPT_BY) | NOT_KEPT,
+      "unaccounted %s, stale %s" % (sorted(toggles - set(KEPT_BY) - NOT_KEPT),
+                                    sorted(set(KEPT_BY) - toggles)))
+check("and every one kept is a setting the session saves",
+      set(KEPT_BY.values()) == set(session.SETTINGS)
+      == set(session.settings(probe.args, probe.scale, probe.resolver)),
+      "%s against %s" % (sorted(set(KEPT_BY.values())),
+                         sorted(session.SETTINGS)))
+probe.close()
+
 # -- the options ------------------------------------------------------------
 
 parser = cli.build_parser()
@@ -439,12 +572,6 @@ try:
 except SystemExit:
     check("a save interval of nothing is refused", True)
 
-refused = subprocess.run(
-    [sys.executable, *SCRIPT, "--resume", "--flow-store", "off"],
-    capture_output=True, text=True, timeout=30)
-check("--resume with no store to keep a session in is refused",
-      refused.returncode != 0 and "--resume" in refused.stderr
-      and "--flow-store off" in refused.stderr, refused.stderr)
 
 # -- the collector, run for real, killed, and run again ---------------------
 

@@ -988,10 +988,14 @@ Seven things about it are easy to break.
   instead, where the refusal is only a note. A stream that drops on its own
   is the same case arriving by another door: the browser retries with the
   address the stream was opened with, which holds whatever term was wanted
-  back then, so the error handler closes a stream whose term is out of date
-  and reconnects itself after `RETRY_WAIT`. Left to the browser, the retry
-  arrives under the old term, and every flow before the page sends the new
-  one comes through.
+  back then, and the row the replay starts after as it was back then too. So
+  the error handler closes every stream that drops and reconnects itself,
+  after `RETRY_WAIT` and then longer, from the term wanted and the newest row
+  held now. Left to the browser, the retry arrives under the old term, and
+  every flow before the page sends the new one comes through; and under
+  `--resume` a restart is a dropped stream too, where the old row would replay
+  thousands of rows the page already has, or for a tab that never
+  reconnected, none of the ones it missed.
 - **A term applies on Enter or blur, and an empty box applies at once.** The
   match is exact, so applying as each character is typed would throw away
   every flow that arrived while `443` went through `4` and `44`. Clearing can
@@ -1143,7 +1147,7 @@ The token is not part of it: a URL survives a restart only through
 token out of every file this program writes, and a run that resumes with a
 token it made up says so at startup.
 
-Eleven things about it are easy to break and quiet when broken.
+Thirteen things about it are easy to break and quiet when broken.
 
 - **The session table is an addition, not a schema version.** `_check_schema`
   refuses any version it was not built for, so a bump would stop the previous
@@ -1187,10 +1191,15 @@ Eleven things about it are easy to break and quiet when broken.
   the compose file that changes the same setting wins. `started_with` is noted
   when the `Session` is built, which is before the restore and before any key,
   so it is always what the command line and the settings file said.
-- **A save is spaced by what it costs.** It runs on the receive loop, and with
-  the endpoint and pair tables at their cap it was measured at about two
-  seconds and 35 MB, so `SAVE_SPACING` makes the next one wait at least a
-  hundred times as long. `--resume-every` is the floor, not the interval.
+- **A save is spaced by what it costs, and skipped when it would change
+  nothing.** It runs on the receive loop, and with the endpoint and pair tables
+  at their cap it was measured at about two seconds and 35 MB, so
+  `SAVE_SPACING` makes the next one wait at least a hundred times as long.
+  `--resume-every` is the floor, not the interval. The save commits, flows
+  waiting beside it included, so the cost it measures includes putting it on
+  disk. `fingerprint` stands in for comparing the text, and a save while
+  running that would write what the last one wrote is skipped; the one on the
+  way out never is, since what it adds is that the stop was clean.
 - **Templates and sampling rates go back only from a young session.** They
   are an exporter's claims about itself, and one rebooted or upgraded while
   the collector was down may reuse a template ID for another layout, which
@@ -1198,10 +1207,19 @@ Eleven things about it are easy to break and quiet when broken.
   `TEMPLATE_AGE` is half an hour, Cisco's default v9 template timeout. The
   counts of templates learned go back regardless, being figures about the
   session.
-- **Whether the save was clean is a row of its own.** A run that picks up a
-  clean save and is killed before its own first save has numbered flows the
-  saved serial does not know, so `mark_unclean` takes the flag back and commits
-  as soon as a session is restored, without rewriting the session.
+- **A restore is followed at once by a save.** From the moment a session is
+  picked up the run numbers flows the saved serial does not know, so if it is
+  killed before its own first save the next run must find a crash's leftovers,
+  numbered past this run's skip. Without the save, two kills in a row hand out
+  the same range twice. `test_resume` kills three runs in a row to hold it.
+- **Leaving the flag out lets the session go.** A run with a store that was
+  not asked to resume clears the session row, so a session cannot come back
+  weeks stale the next time the flag is given. `--resume` with the store off
+  is a line and a run without a session rather than a refusal, because the
+  two can come from different places, and the command line overriding a
+  settings file is not something to refuse.
+- **The resolver's counts are read while lanname's threads add to them.**
+  `_settled` copies them and tries again when a key arrives mid-copy.
 
 Three things around it changed because of it. The exit summary goes to stderr
 only under `--resume`, since a browser left open would otherwise have a summary
@@ -1211,12 +1229,17 @@ so the page can tell a restart from a dropped connection and write one line
 saying flows sent while the collector was down never arrived. And the page no
 longer gives up after five failures. A collector being restarted is
 unreachable for as long as the restart takes, which a stop and a later start
-can make hours, so a stream that fails to connect is retried for ever, and one
-refused outright is followed by a GET of the `ping` route, because a browser
-hides the status of a refusal: nothing or a 503 is a collector on its way down
-or not up yet and is waited out, a 404 is a token from before the restart, and
-a 204 is the watcher cap. A retry the page schedules itself does not fire in a
-hidden tab, for the reason a hidden tab parks.
+can make hours, so a stream that drops is retried for ever, by the page and
+never by the browser, whose retry would reuse a stale filter and a stale row
+to replay after. One refused outright is followed by a GET of the `ping`
+route, because a browser hides the status of a refusal: nothing or a 503 is a
+collector on its way down or not up yet and is waited out, a 204 is the
+watcher cap and is given up on, and a 404 is said once and then asked about
+every thirty seconds, since it is either a token from before the restart or a
+reverse proxy answering for a container that is down, and the page cannot
+tell which. An answer that arrives after the tab has reconnected another way
+is ignored. A retry the page schedules itself does not fire in a hidden tab,
+for the reason a hidden tab parks.
 
 What is not kept is deliberate and written on `session.py`: the stream
 positions of the sequence watch, so downtime is not reported as loss on the

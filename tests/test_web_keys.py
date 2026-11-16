@@ -1070,4 +1070,29 @@ check("without --resume the summary still reaches the browser",
       any(kind == "summary"
           for kind, _text in run([], [v5_packet(0)])["prose"]))
 
+# Leaving the flag out means starting afresh now and later. A session left in
+# place would come back the next time the flag was given, however stale, and
+# without the flows counted in between, so a run not asked to resume lets it
+# go and says that it has.
+plain_run = run([], [v5_packet(8)], argv=["--flow-store", resume_store])
+check("a run not asked to resume lets a saved session go, and says so",
+      "was let go" in plain(plain_run["err"]), plain(plain_run["err"])[-400:])
+gone = main.store.FlowStore(resume_store, retention_days=7)
+check("so that it is not there for the next run that is",
+      gone.load_session() is None)
+gone.close()
+
+# A session has nowhere to go with the store off. That is said and the run
+# goes on, because the two can come from different places, `resume = true` in
+# a settings file and `--flow-store off` typed for a throwaway run, and the
+# command line is meant to win.
+storeless = run([], [v5_packet(0)], argv=["--flow-store", "off", "--resume"])
+check("--resume with the store off runs, and says it will not keep a session",
+      "will not keep one" in plain(storeless["err"]),
+      plain(storeless["err"])[-400:])
+check("without saying anything about a token it will not need to keep",
+      "made up for this run" not in plain(storeless["err"]))
+check("and greets a browser as a run that resumed nothing",
+      storeless["greeting_when_serving"].get("resumed") is False)
+
 finish("web keys")

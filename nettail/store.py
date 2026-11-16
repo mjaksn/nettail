@@ -300,13 +300,13 @@ class FlowStore:
     def save_session(self, text, clean=False, now=None):
         """Keep the session `--resume` will pick up, in the open transaction.
 
-        Written beside the flows rather than committed on its own, so that it
-        goes to disk with the next flush and a crash loses the two together
-        rather than one without the other.
+        Written beside the flows, in their transaction, so that a commit puts
+        the two on disk together and a crash loses both from one moment rather
+        than one without the other.
 
         Whether it was saved on the way out is a row of its own rather than a
-        field in the text, because it has to be taken back without rewriting
-        the session: see `mark_unclean`.
+        field in the text, so that it is a fact about the save and not about
+        the session, and is read without parsing tens of megabytes to find it.
         """
         now = time.time() if now is None else now
         self._db.execute(
@@ -317,19 +317,19 @@ class FlowStore:
             "VALUES ('clean', ?, ?)", (float(now), "1" if clean else "0"))
         self._dirty = True
 
-    def mark_unclean(self):
-        """Say the saved session is no longer the last word, and commit it.
+    def clear_session(self):
+        """Forget the saved session. Answers whether there was one.
 
-        Called as soon as a session has been picked up. From then on the run
-        is numbering flows the saved session knows nothing about, so if it is
-        killed before its own first save, the next run has to treat what it
-        finds as a crash's leftovers and not as a clean stop. Committed here
-        and not at the next flush, since the kill this is for may come first.
+        What a run that was not asked to resume does with one it finds, so
+        that leaving `--resume` out means starting afresh now and later: a
+        session left in place would come back, weeks stale, the next time the
+        flag was given, without the flows counted in between.
         """
-        self._db.execute(
-            "UPDATE session SET value = '0' WHERE name = 'clean'")
-        self._dirty = True
-        self.flush()
+        found = self._db.execute(
+            "DELETE FROM session WHERE name IN ('state', 'clean')").rowcount
+        if found:
+            self._dirty = True
+        return bool(found)
 
     def load_session(self):
         """The saved session as (when, text, clean), or None for none."""
@@ -388,8 +388,8 @@ class DisabledStore:
     def save_session(self, text, clean=False, now=None):
         return None
 
-    def mark_unclean(self):
-        return None
+    def clear_session(self):
+        return False
 
     def load_session(self):
         return None

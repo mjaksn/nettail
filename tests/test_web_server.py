@@ -286,14 +286,26 @@ try:
           "EventSource.CLOSED" in body)
     # A browser hides the status of a refused stream, so the page asks the
     # collector which refusal it was. A restart is one of them, on its way
-    # down, and has to be waited out rather than given up on; a full cap
-    # and a token from before the restart are the two that waiting cannot
-    # fix, and both move the indicator off connecting.
+    # down, and has to be waited out rather than given up on. A full cap is
+    # the one waiting cannot fix, and moves the indicator off connecting.
     check("and asks the collector why", "whyRefused()" in body
           and 'BASE + "/ping"' in body)
-    check("moving off connecting when waiting cannot help",
-          'stopTrying("gone", "refused"' in body
-          and 'stopTrying("gone", "the collector does not know' in body)
+    check("giving up only on a full cap", 'stopTrying("gone", "refused"' in body
+          and body.count("stopTrying(") == 2, str(body.count("stopTrying(")))
+    # A 404 is either a token from before the restart or a proxy answering
+    # for a container that is down, and only the first is for good. The page
+    # says what the first would mean, once, and goes on asking slowly, which
+    # reconnects by itself in the second.
+    check("an address nothing knows is said once and then waited out",
+          "unknownTold" in body
+          and 'retryLater("the collector does not know this address")' in body)
+    # The answer to a ping can arrive after the tab has reconnected another
+    # way, and acting on it then would close a stream that is working.
+    start = body.find("function whyRefused(")
+    inside = body[start:body.find("\n  }\n", start)]
+    check("an answer about a refused stream leaves a newer one alone",
+          inside.count("if (stream || gaveUp) { return; }") == 2,
+          str(inside.count("if (stream || gaveUp) { return; }")))
     # A collector being restarted is unreachable for as long as the restart
     # takes, which a stop and a later start can make hours. The page gave up
     # after five failures once, and a tab left open across a restart then had
@@ -520,12 +532,20 @@ try:
           and "filterAccepted" in inside)
     # A browser retries a dropped stream with the address it first opened, so
     # a filter confirmed since would be missing from the subscription the
-    # retry makes. The page retries itself when the two differ.
+    # retry makes, and the replay would start after whatever row was newest
+    # back then: rows the page already has, or none at all. So the page does
+    # every retry itself, and `connect` builds the address afresh.
     start = body.find("es.onerror")
     inside = body[start:body.find("\n    };", start)]
-    check("a dropped stream opened under an older filter is retried by the page",
-          start != -1 and "term !== reconnectTerm()" in inside
-          and "reconnectSoon()" in inside)
+    connecting = inside[inside.find("EventSource.CONNECTING"):]
+    check("a dropped stream is always retried by the page, not the browser",
+          start != -1 and "es.close();" in connecting
+          and "retryLater();" in connecting
+          and "reconnectTerm()" not in connecting)
+    check("from the term wanted and the newest row held now",
+          "var term = reconnectTerm()" in body
+          and 'params.push("after=" + encodeURIComponent(String(lastIngestId)))'
+          in body)
     # And a term applied while the browser's own retry is still pending takes
     # that retry over, since the retry would come back under the old term.
     start = body.find("function applyFilter(")
