@@ -166,10 +166,22 @@ class FlowStore:
                 ON flows(dst_addr, received, ingest_id);
             CREATE INDEX IF NOT EXISTS flows_exporter_received
                 ON flows(exporter, received, ingest_id);
+            CREATE TABLE IF NOT EXISTS session (
+                name TEXT PRIMARY KEY,
+                saved REAL NOT NULL,
+                value TEXT NOT NULL
+            );
         """)
         if self._db.execute("PRAGMA user_version").fetchone()[0] == 0:
             self._db.execute("PRAGMA user_version = %d" % SCHEMA_VERSION)
         self._dirty = True
+
+    # The session table is added beside the flows rather than announced with a
+    # new `SCHEMA_VERSION`, and that is deliberate. `_check_schema` refuses any
+    # version it was not built for, so a bump would make the release before
+    # this one refuse to start on a volume this one had touched, and rolling an
+    # image back is exactly what somebody does when a new one misbehaves. An
+    # older build never reads the table and is not disturbed by it being there.
 
     def _check_schema(self):
         version = self._db.execute("PRAGMA user_version").fetchone()[0]
@@ -285,6 +297,52 @@ class FlowStore:
             (int(ingest_id), int(limit))).fetchall()
         return [dict(row) for row in rows]
 
+    def save_session(self, text, clean=False, now=None):
+        """Keep the session `--resume` will pick up, in the open transaction.
+
+        Written beside the flows rather than committed on its own, so that it
+        goes to disk with the next flush and a crash loses the two together
+        rather than one without the other.
+
+        Whether it was saved on the way out is a row of its own rather than a
+        field in the text, because it has to be taken back without rewriting
+        the session: see `mark_unclean`.
+        """
+        now = time.time() if now is None else now
+        self._db.execute(
+            "INSERT OR REPLACE INTO session (name, saved, value) "
+            "VALUES ('state', ?, ?)", (float(now), text))
+        self._db.execute(
+            "INSERT OR REPLACE INTO session (name, saved, value) "
+            "VALUES ('clean', ?, ?)", (float(now), "1" if clean else "0"))
+        self._dirty = True
+
+    def mark_unclean(self):
+        """Say the saved session is no longer the last word, and commit it.
+
+        Called as soon as a session has been picked up. From then on the run
+        is numbering flows the saved session knows nothing about, so if it is
+        killed before its own first save, the next run has to treat what it
+        finds as a crash's leftovers and not as a clean stop. Committed here
+        and not at the next flush, since the kill this is for may come first.
+        """
+        self._db.execute(
+            "UPDATE session SET value = '0' WHERE name = 'clean'")
+        self._dirty = True
+        self.flush()
+
+    def load_session(self):
+        """The saved session as (when, text, clean), or None for none."""
+        rows = {row["name"]: row for row in self._db.execute(
+            "SELECT name, saved, value FROM session "
+            "WHERE name IN ('state', 'clean')")}
+        state = rows.get("state")
+        if state is None:
+            return None
+        clean = rows.get("clean")
+        return (float(state["saved"]), state["value"],
+                clean is not None and clean["value"] == "1")
+
     def close(self):
         if self._db is not None:
             self.flush()
@@ -326,6 +384,15 @@ class DisabledStore:
 
     def before(self, ingest_id, limit):
         return []
+
+    def save_session(self, text, clean=False, now=None):
+        return None
+
+    def mark_unclean(self):
+        return None
+
+    def load_session(self):
+        return None
 
     def close(self):
         return None

@@ -254,6 +254,29 @@ try:
     except urllib.error.HTTPError as exc:
         check("the font is behind the token", exc.code == 404, str(exc.code))
 
+    # What a page whose stream was refused asks, since a browser hides why.
+    # Nothing in the answer but its status, and each status means one thing:
+    # this is the one a collector that is up and open gives.
+    ping = urllib.request.urlopen(
+        urllib.request.Request("http://%s/t/%s/ping" % (host, site.token),
+                               headers={"Host": host}), timeout=TIMEOUT)
+    check("a ping to a collector that is up answers with no content",
+          ping.status == 204, str(ping.status))
+    check("and says nothing worth keeping",
+          ping.headers["Cache-Control"] == "no-store",
+          repr(ping.headers["Cache-Control"]))
+    # And a token from before a restart meets the gate in front of every
+    # route, which is how the page tells it from a collector still starting.
+    try:
+        urllib.request.urlopen(
+            urllib.request.Request(
+                "http://%s/t/%s/ping" % (host, "not-the-token"),
+                headers={"Host": host}), timeout=TIMEOUT)
+        check("a ping with another token is refused", False, "it was answered")
+    except urllib.error.HTTPError as exc:
+        check("a ping with another token is refused", exc.code == 404,
+              str(exc.code))
+
     # A response that is not a 200 fails an EventSource permanently: the state
     # goes to CLOSED rather than CONNECTING, so the retry branch never sees it.
     # Handling only CONNECTING left the reader on "connecting" for ever with
@@ -261,8 +284,28 @@ try:
     # tab gets when MAX_CLIENTS turns it away with a 503 that says so.
     check("the page notices a connection that was refused outright",
           "EventSource.CLOSED" in body)
-    check("and moves off connecting when it happens",
-          'setState("gone", "refused")' in body)
+    # A browser hides the status of a refused stream, so the page asks the
+    # collector which refusal it was. A restart is one of them, on its way
+    # down, and has to be waited out rather than given up on; a full cap
+    # and a token from before the restart are the two that waiting cannot
+    # fix, and both move the indicator off connecting.
+    check("and asks the collector why", "whyRefused()" in body
+          and 'BASE + "/ping"' in body)
+    check("moving off connecting when waiting cannot help",
+          'stopTrying("gone", "refused"' in body
+          and 'stopTrying("gone", "the collector does not know' in body)
+    # A collector being restarted is unreachable for as long as the restart
+    # takes, which a stop and a later start can make hours. The page gave up
+    # after five failures once, and a tab left open across a restart then had
+    # to be reloaded to see a session the collector had kept for it.
+    check("the page never gives up on a collector that is not answering",
+          "failures >= 5" not in body and "DOWN_AFTER" in body)
+    check("and a retry it schedules itself waits for a hidden tab to come back",
+          "document.hidden) { return; }" in body)
+    # A restart is told from a dropped connection by the run id in the
+    # greeting, and only a greeting after the first can be a restart.
+    check("the page tells a restart from a dropped connection",
+          "greeted && !!hello.run && hello.run !== runId" in body)
 
     # A tab in the background gives up its stream, because a browser that is
     # not running the page goes on buffering what arrives until the tab is
@@ -290,11 +333,11 @@ try:
     check("and one paused in the background says that instead",
           "paused in the background" in body)
 
-    # A refused connection and one abandoned after five failures both leave a
-    # dead EventSource behind. Left assigned, it reads as a live stream to
-    # anything that checks, and the clock watcher would park it, take the
-    # notice off the indicator and reconnect into whatever refused it. Both
-    # branches say to reload, so the page has to mean it. A name is a blunt
+    # A refusal the page gives up on leaves a dead EventSource behind. Left
+    # assigned, it reads as a live stream to anything that checks, and the
+    # clock watcher would park it, take the notice off the indicator and
+    # reconnect into whatever refused it. Both refusals tell the reader what
+    # to do instead, so the page has to mean it. A name is a blunt
     # thing to grep for, but nothing here runs the page, and the alternative
     # is a rule that fails nowhere when it is dropped.
     check("the page records having stopped trying", "gaveUp" in body)
@@ -1032,6 +1075,33 @@ try:
     deadline = time.time() + TIMEOUT
     while bus.clients and time.time() < deadline:
         time.sleep(0.05)
+
+    # -- a collector on its way down -------------------------------------
+    #
+    # Between the feed closing and the server stopping, a stream is refused
+    # with a 503, and a page that asks why is told the same, so that it waits
+    # for the restart rather than reporting a full cap. A server of its own,
+    # because closing the feed is the one thing the checks below cannot have
+    # done to them early.
+    closing_bus = Feed()
+    closing = WebInterface(closing_bus, queue.Queue(maxsize=8), set(),
+                           bind="127.0.0.1", port=0)
+    closing.start()
+    try:
+        closing_bus.close()
+        there = "127.0.0.1:%d" % closing.port
+        try:
+            urllib.request.urlopen(
+                urllib.request.Request(
+                    "http://%s/t/%s/ping" % (there, closing.token),
+                    headers={"Host": there}), timeout=TIMEOUT)
+            check("a ping to a collector closing down says so", False,
+                  "it answered as though open")
+        except urllib.error.HTTPError as exc:
+            check("a ping to a collector closing down says so",
+                  exc.code == 503, str(exc.code))
+    finally:
+        closing.stop(timeout=1.0)
 
     # -- shutting down ----------------------------------------------------
     #

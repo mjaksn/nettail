@@ -238,9 +238,10 @@ usage: nettail [-h] [--version] [--config FILE | --save-config [FILE]]
                [--macs] [--verbose] [--templates] [--json [FILE]]
                [--flow-store [FILE]] [--flow-retention-days DAYS]
                [--flow-prune-every SECONDS] [--flow-commit-every SECONDS]
-               [--colour WHEN] [--no-color] [--header-every HEADER_EVERY]
-               [--sticky-header] [--hide-status] [--no-supplemental-services]
-               [--web] [--web-port PORT] [--web-bind ADDR] [--web-host NAME]
+               [--resume] [--resume-every SECONDS] [--colour WHEN]
+               [--no-color] [--header-every HEADER_EVERY] [--sticky-header]
+               [--hide-status] [--no-supplemental-services] [--web]
+               [--web-port PORT] [--web-bind ADDR] [--web-host NAME]
                [--web-url URL] [--web-token TOKEN] [--web-colour WHEN]
                [--web-readonly] [--web-detail-refresh SECONDS]
                [--size-scale-max BYTES | --size-scale-dynamic]
@@ -270,6 +271,8 @@ usage: nettail [-h] [--version] [--config FILE | --save-config [FILE]]
 | `--flow-retention-days DAYS` | `14` | How long to keep rows in the durable flow store. At least one day, and a value of 14 keeps the last two weeks unless you change it |
 | `--flow-prune-every SECONDS` | `43200` | How often old rows are pruned from the SQLite store. This is 12 hours by default, and it is a background maintenance pass rather than a freeze on the collector |
 | `--flow-commit-every SECONDS` | `1` | How often buffered writes are committed to the file. Lower values make the history more current, while higher values allow a little more batching |
+| `--resume` | off | Keep the session in the flow store and pick it up at the next start: the statistics behind the status bar, the summary and the details dialog, the templates exporters have sent, what the keys have set, and the flows a browser can click on. A browser left open reconnects to the same view, provided the token is the same. Needs the store, and the image, the compose file and the installer all turn it on. See [Resuming a session](#resuming-a-session) |
+| `--resume-every SECONDS` | `60` | How often `--resume` saves the session while running, at least. A clean stop saves on the way out, so this is what a crash or a hard kill can lose. A save pauses the collector for as long as it takes, which grows with the tables, so one that took long puts the next further off |
 | `--colour WHEN` | `auto` | When to use ANSI colour **on this terminal**: `auto`, `always` or `never`. Under `auto` a terminal gets colour and a redirected stream does not, and `NO_COLOR` in the environment turns it off. The browser view has its own switch, `--web-colour`, and is not decided by this one. `--color` is accepted too |
 | `--no-color` | off | The same as `--colour never`, and like it, about this terminal |
 | `--header-every N` | `40` | Reprint the column header every N lines. `0` disables repeats |
@@ -289,7 +292,7 @@ All off unless `--web` is given. See [The web interface](#the-web-interface).
 | `--web-host NAME` | none | A name the view answers to. Under the loopback default it is added beside `localhost`; under another `--web-bind`, which otherwise answers to any name, it restricts the view to the names given. May be repeated |
 | `--web-url URL` | none | The address a browser opens when a reverse proxy stands in front of the view, such as `https://flows.example.com`. The view answers to that name with no port or with the URL's own and takes the page's requests (key presses, row clicks, filters and scrolling back) from that origin, the printed URL becomes it, and the name narrows the view as `--web-host` does. The proxy serves the view from the root of that name. See [Behind a reverse proxy](#behind-a-reverse-proxy) |
 | `--web-colour WHEN` | `on` | Colour in the browser view: `on` or `off`. A browser is a colour-capable reader whatever stdout is, so a redirected run does not take the colour out of it. `--web-color` is accepted too |
-| `--web-token TOKEN` | random | Use this token in the URL instead of a fresh random one, so a bookmark survives a restart. Taken from `NETTAIL_WEB_TOKEN` in the environment when the flag is not given, which is how an installed service receives one without it appearing in `ps` |
+| `--web-token TOKEN` | random | Use this token in the URL instead of a fresh random one, so a bookmark survives a restart, and so does a tab left open under `--resume`. Taken from `NETTAIL_WEB_TOKEN` in the environment when the flag is not given, which is how an installed service receives one without it appearing in `ps` |
 | `--web-readonly` | off | Serve the display but accept no keys from the browser |
 | `--web-detail-refresh SECONDS` | `5` | How often the flow details dialog asks the collector for its figures again. `0` leaves them still until **Refresh** is pressed. See [Clicking a flow](#clicking-a-flow) |
 
@@ -1057,10 +1060,12 @@ it does not clear the table underneath.
 The collector keeps the last four thousand flows each tab was sent, which is as
 many rows as the page itself keeps. Clicking a row older than that says so, and
 still shows the two endpoint panels and the pair, since those are kept for as
-long as the run. A row left over from before a restart says the same thing, and
-it is worth knowing that it does: a bookmarked tab reconnects with the previous
-run's rows still on the page, and none of them can be looked up in the run that
-replaced it.
+long as the run. Under `--resume` those panels and the last four thousand flows
+sent to anybody are part of the session a restart keeps, so a row from before
+the restart is answered after it as it was before. Without `--resume` a row
+left over from before a restart says the flow has gone, and it is worth knowing
+that it does: a bookmarked tab reconnects with the previous run's rows still on
+the page, and none of them can be looked up in the run that replaced it.
 
 A tab that went to the background and came back is a new watcher as far as the
 collector is concerned. Its older rows stay clickable for as long as they are
@@ -1189,6 +1194,82 @@ The store is kept for a limited time. `--flow-retention-days` sets the window,
 `--flow-commit-every` decides how often buffered writes are flushed to disk.
 That means a tab that went to the background can still ask for the rows it
 missed, without the process having to keep every flow it ever saw in memory.
+
+### Resuming a session
+
+A collector run as a service or in a container is restarted for reasons that
+have nothing to do with the network it watches: an image pulled, a host
+rebooted, an upgrade. The flows already survive that, in the store. With
+`--resume` the rest of the session does too. It is saved in the same file and
+picked up at the next start:
+
+- the statistics: the status bar's figures, every table in the traffic
+  summary, and the endpoint and pair figures the details dialog shows;
+- the templates exporters have sent, so v9 and IPFIX records are read from the
+  first datagram after the restart rather than counted as deferred until the
+  exporter next resends;
+- the sampling rates exporters have advertised, so they are not reported again
+  as news. These and the templates are what an exporter says about itself,
+  and one rebooted or upgraded while the collector was down may say something
+  else under the same template IDs, so after half an hour down both are left
+  to be learned again, as they would be without `--resume`;
+- what the keys have set, from a terminal or a browser;
+- the last four thousand flows sent to a browser, so rows from before the
+  restart are still answered when clicked;
+- the run time, as time spent watching. The time the collector was down is
+  not counted, so an average over the session is not diluted by it.
+
+A browser left open across the restart waits for the collector to come back,
+however long that takes, and reconnects to the same view: the rows it had stay
+where they were, the flows that arrived after it lost its connection are
+replayed from the store, and the figures carry on from where they stopped. It
+writes one line where the restart happened, because flows an exporter sent
+while nothing was listening never arrived anywhere:
+
+```
+The collector was restarted and carried on its session where it stopped. Flows
+sent to it while it was down never arrived, so they are not here or in its
+figures.
+```
+
+That needs the address the tab holds to still work, and the token is in it. A
+token made up for the run is made up again at the next, so give the collector
+one with `NETTAIL_WEB_TOKEN` or `--web-token`; a run with `--resume` and no
+token of its own says at startup that a browser's URL will not survive a
+restart. A tab that meets a collector with a different token says so and stops
+trying, rather than waiting for ever.
+
+A setting the command line or the settings file has changed since the last run
+is not overridden by a key pressed before the restart. Each setting is saved
+with the value the run started with, and the key's value is put back only when
+this run started with the same. So a key pressed in a browser survives a
+`docker restart`, and an edit to the compose file that changes the same setting
+wins.
+
+Some things are not kept. Pause is an act and not a setting, and the flows it
+was holding go with the process; they are in the store, and a tab is replayed
+them. The cache of host names is filled again within a lookup's timeout, so
+the rows a reconnecting tab is replayed show addresses where the live rows
+after them show names, and the `l` key's list of local hosts starts again. The
+position of each exporter's sequence numbers is learned again, so exports sent
+while the collector was down are not reported as lost on the network. And the
+exit summary goes to the terminal or the log only, not to the browser, since
+the session is not over.
+
+The session is saved when the collector stops cleanly, which `docker stop`,
+`docker restart` and `systemctl restart` all do, and every `--resume-every`
+seconds while it runs, which is what a crash or a hard kill can lose. A save
+pauses the collector for as long as it takes: milliseconds on a home network,
+and about two seconds with fifty thousand addresses and pairs, which is where
+their tables are capped, so a save that took long puts the next one further
+off. A session that cannot be read,
+from another build or a damaged file, is met with a line saying so and a new
+session, never with a run that refuses to start.
+
+`--resume` is off unless asked for, because a run at a terminal that is stopped
+and started again is usually meant to start afresh. The image, the compose file
+and the installer all turn it on. `--flow-store off` and `--resume` cannot be
+had together, since the session is kept in the store.
 
 ### Scrolling back in time
 
@@ -1442,9 +1523,11 @@ of stdout. `--web-colour off` is how a run says otherwise.
   clickable and says the flow itself has gone.
 - IPv4 only, matching the collector socket.
 - The page fetches one thing besides itself, `flags.woff2`, and only when
-  there are country flags on it to draw, and asks one route a question, which
-  is what clicking a flow does. Everything else it needs is inside it, and it
-  reaches for nothing off this machine at all.
+  there are country flags on it to draw. Besides the stream it asks the
+  collector questions only when the reader does something, a click on a flow,
+  a filter, a scroll back, a key, and once when a stream is refused, to tell a
+  collector that is restarting from one with another token. Everything else it
+  needs is inside it, and it reaches for nothing off this machine at all.
 
 ---
 
@@ -2510,7 +2593,9 @@ authentication from SSH, which is more than `--web-bind` on its own will ever
 give you.
 
 **Pin the token.** A fresh random token every restart means a fresh URL every
-restart. An environment file keeps one bookmark working:
+restart. An environment file keeps one bookmark working, and with `--resume` on
+the `ExecStart` line it is also what lets a tab left open pick the session up
+again after `systemctl restart`:
 
 ```ini
 # /etc/netflow/nettail.env
@@ -2557,7 +2642,7 @@ image runs by default.
 
 ```
 docker run -d --name nettail --restart unless-stopped \
-    --network host ghcr.io/mjaksn/nettail:latest --web --web-bind 0.0.0.0
+    --network host ghcr.io/mjaksn/nettail:latest --web --web-bind 0.0.0.0 --resume
 docker logs nettail        # the URL, with its token, is printed at startup
 ```
 
@@ -2569,8 +2654,11 @@ the printed URL then carries the first unless `--web-url` gave the address:
 ```
 docker run -d --name nettail --restart unless-stopped \
     --network host ghcr.io/mjaksn/nettail:latest \
-    --web --web-bind 0.0.0.0 --web-host z2m
+    --web --web-bind 0.0.0.0 --web-host z2m --resume
 ```
+
+Arguments after the image name replace its default command, `--resume`
+included, which is why both of these name it again.
 
 `docker-compose.yml` in this repository is the same thing as a Compose file,
 with the options worth knowing about written out beside it.
@@ -2682,9 +2770,26 @@ one if the history should outlast the container:
 -v nettail-history:/var/lib/nettail
 ```
 
-The compose file does this already. The totals and the tables are held in
-memory either way, and a restart starts counting again, which is the same
-thing `Ctrl-C` and a fresh run do. `--flow-store off` keeps no history at all.
+The compose file does this already. The image runs with `--resume`, so the
+volume holds the session as well as the flows, and a restart carries on
+counting where it stopped; see [Resuming a session](#resuming-a-session). Take
+`--resume` out of the command for a restart that starts counting again, as
+`Ctrl-C` and a fresh run do. `--flow-store off` keeps no history at all, and
+needs `--resume` gone with it.
+
+A browser left open across a restart reconnects by itself only if the token
+in its URL still works, and one the collector made up is made up again at the
+next start. Keep one in a file and hand it over with `--env-file`, which keeps
+it out of `ps` on the host as well as in the container:
+
+```
+echo "NETTAIL_WEB_TOKEN=$(openssl rand -base64 24 | tr '+/' '-_' | tr -d '=')" > nettail.env
+docker run -d --name nettail --restart unless-stopped --env-file nettail.env \
+    -v nettail-history:/var/lib/nettail \
+    --network host ghcr.io/mjaksn/nettail:latest --web --web-bind 0.0.0.0 --resume
+```
+
+The compose file reads `nettail.env` beside it when there is one.
 
 Two more things are worth mounting. Your own static name mappings:
 
@@ -2738,7 +2843,7 @@ docker run -it --rm --network host ghcr.io/mjaksn/nettail:latest --port 2055
 ```
 
 An argument after the image name is not optional. The image's default command
-is `--web --web-bind 0.0.0.0`, so a run with nothing after the image name
+is `--web --web-bind 0.0.0.0 --resume`, so a run with nothing after the image name
 starts the browser view on every address the host has rather than a bare
 collector. `-it` is not optional either: without a terminal the keyboard
 controls turn themselves off and the sticky header has nothing to stick to. For
@@ -3021,6 +3126,7 @@ another suite's result.
 | `test_flow_display` | the direction arrow, names in place of addresses, and the mac line sitting under the columns it belongs to |
 | `test_templates` | a template spelled out the first time it arrives, a line for each resend after that, the shape again when an ID is redefined, and none of it without `--templates` |
 | `test_flow_store` | the flow store: where the file goes by default, one row in and back out, writes held until the commit cadence, and retention |
+| `test_resume` | `--resume`: the tally, the traffic tables, the ring and a whole session read back exactly as they were saved, a template that needs no resend, a key kept only where the command line agrees, a damaged session met with a new one, and a collector killed hard and started again |
 | `test_colour` | colour decided per reader, painted once and taken out again for whichever of the two refused it |
 | `test_help_colour` | the help staying plain on 3.14, where argparse settles colour before this program can |
 | `test_hosts_and_gradient` | the local host list, and the report ramp spanning the rows it prints |

@@ -254,7 +254,11 @@ NETTAIL_WEB_TOKEN=$WEB_TOKEN
 ENV
 chmod 0640 "$ENV_FILE"
 
-ARGS=(--port "$FLOW_PORT" --resolve "$RESOLVE")
+# --resume because a service is restarted for reasons that have nothing to do
+# with the network it is watching, an upgrade or a reboot, and the statistics
+# it had gathered and the settings a browser had made should come through one.
+# The token is the other half of that and is already kept in the file above.
+ARGS=(--port "$FLOW_PORT" --resolve "$RESOLVE" --resume)
 if [ "$WEB" -eq 1 ]; then
     ARGS+=(--web --web-port "$WEB_PORT")
 fi
@@ -467,13 +471,15 @@ services:
       - --port
       - "$FLOW_PORT"
       - --resolve
-      - $RESOLVE$extra
+      - $RESOLVE
+      - --resume$extra
 $web_lines
 
-    # The flow history, which is kept unless the command says --flow-store off.
-    # The image puts it in /var/lib/nettail, and a named volume there is what
-    # keeps it across a pull and recreate; without one it goes with the
-    # container, as every update would then throw it away.
+    # The flow history, which is kept unless the command says --flow-store off,
+    # and the session --resume keeps beside it. The image puts both in
+    # /var/lib/nettail, and a named volume there is what keeps them across a
+    # pull and recreate; without one they go with the container, as every
+    # update would then throw them away.
     volumes:
       - history:/var/lib/nettail
 

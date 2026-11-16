@@ -225,6 +225,24 @@ jobs:
             exit 1
           }
           echo "the container printed the right line"
+      - name: the default command must pick its session up across a restart
+        # The image resumes by default, because a container is restarted for
+        # reasons that have nothing to do with the network it is watching.
+        # Restarted rather than recreated, so the file is still in the
+        # container's own layer with no volume needed, and stopped with the
+        # SIGTERM docker sends, which is the clean save on the way out.
+        run: |
+          docker restart warned
+          for attempt in $(seq 1 30); do
+            if docker logs warned 2>&1 | grep -q "resumed the session saved"; then
+              echo "the restarted container resumed its session"
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs warned
+          echo "::error::the restarted container did not resume its session"
+          exit 1
       - name: it must be running as the unprivileged user
         run: |
           who="$(docker exec probe id --user --name)"

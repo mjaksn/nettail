@@ -853,12 +853,14 @@ The reasoning that is not in the code:
 - **The serial is never reset, not even by the c key.** A page holding rows
   from before a clear must not have them answered by flows from after it.
 - **A serial is checked against the ask's ends before it is believed, and
-  that is not belt and braces.** Serials do start again at 1 on a restart, and
-  `--web-token` exists so that a bookmark survives one, so a reconnecting tab
-  arrives with a page full of the previous run's serials on its rows.
-  Answering one of those out of the new run's ring shows a reader an entirely
-  different flow under a title naming the one they clicked, which is worse
-  than saying nothing. `report` calls it held only when
+  that is not belt and braces.** Serials start again at 1 on a restart that
+  did not `--resume`, and `--web-token` exists so that a bookmark survives
+  one, so a reconnecting tab arrives with a page full of the previous run's
+  serials on its rows. A resumed run carries the serial on, and past a crash
+  moves it further on still, but the check is what makes either safe rather
+  than merely likely. Answering one of those out of the new run's ring shows
+  a reader an entirely different flow under a title naming the one they
+  clicked, which is worse than saying nothing. `report` calls it held only when
   `flow_endpoints(rec)` matches the ends the ask carried, and `test_detail`
   pins both directions.
 - **Text off the wire may not reach a report unchecked.** `_detail` in
@@ -1127,6 +1129,107 @@ going until the start line appears, apply a filter and scroll up again, then
 scroll back to the tail and watch the rows that arrived meanwhile be sent
 again.
 
+## Resuming a session
+
+`--resume` keeps the session in the flow store and picks it up at the next
+start, so that a collector restarted under a container or a unit carries on
+and a browser left open reconnects to the same view. `session.py` does the
+saving and the loading; `Tally.state`, `Traffic.state` and `Ring.state` each
+say what their own object holds, so the shape sits next to the fields. It is
+off by default, because a terminal run stopped and started again usually means
+to start afresh, and the image, the compose file and the installer turn it on.
+The token is not part of it: a URL survives a restart only through
+`NETTAIL_WEB_TOKEN` or `--web-token`, which was a decision about keeping the
+token out of every file this program writes, and a run that resumes with a
+token it made up says so at startup.
+
+Eleven things about it are easy to break and quiet when broken.
+
+- **The session table is an addition, not a schema version.** `_check_schema`
+  refuses any version it was not built for, so a bump would stop the previous
+  release starting on a volume this one had touched, and rolling an image back
+  is what somebody does when a new one misbehaves. `test_resume` builds a
+  store the way the release before this one did and opens it.
+- **Saved in the flows' transaction, before the flush.** The two go to disk in
+  one commit, so a crash loses both from one moment. The save on the way out
+  happens before `flow_store.close`, which is what commits it.
+- **Loading is all or nothing.** `_build` turns the whole text into objects,
+  the key settings included, and anything malformed raises there; `_apply`
+  only assigns. A raise partway through applying would leave a run with half
+  of each session. A file from another build or a damaged one is a line and a
+  new session, never a refusal to start, since this runs where a service is
+  restarting itself.
+- **Objects handed out before the restore are filled in place.** The keys and
+  the status bar hold `decoder.stats`, the tally, the resolver's stats and the
+  sequence watch before any session is read, so `Tally.take` and the
+  `clear`-then-`update` calls change those objects rather than replacing them.
+  A replacement they did not hold would count flows nobody reported.
+- **Every figure the tally holds has to be saved.** `Tally.COUNTERS` and
+  `Tally.SCALARS` name them, and `test_resume` holds them against what `reset`
+  sets, in both directions. A Counter goes as pairs rather than an object
+  because `second_bits` is keyed by a number and `most_common` breaks ties by
+  insertion order; peers go sorted so the same table always saves the same
+  text.
+- **Templates go back through `TemplateStore.put`, not the store's own.**
+  `WatchedTemplates` records every put for the t key, and the store raises a
+  `TemplateLearned` for each new one, so a restore through the subclass would
+  report every template as just arrived. The base class's put and a
+  `take_events` straight after are what make the restore silent, and a resend
+  afterwards is still a resend, which `test_resume` checks with a real IPFIX
+  datagram. The settings go back first, because the t key's setting may
+  install the watched store, and installing one replaces what the decoder held.
+- **The elapsed time is kept, not the start time.** A start time carried across
+  counts the downtime as time spent watching, and every average over the
+  session is diluted by it.
+- **A setting goes back only where this run started the way the saved one
+  did.** Each is saved as the value the run started with and the value it
+  ended with. So a key pressed in a browser survives a restart, and an edit to
+  the compose file that changes the same setting wins. `started_with` is noted
+  when the `Session` is built, which is before the restore and before any key,
+  so it is always what the command line and the settings file said.
+- **A save is spaced by what it costs.** It runs on the receive loop, and with
+  the endpoint and pair tables at their cap it was measured at about two
+  seconds and 35 MB, so `SAVE_SPACING` makes the next one wait at least a
+  hundred times as long. `--resume-every` is the floor, not the interval.
+- **Templates and sampling rates go back only from a young session.** They
+  are an exporter's claims about itself, and one rebooted or upgraded while
+  the collector was down may reuse a template ID for another layout, which
+  would cut records up wrongly and silently until the next resend.
+  `TEMPLATE_AGE` is half an hour, Cisco's default v9 template timeout. The
+  counts of templates learned go back regardless, being figures about the
+  session.
+- **Whether the save was clean is a row of its own.** A run that picks up a
+  clean save and is killed before its own first save has numbered flows the
+  saved serial does not know, so `mark_unclean` takes the flag back and commits
+  as soon as a session is restored, without rewriting the session.
+
+Three things around it changed because of it. The exit summary goes to stderr
+only under `--resume`, since a browser left open would otherwise have a summary
+put in the middle of its table at every restart, between flows that read as
+one session either side of it. The greeting carries a `run` id and `resumed`,
+so the page can tell a restart from a dropped connection and write one line
+saying flows sent while the collector was down never arrived. And the page no
+longer gives up after five failures. A collector being restarted is
+unreachable for as long as the restart takes, which a stop and a later start
+can make hours, so a stream that fails to connect is retried for ever, and one
+refused outright is followed by a GET of the `ping` route, because a browser
+hides the status of a refusal: nothing or a 503 is a collector on its way down
+or not up yet and is waited out, a 404 is a token from before the restart, and
+a 204 is the watcher cap. A retry the page schedules itself does not fire in a
+hidden tab, for the reason a hidden tab parks.
+
+What is not kept is deliberate and written on `session.py`: the stream
+positions of the sequence watch, so downtime is not reported as loss on the
+network; the name cache and the l key's host list, which are lanname's; pause,
+which is an act; and the per-second rates.
+
+Nothing in the suite runs the page, so the browser half is a manual check:
+open a tab on a collector started with `--resume` and a token, send traffic,
+press a few keys, then `docker restart` it and, separately, stop it for a
+minute and start it again. The rows should stay, the footer's figures carry
+on, the keys stay lit, a click on an older row answer as before, and one line
+mark the restart.
+
 ## There is a QR encoder in here
 
 `qr.py` encodes the `--web` URL as a QR code and draws it out of half block
@@ -1304,8 +1407,8 @@ Four things about that arrangement are easy to get wrong.
   matter. With three, a pending timeout left to run fires after the tab is back
   and the stream is live again, and parks a tab somebody is looking at.
 - **`stream === null` is not the same question as parked.** A refused
-  connection and one abandoned after five failures both leave it null, and the
-  clock watcher must not reopen either of those. That is what `parked` is for,
+  connection, and one waiting out a collector that is restarting, both leave
+  it null, and the clock watcher must not reopen either of those. That is what `parked` is for,
   and why it is cleared in `connect` rather than at each call site.
 - **Every cause has to note the Follow box, and one return has to restore it.**
   The visibility path notes it on the way out, before the grace. The other two
@@ -1313,11 +1416,13 @@ Four things about that arrangement are easy to get wrong.
   `takeBack` puts it back. Restoring only in the visibility handler leaves the
   starved-window case, which is the one all this was written for, coming back
   to a page that has quietly stopped following.
-- **A dead `EventSource` must not stay assigned.** Both branches that stop
-  trying tell the reader to reload, so both close the stream, null it and set
+- **A dead `EventSource` must not stay assigned.** Both refusals that stop
+  trying, the full cap and a token from before a restart, tell the reader what
+  to do instead, so `stopTrying` closes the stream, nulls it and sets
   `gaveUp`. Left assigned, a refused connection reads as a live one, and the
   clock watcher parks it, takes the refusal off the indicator and reconnects
-  into the same full cap to be refused again.
+  into the same full cap to be refused again. See "Resuming a session" for
+  the refusal that is waited out instead.
 
 The count shown on return comes from `flows_shown` in the status payload,
 counted in the receive loop where `should_show` passes. It has to be counted
@@ -1513,7 +1618,7 @@ the flows keep the rows they should and that nothing is drawn over.
 ## The installer
 
 `scripts/install.sh` covers both deployments, systemd and Docker, and asks
-which. Five things in it are deliberate:
+which. Six things in it are deliberate:
 
 - **The web token lives in `/etc/nettail/nettail.env` and is never
   regenerated.** Re-running the installer to pick up a new version must not
@@ -1548,6 +1653,11 @@ which. Five things in it are deliberate:
 - **The unit gives the flow store a state directory.** The service user has no
   home, and a store that cannot be opened stops the run. See "The flow store
   is on by default" above.
+- **Both paths pass `--resume`.** A service is restarted for upgrades and
+  reboots, and the session is kept in the store the line above gives it. The
+  token it needs to be worth anything to a browser left open is already in the
+  env file, which is the first bullet. `test_installer` holds both command
+  lines to it. See "Resuming a session" above.
 
 It is safe to run twice, and that is worth keeping: an existing user, virtual
 environment and token are all reused rather than replaced.
@@ -1583,7 +1693,9 @@ than skipping quietly.
 The image is built for `--web`. The console display wants a real terminal and a
 detached container has none, so the browser view is the only mode that works
 properly there. That is why `CMD` is `--web --web-bind 0.0.0.0` and not a bare
-collector.
+collector, and `--resume` is on it because a container is restarted for
+reasons that have nothing to do with the network it watches. CI restarts the
+default command's container and greps for the line that says it resumed.
 
 Four things about it are easy to get wrong later:
 

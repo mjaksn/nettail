@@ -279,6 +279,68 @@ class Tally:
                 counter.pop(key, None)
         self.pruned += len(dropped)
 
+    # -- keeping it across a restart ----------------------------------------
+    #
+    # What `--resume` saves and loads, as `Traffic.state` is for the tables
+    # this holds. Every Counter goes as a list of pairs rather than as an
+    # object, for two reasons: `second_bits` is keyed by a number, which a JSON
+    # object would hand back as a string, and `most_common` breaks a tie by
+    # insertion order, so the order a counter was filled in is part of what it
+    # reports. The scalars are named in one tuple so that a figure added to
+    # `reset` and left out of here is easy to see, and `test_resume` compares
+    # this against `reset` to make it fail rather than merely be easy to see.
+
+    COUNTERS = ("proto_flows", "proto_bytes", "proto_packets", "proto_in",
+                "proto_out", "service_bytes", "service_flows", "service_in",
+                "service_out", "talkers", "talkers_in", "talkers_out",
+                "internal", "internal_in", "internal_out", "second_bits")
+    SCALARS = ("flows", "_tick", "external_bytes", "external_flows",
+               "inbound_bytes", "outbound_bytes", "timed_flows", "rated_flows",
+               "events_dropped", "pruned", "peak_flow_bits")
+
+    def state(self):
+        """Everything this has counted, in a shape JSON can carry."""
+        return {
+            "counters": {name: [[key, value]
+                                for key, value in getattr(self, name).items()]
+                         for name in self.COUNTERS},
+            "scalars": {name: getattr(self, name) for name in self.SCALARS},
+            "longest": [[duration, tick, list(details)]
+                        for duration, tick, details in self.longest],
+            "events": [[when, rate] for when, rate in self._events],
+            "traffic": self.traffic.state(),
+        }
+
+    @classmethod
+    def from_state(cls, state, top=TOP_N):
+        """A fresh tally holding what `state` describes, or a raise.
+
+        The heap goes back in the order it was saved, which is already a heap,
+        and its details go back as tuples, since a tie on duration and tick is
+        impossible and so a list there would never be compared, but the
+        summary unpacks it and the next save would otherwise differ.
+        """
+        tally = cls(top=top)
+        for name in cls.COUNTERS:
+            setattr(tally, name, Counter(
+                {key: value for key, value in state["counters"][name]}))
+        for name in cls.SCALARS:
+            setattr(tally, name, state["scalars"][name])
+        tally.longest = [(duration, tick, tuple(details))
+                         for duration, tick, details in state["longest"]]
+        tally._events = [(when, rate) for when, rate in state["events"]]
+        tally.traffic = Traffic.from_state(state["traffic"])
+        return tally
+
+    def take(self, other):
+        """Become `other`, in place.
+
+        In place because this object is already in the hands of the keys and
+        the status bar, which were given it before a saved session was read,
+        and a replacement they did not hold would count flows nobody reported.
+        """
+        self.__dict__.update(other.__dict__)
+
     # -- reporting ----------------------------------------------------------
 
     def longest_flows(self):

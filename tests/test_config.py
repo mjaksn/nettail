@@ -67,6 +67,8 @@ SAMPLES = {
     "flow_retention_days": "21",
     "flow_prune_every": "1800",
     "flow_commit_every": "2.5",
+    "resume": "true",
+    "resume_every": "90",
     "colour": "never",
     "no_color": "true",
     "header_every": "12",

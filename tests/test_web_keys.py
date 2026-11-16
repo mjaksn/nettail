@@ -1030,4 +1030,44 @@ check("as one finished line, written in Python",
 check("holding a field the row has no column for",
       any("=" in e[0] for e in extras), str(extras[:1]))
 
+# -- --resume, through the real receive loop ----------------------------
+#
+# What `session` does is held in test_resume. What is held here is what main
+# does around it, which only a run through main can show: the exit summary kept
+# off a browser that is going to see the session carry on, the greeting saying
+# which process this is and whether it picked a session up, and the warning
+# about a token that will not survive the restart the flag exists for.
+resume_store = os.path.join(tempfile.mkdtemp(prefix="nettail-resume-"),
+                            "flows.sqlite3")
+first_run = run([], [v5_packet(0)] * 3, argv=["--flow-store", resume_store,
+                                              "--resume"])
+first_greeting = first_run["greeting_when_serving"]
+check("the greeting names the process it came from",
+      isinstance(first_greeting.get("run"), str) and first_greeting["run"],
+      repr(first_greeting.get("run")))
+check("and a first run says it resumed nothing",
+      first_greeting.get("resumed") is False)
+check("under --resume the exit summary stays off the browser",
+      not any(kind == "summary" for kind, _text in first_run["prose"]),
+      repr([kind for kind, _text in first_run["prose"]]))
+check("while the terminal still gets it", "Summary" in plain(first_run["err"]))
+check("a resumed run with a made-up token says the URL will not survive",
+      "made up for this run" in plain(first_run["err"]))
+
+second_run = run([], [v5_packet(6)] * 2, argv=["--flow-store", resume_store,
+                                               "--resume", "--web-token",
+                                               "a-kept-token"])
+second_greeting = second_run["greeting_when_serving"]
+check("the next run is another process",
+      second_greeting.get("run") != first_greeting.get("run"))
+check("which says it picked the session up",
+      second_greeting.get("resumed") is True)
+check("and says so in the banner a browser is shown",
+      "resumed the session saved" in plain(second_greeting["banner"]))
+check("and one given a token says nothing about it",
+      "made up for this run" not in plain(second_run["err"]))
+check("without --resume the summary still reaches the browser",
+      any(kind == "summary"
+          for kind, _text in run([], [v5_packet(0)])["prose"]))
+
 finish("web keys")

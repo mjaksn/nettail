@@ -4,9 +4,12 @@
 #   docker compose logs --follow        the console display, as it scrolls
 #
 # The URL with the token in it is printed at startup, so read the logs once
-# after the first start. To pin it so that a bookmark survives a restart,
-# uncomment the env_file block below and put NETTAIL_WEB_TOKEN in the file
-# it names.
+# after the first start. To keep it the same across restarts, so that a
+# bookmark goes on working and a browser left open reconnects by itself, put
+# NETTAIL_WEB_TOKEN in nettail.env beside this file; the env_file block below
+# reads it. One way to make the file:
+#
+#   echo "NETTAIL_WEB_TOKEN=$(openssl rand -base64 24 | tr '+/' '-_' | tr -d '=')" > nettail.env
 
 name: nettail
 
@@ -62,6 +65,12 @@ services:
       #- --web-port
       #- "2056"
       - --web
+      # Carry the session on across a restart: the statistics, the templates
+      # exporters have sent, what the keys have set, and the flows a browser
+      # can click on. It is kept in the history volume below, beside the
+      # flows. A browser left open reconnects to the same view, provided the
+      # token is the same, which is what nettail.env above is for.
+      - --resume
       # Loopback, not 0.0.0.0, because host networking means the host's own
       # loopback. This is the same guarantee the program gives outside a
       # container, and it needs no publish to keep it. The image's default
@@ -111,20 +120,24 @@ services:
     #  country-db:
     #    condition: service_completed_successfully
 
-    # Pin the token so a bookmark survives a restart. Leave it out and a
-    # fresh random one is printed at every start. It goes in a file rather
-    # than on the command line so that it stays out of ps; nettail reads
-    # NETTAIL_WEB_TOKEN itself.
-    #env_file:
-    #  - ./nettail.env        # NETTAIL_WEB_TOKEN=the-token-you-want-to-keep
+    # The token, so that a bookmark survives a restart and a browser left open
+    # reconnects to the session --resume kept. Not required: with no file a
+    # fresh random token is printed at every start, the collector says at
+    # startup that a browser's URL will not survive a restart, and everything
+    # else still works. It goes in a file rather than on the command line so
+    # that it stays out of ps; nettail reads NETTAIL_WEB_TOKEN itself.
+    env_file:
+      - path: ./nettail.env   # NETTAIL_WEB_TOKEN=the-token-you-want-to-keep
+        required: false
 
     # The flow history, which the browser view scrolls back into and replays a
-    # returning tab from. It is kept in /var/lib/nettail inside the container,
-    # and a named volume there is what keeps it across a recreate: without one
-    # it goes with the container, and every `docker compose pull` starts it
-    # again from nothing. The totals and the tables are still held in memory
-    # and start again on a restart, as they always have. Put `--flow-store off`
-    # in the command above to keep no history at all.
+    # returning tab from, and the session --resume keeps beside it. Both are
+    # kept in /var/lib/nettail inside the container, and a named volume there
+    # is what keeps them across a recreate: without one they go with the
+    # container, and every `docker compose pull` starts them again from
+    # nothing. Put `--flow-store off` in the command above to keep no history
+    # at all, and take --resume out with it, since the session has nowhere to
+    # go without the store and nettail refuses the pair.
     #
     # The same volume holds a country database fetched with
     # `--update-country-db`, as the note on `--country` above says. A run at a

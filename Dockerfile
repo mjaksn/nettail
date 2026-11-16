@@ -112,8 +112,15 @@ USER nettail
 # on the host exactly as the loopback default does, and the collector says so at
 # startup instead of the warning it prints for a routable bind on a host.
 #
+# --resume because a container is restarted for reasons that have nothing to do
+# with the network it is watching, a pull or a reboot, and it keeps the session
+# beside the flow history in /var/lib/nettail, so a volume there keeps both. A
+# browser left open reconnects to the same view only if its URL still works,
+# which needs NETTAIL_WEB_TOKEN set: without it the token is made up again at
+# every start, and the collector says so at startup.
+#
 # CMD rather than baking it into ENTRYPOINT, so that `docker run ... nettail
 # --json` replaces the lot. A run that supplies no arguments of its own gets
 # this instead, whatever docker flags come before the image name.
 ENTRYPOINT ["nettail"]
-CMD ["--web", "--web-bind", "0.0.0.0"]
+CMD ["--web", "--web-bind", "0.0.0.0", "--resume"]

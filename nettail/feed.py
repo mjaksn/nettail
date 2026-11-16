@@ -233,6 +233,11 @@ class Feed:
         self.filtering = any(c.filter is not None for c in self._clients)
 
     @property
+    def closing(self):
+        """Whether `close` has been called, and new subscribers are refused."""
+        return self._closed_down
+
+    @property
     def clients(self):
         """How many browsers are attached. For the status line and the cap."""
         with self._lock:

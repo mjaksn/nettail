@@ -361,6 +361,11 @@ with tempfile.TemporaryDirectory() as where:
           landed.startswith("/var/lib/nettail/"), landed)
     check("without the command line turning the store off or elsewhere",
           "--flow-store" not in argv, shown(argv))
+    # A service is restarted for upgrades and reboots, and the session is what
+    # a browser left open would otherwise lose. The store above is where it is
+    # kept, which is why the two are held in the same place.
+    check("and the service resumes its session after a restart",
+          "--resume" in argv, shown(argv))
 
     # AGENTS.md says the token is kept out of ps. That is only true while
     # nothing puts it on the command line, which is what this holds.
@@ -444,6 +449,8 @@ with tempfile.TemporaryDirectory() as where:
           and "history:" in compose_lines, shown(compose_lines[-8:]))
     check("without the command turning the store off",
           "--flow-store" not in argv, shown(argv))
+    check("and the container resumes its session after a restart",
+          "--resume" in argv, shown(argv))
 
 
 # --- every resolver mode the program has, and nothing else ------------------

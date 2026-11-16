@@ -123,6 +123,28 @@ class Ring:
         for taker in takers:
             self._hold(self._windows.setdefault(taker, deque()), serial)
 
+    def state(self):
+        """The flows sent to anybody, oldest first, as `--resume` saves them.
+
+        Only that window. Every other one belongs to a watcher, and no watcher
+        outlives the process, so after a restart every tab is a new
+        subscription exactly as a tab back from the background is, and the
+        shared window is what answered for its rows then too.
+        """
+        return [[serial, rec, hdr]
+                for serial, (rec, hdr) in ((s, self._records[s])
+                                           for s in self._latest)]
+
+    def restore(self, state):
+        """Put back what `state` saved, as the shared window and nothing else."""
+        self._records = {}
+        self._held = {}
+        self._latest = deque()
+        self._windows = {}
+        for serial, rec, hdr in state:
+            self._records[int(serial)] = (dict(rec), dict(hdr))
+            self._hold(self._latest, int(serial))
+
     def _hold(self, window, serial):
         window.append(serial)
         self._held[serial] = self._held.get(serial, 0) + 1
