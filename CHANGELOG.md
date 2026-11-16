@@ -11,7 +11,7 @@ but it is a program rather than a library, and the names inside it may move
 without that being a breaking change. `--json` output is the part meant to be
 parsed, and it is treated as public.
 
-## Unreleased
+## [0.22.0] - 2026-11-16
 
 ### Added
 
@@ -1367,6 +1367,7 @@ console: the part that decides what a flow should look like on a terminal.
   reminder line under the startup banner can be a pointer rather than a
   two-hundred-character list that wrapped and then scrolled away.
 
+[0.22.0]: https://github.com/mjaksn/nettail/releases/tag/v0.22.0
 [0.21.0]: https://github.com/mjaksn/nettail/releases/tag/v0.21.0
 [0.20.1]: https://github.com/mjaksn/nettail/releases/tag/v0.20.1
 [0.20.0]: https://github.com/mjaksn/nettail/releases/tag/v0.20.0
