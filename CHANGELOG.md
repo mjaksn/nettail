@@ -11,6 +11,77 @@ but it is a program rather than a library, and the names inside it may move
 without that being a breaking change. `--json` output is the part meant to be
 parsed, and it is treated as public.
 
+## [0.22.0] - 2026-11-16
+
+### Added
+
+- **`--resume` carries a session across a restart.** The statistics behind
+  the status bar, the traffic summary and the details dialog, the templates
+  and sampling rates exporters have sent, what the keys have set, the flow
+  numbering and the last four thousand flows a browser can click on are saved
+  into the flow store and picked up at the next start. A browser left open
+  reconnects to the same view: its rows stay, the figures carry on, the keys
+  stay lit, and a row from before the restart still opens its details. The run
+  time counts only the time spent watching. The session is saved on a clean
+  stop and every `--resume-every` seconds while running, 60 by default, and a
+  save that took long puts the next one further off, since it pauses the
+  collector for as long as it takes. Templates and sampling rates are put back
+  only after less than half an hour down, because an exporter rebooted in the
+  meantime may reuse a template ID for another layout, and only when the
+  clock is not behind the one the session was saved by. A session that cannot
+  be read is met with a line and a new session rather than a refusal to start,
+  and so is one the store shows another run has stored flows past.
+  Off unless asked for. A run with a store that is not asked to resume lets a
+  saved session go, so leaving the flag out means starting afresh for good,
+  and with `--flow-store off` the flag says it has nowhere to keep a session
+  and the run goes on without one.
+- **The image, the compose file and the installer resume by default.** The
+  image's command is now `--web --web-bind 0.0.0.0 --resume`, and both the unit
+  and the compose file the installer writes pass `--resume`.
+- **A `ping` route** answers whether the collector would take a stream, so a
+  page whose stream was refused can tell a collector restarting from one that
+  no longer knows its token.
+
+### Changed
+
+- **The browser view waits for a collector that is down, however long it
+  takes.** It gave up after five failed reconnects, on the grounds that a
+  restart changed the token, and a tab left open then had to be reloaded. It
+  now retries for as long as nothing answers, says "waiting for the collector"
+  meanwhile, and stops only when the collector answers and refuses with the
+  watcher cap full, as before. An address the collector no longer knows, which
+  is what another token looks like, is said once in so many words and then
+  tried every thirty seconds, since a reverse proxy answering for a container
+  that is down looks the same. A restart is told apart from a dropped
+  connection and marked with one line in the table, since flows sent while the
+  collector was down never arrived anywhere.
+- **The page retries a dropped stream itself, from where it is now.** The
+  browser's own retry reused the address the stream was opened with, which
+  carried the filter and the row the replay starts after as they were then.
+  The page corrected the filter and not the row, so a stream that dropped
+  could be replayed rows the page already had, or none of the ones it missed.
+- **Under `--resume` the exit summary goes to the terminal only.** A browser
+  that is going to see the session carry on would otherwise have a summary put
+  in the middle of its table at every restart. The `s` key still gives it one.
+- **A run that resumes with a token it made up says so at startup**, since a
+  browser's URL does not survive the restart unless the token does.
+- **The shipped compose file reads `nettail.env` beside it**, not required, so
+  `NETTAIL_WEB_TOKEN` can be set without editing the file. It needs Compose
+  2.24 or later for the `required: false` it uses, and an older Compose
+  refuses the whole file; the comment above the block says what to change.
+
+### Upgrading
+
+A compose file's `command:` replaces the image's, so one written before this
+release does not resume until `- --resume` is added to it, and a browser's URL
+survives a restart only once `NETTAIL_WEB_TOKEN` is set, in `nettail.env` or
+however the file passes it. A systemd unit picks `--resume` up when
+`scripts/install.sh` is run again, and already has its token in
+`/etc/nettail/nettail.env`. An older release can still open a flow store this
+one has written to, so rolling the image back is safe, and a session saved
+before the rollback is not picked up again after rolling forward once the
+older release has stored flows past it.
+
 ## [0.21.0] - 2026-11-12
 
 ### Added
@@ -1301,6 +1372,7 @@ console: the part that decides what a flow should look like on a terminal.
   reminder line under the startup banner can be a pointer rather than a
   two-hundred-character list that wrapped and then scrolled away.
 
+[0.22.0]: https://github.com/mjaksn/nettail/releases/tag/v0.22.0
 [0.21.0]: https://github.com/mjaksn/nettail/releases/tag/v0.21.0
 [0.20.1]: https://github.com/mjaksn/nettail/releases/tag/v0.20.1
 [0.20.0]: https://github.com/mjaksn/nettail/releases/tag/v0.20.0

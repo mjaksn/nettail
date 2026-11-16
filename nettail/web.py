@@ -50,12 +50,14 @@ are not optional.
 - **An `Origin` check on every route a browser posts to**, refusing a request
   that names an origin other than this one. The one from `--web-url` is the
   only origin it takes that may say https, and only exactly as given.
-- **Seven routes and no eighth.** The page, the stream, the flags font, the
+- **Eight routes and no ninth.** The page, the stream, the flags font, the
   control route, the one that answers a question about a flow, the one that
-  sets a tab's filter and the one that looks back through stored flows for a
-  tab scrolling up. No directory listing, no file handler, nothing that turns
-  part of a request into a path on disk. The page and the font are read once
-  at startup and live in memory.
+  sets a tab's filter, the one that looks back through stored flows for a
+  tab scrolling up, and `ping`, which answers with a status and nothing else
+  so that a page whose stream was refused can tell a collector restarting
+  from one that no longer knows its token. No directory listing, no file
+  handler, nothing that turns part of a request into a path on disk. The page
+  and the font are read once at startup and live in memory.
 - **A cap on connected browsers.** Each stream holds a thread for as long as
   the tab is open, so the count is bounded rather than left to whoever is
   opening tabs. That cap covers the stream only, which is why there is also
@@ -869,10 +871,11 @@ def _frame(event, payload):
 
 
 class _Handler(BaseHTTPRequestHandler):
-    """Seven routes and nothing else.
+    """Eight routes and nothing else.
 
     The page, the stream, the flags font, one key press, one question about a
-    flow, one tab's filter and one ask for older stored flows. Matched exactly
+    flow, one tab's filter, one ask for older stored flows, and a ping that
+    says whether this collector would take a stream. Matched exactly
     rather than by prefix, so a path this does not name is a 404 and never a
     file on disk.
     """
@@ -1004,6 +1007,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._page()
         elif route == "events":
             self._stream()
+        elif route == "ping":
+            self._ping()
         elif route == FONT_FILE:
             self._font()
         else:
@@ -1038,6 +1043,28 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
         self.wfile.write(self.site.font)
+
+    def _ping(self):
+        """No content when this collector would take a stream, 503 while closing.
+
+        What a page asks when its stream was refused, since `EventSource`
+        is told the status of a refusal and never says what it was. Three
+        answers mean three different things to a tab left open across a
+        restart. Nothing at all is a collector that is not up yet, and so is
+        this 503, which is one on its way down: both are worth waiting out.
+        A 404 is the gate in front of every route here, which is what a tab
+        holding a token from before the restart meets when the collector came
+        back with another: no amount of waiting fixes that. And this answering
+        204 while the stream was refused leaves the watcher cap, which is a
+        refusal of a different kind and is told as one.
+        """
+        code = 503 if self.site.bus.closing else 204
+        self.close_connection = True
+        self.send_response(code)
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", "0")
+        self.send_header("Connection", "close")
+        self.end_headers()
 
     def _stream(self):
         site = self.site

@@ -559,6 +559,10 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
   var readonly = true;
   var failures = 0;
   var greeted = false;
+  // Which collector process the last greeting came from. A different one on
+  // a later greeting is a restart, which is a gap in what was received and
+  // not only in what this tab was sent, so it is said differently.
+  var runId = null;
   // The live stream, or null when the tab has given it up.
   var stream = null;
   // The collector's count of flows shown, from the last status
@@ -971,8 +975,8 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
   // about the pause a browser leaves before its own retry. Used wherever the
   // browser's retry would reuse an address carrying a term no longer wanted,
   // and by `resync`, which wants a fresh subscription for the replay it
-  // carries. `failures` is left as it is, so five of these still give up the
-  // way five of the browser's retries do.
+  // carries. `failures` is left as it is, so the state line goes on saying
+  // how long the collector has been out of reach.
   function reconnectSoon() {
     if (stream) { stream.close(); }
     stream = null;
@@ -1920,13 +1924,14 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
   var HIDE_GRACE = 15000;
   var hideTimer = 0;
   // Whether the page gave the stream up itself. Not the same question as
-  // whether there is one: a refused connection and one abandoned after five
-  // failures both leave `stream` null, and neither should be quietly
-  // reopened by the clock watcher below.
+  // whether there is one: a refused connection, and one waiting out a
+  // collector that is restarting, both leave `stream` null, and the clock
+  // watcher below must not reopen either of those.
   var parked = false;
-  // Set when the page has stopped trying: refused outright, or given up after
-  // five failures. Both tell the reader to reload, and neither should be
-  // undone by a tab switch or by the clock watcher.
+  // Set when the page has stopped trying: refused by a collector that has
+  // the watchers it allows, or by one that no longer knows this address.
+  // Both tell the reader what to do instead, and neither should be undone
+  // by a tab switch or by the clock watcher.
   var gaveUp = false;
   // The flow count when the stream was given up, or null when it is live. The
   // page cannot count what it missed, because nothing reached it, so it asks
@@ -2010,8 +2015,9 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
   }
 
   function takeBack() {
-    // Both of the branches that give up for good say to reload, so retrying
-    // behind the reader's back would be the page contradicting its own notice.
+    // Both of the branches that give up for good tell the reader what to do
+    // instead, so retrying behind their back would be the page contradicting
+    // its own notice.
     if (gaveUp) { return; }
     failures = 0;
     setState("retry", "reconnecting");
@@ -2098,6 +2104,119 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
     }
   }, BEAT);
 
+  // The half of a greeting that says how this collector process was started
+  // and what a browser may do with it, taken from the first greeting and
+  // again from the first after a restart, since a new process may have been
+  // started differently. One function for both, so that a field added later
+  // cannot be read at page load and then left at the old process's value by
+  // a tab kept open across a restart.
+  function takeGreeting(hello) {
+    readonly = !!hello.readonly;
+    // How the collector was started, like readonly and json beside it. The
+    // dialog works under --web-readonly, which is why this is read whatever
+    // that says: asking what a flow was changes nothing.
+    if (typeof hello.detail_refresh === "number") {
+      detailRefreshMs = Math.max(hello.detail_refresh, 0) * 1000;
+    }
+    if (typeof hello.restore_max === "number") {
+      restoreMax = Math.max(hello.restore_max, 0);
+    }
+    if (typeof hello.history_rows === "number") {
+      historyRows = Math.max(hello.history_rows, 0);
+    }
+    buildKeys(hello.keys || []);
+    pressable = hello.pressable || [];
+  }
+
+  // How many failures in a row before the state line stops saying
+  // "reconnecting", which reads as a moment, and says the collector is being
+  // waited for. And the longest the page waits between its attempts, which
+  // start at about the pause a browser leaves before its own retry.
+  var DOWN_AFTER = 3;
+  var RETRY_MAX = 30000;
+  // Whether the reader has been told this address is not known. Said once,
+  // and then the page keeps trying quietly, because what it cannot tell is
+  // whether that will change: see `whyRefused`.
+  var unknownTold = false;
+
+  // A stream refused outright, asked about. The answer decides between the
+  // things a tab left open across a restart can meet, and only the collector
+  // can tell them apart, since a browser hides the status of a refused stream:
+  // see `_ping` in web.py for what each answer means at that end.
+  function whyRefused() {
+    setState("retry", "reconnecting");
+    window.fetch(BASE + "/ping", { cache: "no-store" }).then(function (response) {
+      // Anything may have reconnected while the question was out: the tab
+      // coming back to the front opens a stream of its own. An answer about
+      // the refused one says nothing about that, and acting on it would
+      // close a stream that is working.
+      if (stream || gaveUp) { return; }
+      if (response.status === 404) {
+        // Either the collector came back with another token, or something
+        // in front of it, a reverse proxy that drops its route while the
+        // container is down, is answering for it. Only the first is for
+        // good, and the page cannot tell which, so the reader is told what
+        // the first would mean and the page goes on asking at the slowest
+        // pace, which costs nothing and reconnects by itself in the second.
+        if (!unknownTold) {
+          unknownTold = true;
+          note("gap", "Nothing at this address knows this page. If the " +
+               "collector was restarted without a fixed token, it printed " +
+               "a new URL when it started; open that one. If something in " +
+               "front of it is answering while it restarts, this page will " +
+               "reconnect by itself when it is back.");
+        }
+        failures = Math.max(failures, 5);
+        retryLater("the collector does not know this address");
+      } else if (response.ok) {
+        // Up, open, and still refusing, which is nearly always the watcher
+        // cap. The other way here is a query the collector would not take,
+        // which this page does not send.
+        stopTrying("gone", "refused",
+                   "The collector refused this connection. It most likely " +
+                   "already has all the watchers it allows open. Close " +
+                   "another tab and reload to try again.");
+      } else {
+        retryLater();
+      }
+    }).catch(function () {
+      if (stream || gaveUp) { return; }
+      retryLater();
+    });
+  }
+
+  // The refusal waiting cannot fix. It closes the stream, nulls it and sets
+  // `gaveUp`, so that neither a tab switch nor the clock watcher reopens a
+  // connection that would only be refused again.
+  function stopTrying(state, text, why) {
+    if (stream) { stream.close(); }
+    stream = null;
+    gaveUp = true;
+    setState(state, text);
+    note("gap", why);
+  }
+
+  // A stream that dropped, or a collector on its way down or not up yet,
+  // tried again after a wait that starts at `RETRY_WAIT` and grows to
+  // `RETRY_MAX`. `why` is what the state line says meanwhile, when there is
+  // something more particular to say than that the collector is awaited.
+  // Something else may have reconnected before the wait is over: the tab
+  // coming back to the front, or the tab being parked.
+  function retryLater(why) {
+    failures += 1;
+    setState("retry", why || (failures >= DOWN_AFTER
+                              ? "waiting for the collector" : "reconnecting"));
+    var wait = Math.min(RETRY_WAIT * Math.pow(2, Math.min(failures, 5) - 1),
+                        RETRY_MAX);
+    window.setTimeout(function () {
+      // A hidden tab waits to be looked at: opening a stream now would hand
+      // a backgrounded tab the buffer `park` exists to keep from it, and
+      // coming back to the front reconnects whenever there is no stream.
+      if (stream || parked || gaveUp || document.hidden) { return; }
+      connect();
+    }, wait);
+  }
+
   function connect() {
     parked = false;
     // The clock watcher measures from here too. A tick held back by whatever
@@ -2134,26 +2253,29 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
       if (!currentConnection(es)) { return; }
       var hello = JSON.parse(event.data);
       failures = 0;
+      unknownTold = false;
       setState("yes", "watching");
       var status = hello.status;
+      var restarted = greeted && !!hello.run && hello.run !== runId;
+      runId = hello.run || runId;
+      if (restarted) {
+        // A new process may have been started differently, so the half of
+        // the greeting that says what a browser may do is taken again. The
+        // columns are not: the rows on the page were laid out under the ones
+        // they have, and a release that changed them is a page to reload.
+        takeGreeting(hello);
+        // The count of flows missed is left unreported across a restart, and
+        // the line below says what the gap was instead. Without the session
+        // the count starts again; with it, a process that was killed rather
+        // than stopped goes back to its last save, which can be lower than
+        // the figure this tab noted on its way out. Either way subtracting
+        // would report a clear that nobody pressed.
+        parkedAt = null;
+      }
       if (!greeted) {
         greeted = true;
-        readonly = !!hello.readonly;
-        // How the collector was started, like readonly and json beside it.
-        // The dialog works under --web-readonly, which is why this is read
-        // whatever that says: asking what a flow was changes nothing.
-        if (typeof hello.detail_refresh === "number") {
-          detailRefreshMs = Math.max(hello.detail_refresh, 0) * 1000;
-        }
-        if (typeof hello.restore_max === "number") {
-          restoreMax = Math.max(hello.restore_max, 0);
-        }
-        if (typeof hello.history_rows === "number") {
-          historyRows = Math.max(hello.history_rows, 0);
-        }
+        takeGreeting(hello);
         buildHead(hello.columns || []);
-        buildKeys(hello.keys || []);
-        pressable = hello.pressable || [];
         document.title = "nettail " + (hello.nettail || "");
         followLabel.hidden = false;
         whereBox.textContent = hello.json
@@ -2164,6 +2286,17 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
           note("notice", "This collector is serving the display only. " +
                "Keys are not taken from the browser.");
         }
+      } else if (restarted) {
+        // Said even when the session came back whole, because what did not
+        // come back is not this program's to have kept: an exporter sent
+        // flows to a port nothing was listening on, and they are nowhere.
+        note("gap", hello.resumed
+          ? "The collector was restarted and carried on its session where it " +
+            "stopped. Flows sent to it while it was down never arrived, so " +
+            "they are not here or in its figures."
+          : "The collector was restarted and did not keep its session, so " +
+            "its figures start again from here. Flows sent to it while it " +
+            "was down never arrived.");
       } else if (parkedAt === null && !resyncing) {
         note("notice", "reconnected to the collector");
       }
@@ -2281,44 +2414,41 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
       if (!currentConnection(es)) { return; }
       if (es.readyState === EventSource.CLOSED) {
         // The server answered with something that was not a 200, which by the
-        // specification fails the connection for good rather than retrying.
-        // The retry branch below never sees this, so without saying something
-        // here the reader is left on "connecting" for ever while the server's
-        // explanation goes nowhere. The commonest way to arrive is to be the
-        // fifth tab: the collector serves four watchers and refuses the rest.
-        // Left pointing at a dead EventSource, this reads as a live stream to
-        // anything that checks: the clock watcher would park it, take the
-        // refusal off the indicator, and reconnect into the same full cap a
-        // few seconds later to be refused again.
+        // specification fails the connection for good rather than retrying,
+        // and the browser does not say what the answer was. So the page asks
+        // the collector itself, in `whyRefused`, which waits out a collector
+        // that is restarting and gives up on one that is full or has another
+        // token. Left pointing at a dead EventSource meanwhile, this would
+        // read as a live stream to anything that checks: the clock watcher
+        // would park it and reconnect into the same refusal.
         es.close();
         stream = null;
-        gaveUp = true;
-        setState("gone", "refused");
-        note("gap", "The collector refused this connection. It may already " +
-             "have all the watchers it allows open, or it may be shutting " +
-             "down. Close another tab and reload to try again.");
+        whyRefused();
         return;
       }
       if (es.readyState === EventSource.CONNECTING) {
-        failures += 1;
-        setState("retry", "reconnecting");
-        if (failures >= 5) {
-          // The token changes when the collector restarts, so retrying past
-          // this point can only fail. Better to say so than to spin quietly.
-          es.close();
-          stream = null;
-          gaveUp = true;
-          setState("gone", "the collector has closed");
-          note("gap", "The stream has ended. If the collector is still " +
-               "running, reload this page; if it was restarted, it printed a " +
-               "new URL.");
-          return;
-        }
-        if (term !== reconnectTerm()) {
-          // The browser is about to retry with the filter this stream opened
-          // under, which is no longer the one wanted, so the page does it.
-          reconnectSoon();
-        }
+        // The stream dropped, or nothing answered at all, and the browser is
+        // about to retry by itself. The page does the retry instead, every
+        // time, because the browser's would use the address this stream was
+        // opened with, and two things in that address go stale. The filter
+        // term may no longer be the one wanted. And the row the replay starts
+        // after is whatever was newest when the stream opened, which for a
+        // tab that has been open a while is thousands of rows ago: retried
+        // as it stands, the replay hands back rows already on the page, and
+        // for a tab that never reconnected it asks for no replay at all and
+        // loses the flows from just before the collector went. `connect`
+        // builds the address afresh from both.
+        //
+        // And it retries for as long as it takes. A collector being restarted
+        // is unreachable for exactly as long as the restart takes, which a
+        // `docker stop` and a later start can make hours, and a page that
+        // gave up partway would have to be reloaded to pick up a session the
+        // collector had kept for it. It used to give up after five, on the
+        // grounds that a restart changed the token; a token that has changed
+        // is a refusal rather than silence, and is the branch above.
+        es.close();
+        stream = null;
+        retryLater();
       }
     };
   }

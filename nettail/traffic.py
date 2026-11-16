@@ -150,6 +150,30 @@ class Pair:
                                    _leg_bytes, _leg_packets)
 
 
+def _leg_state(leg):
+    return [leg.flows, leg.bytes, leg.packets]
+
+
+def _leg_from(state):
+    leg = Leg()
+    leg.flows, leg.bytes, leg.packets = (int(n) for n in state)
+    return leg
+
+
+def _counts_state(counts):
+    return [_leg_state(counts.total), _leg_state(counts.inward),
+            _leg_state(counts.outward)]
+
+
+def _counts_from(state):
+    counts = Counts()
+    total, inward, outward = state
+    counts.total = _leg_from(total)
+    counts.inward = _leg_from(inward)
+    counts.outward = _leg_from(outward)
+    return counts
+
+
 def _leg(table, key):
     leg = table.get(key)
     if leg is None:
@@ -305,6 +329,68 @@ class Traffic:
         return _prune(self.endpoints, self.cap,
                       lambda end: end.counts.total.bytes,
                       lambda end: end.counts.total.packets)
+
+    # -- keeping it across a restart ----------------------------------------
+    #
+    # What `--resume` saves and loads. Plain lists and dictionaries of plain
+    # values, so that it goes through JSON, and laid out in insertion order
+    # because a prune ranks with `heapq.nlargest`, which breaks a tie by the
+    # order it met the keys in: a table read back in another order would keep
+    # a different half of itself at the next prune than it would have kept.
+    # Peers are written sorted rather than in set order so that saving the same
+    # table twice gives the same text, which is what the suite compares.
+
+    def state(self):
+        """Everything this holds, in a shape JSON can carry."""
+        return {
+            "total": _leg_state(self.total),
+            "endpoints": [
+                [end.addr, end.first, end.last, _counts_state(end.counts),
+                 {key: _counts_state(c) for key, c in end.protos.items()},
+                 {key: _counts_state(c) for key, c in end.services.items()},
+                 sorted(end.peers), end.dropped]
+                for end in self.endpoints.values()],
+            "pairs": [
+                [pair.a, pair.b, pair.first, pair.last, _leg_state(pair.total),
+                 _leg_state(pair.a_to_b), _leg_state(pair.b_to_a),
+                 {key: _leg_state(leg) for key, leg in pair.protos.items()},
+                 {key: _leg_state(leg) for key, leg in pair.services.items()},
+                 pair.dropped]
+                for pair in self.pairs.values()],
+        }
+
+    @classmethod
+    def from_state(cls, state, cap=MAX_TRACKED_KEYS):
+        """A fresh instance holding what `state` describes.
+
+        Raises on anything malformed rather than keeping what it could read,
+        since half a table would be a set of figures that never existed.
+        """
+        traffic = cls(cap=cap)
+        traffic.total = _leg_from(state["total"])
+        for (addr, first, last, counts, protos, services, peers,
+             dropped) in state["endpoints"]:
+            end = Endpoint(addr, first)
+            end.last = last
+            end.counts = _counts_from(counts)
+            end.protos = {key: _counts_from(c) for key, c in protos.items()}
+            end.services = {key: _counts_from(c) for key, c in services.items()}
+            end.peers = set(peers)
+            end.dropped = int(dropped)
+            traffic.endpoints[addr] = end
+        for (a, b, first, last, total, a_to_b, b_to_a, protos, services,
+             dropped) in state["pairs"]:
+            pair = Pair(a, b, first)
+            pair.last = last
+            pair.total = _leg_from(total)
+            pair.a_to_b = _leg_from(a_to_b)
+            pair.b_to_a = _leg_from(b_to_a)
+            pair.protos = {key: _leg_from(leg) for key, leg in protos.items()}
+            pair.services = {key: _leg_from(leg)
+                             for key, leg in services.items()}
+            pair.dropped = int(dropped)
+            traffic.pairs[(a, b)] = pair
+        return traffic
 
     # -- reporting ----------------------------------------------------------
 

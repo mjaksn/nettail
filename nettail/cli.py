@@ -6,6 +6,7 @@ import io
 import json
 import os
 import queue
+import secrets
 import signal
 import socket
 import sqlite3
@@ -27,7 +28,7 @@ from netflume import (
     flow_timestamp,
 )
 
-from . import __version__, config, country, detail, jsonout, services, store
+from . import __version__, config, country, detail, jsonout, services, session, store
 from .colour import (
     C,
     PlainStream,
@@ -1538,6 +1539,25 @@ def build_parser():
                     default=store.DEFAULT_COMMIT_CADENCE, metavar="SECONDS",
                     help="how often buffered flow history writes are committed "
                          "(default 1)")
+    ap.add_argument("--resume", action="store_true",
+                    help="keep the session in the flow history store and pick "
+                         "it up at the next start: the statistics, the "
+                         "templates exporters have sent, what the keys have "
+                         "set and the flows a browser can click on, so that a "
+                         "restarted collector carries on where it stopped and "
+                         "a browser left open reconnects to the same view. "
+                         "Needs the store, and a run with a store and "
+                         "without this lets a saved session go. A browser's "
+                         "URL only survives a restart if the token does, so "
+                         "give --web-token or %s as well" % WEB_TOKEN_ENV)
+    ap.add_argument("--resume-every", type=store.cadence_arg,
+                    default=session.SAVE_EVERY, metavar="SECONDS",
+                    help="how often --resume saves the session while running, "
+                         "at least (default 60). A clean stop saves on the way "
+                         "out, so this is only what a crash or a hard kill "
+                         "can lose. A save pauses the collector for as long "
+                         "as it takes, which grows with the tables, so one "
+                         "that took long puts the next further off")
     ap.add_argument("--colour", "--color", choices=("auto", "always", "never"),
                     default="auto", metavar="WHEN",
                     help="when to use ANSI colour on this terminal: auto (a "
@@ -1800,6 +1820,7 @@ def main():
     if args.save_config is not None and args.update_country_db:
         ap.error("--save-config and --update-country-db are both done instead "
                  "of collecting, so only one of them can be asked for")
+
 
     scale = SizeScale(
         top=DEFAULT_SIZE_SCALE_MAX if args.size_scale_max is None
@@ -2178,6 +2199,42 @@ def main():
     # footer until the interval elapses.
     last_status = 0.0
 
+    # The session `--resume` keeps, and whether this run picked one up. Built
+    # after everything it describes and before the bar and the header start,
+    # because what the keys had set is among what it puts back and two of
+    # those settings decide whether either of them starts at all. Built before
+    # the first key too, so that what it notes as this run's starting settings
+    # is what the command line and the settings file said, which is what the
+    # next restart compares against. Its line goes in the banner rather than
+    # out now: starting the header clears the screen.
+    #
+    # A session is kept in the flow store, so `--resume` with the store off
+    # has nowhere to keep one. That is said and the run goes on without it,
+    # rather than refused, because the two can arrive from different places:
+    # `resume = true` in a settings file and `--flow-store off` typed for a
+    # throwaway run is the command line overriding the file, which is what it
+    # does everywhere else, and an error there would be the file winning.
+    #
+    # And a run with a store that was not asked to resume lets a saved session
+    # go, so that leaving the flag out means starting afresh for good. Kept,
+    # it would come back weeks stale the next time the flag was given, without
+    # the flows counted in between.
+    resume = None
+    resumed = False
+    resume_line = None
+    if args.resume and not store.enabled(args):
+        resume_line = ("--resume keeps the session in the flow store, which "
+                       "is off, so this run will not keep one")
+    elif args.resume:
+        resume = session.Session(flow_store, args, decoder, tally, scale,
+                                 resolver, controls, detail_ring, shown_flows,
+                                 flow_serial, every=args.resume_every)
+        resumed, resume_line = resume.restore()
+    elif flow_store.clear_session():
+        flow_store.flush()
+        resume_line = ("a session saved for --resume was let go, since this "
+                       "run was not asked to resume it")
+
     if not json_stdout:
         # Whether there is going to be a bar has to be settled before the
         # header starts, since the header writes the one scroll region the two
@@ -2376,6 +2433,18 @@ def main():
             if not is_loopback(web.bound_addr):
                 web_warnings.append(
                     web_bind_warning(args.web_bind, args.web_port))
+            # A session that survives a restart is half of what a browser left
+            # open needs; the other half is an address that still works, and
+            # the token is in it. One made up for this run is made up again
+            # at the next, and the tab is then refused however much of the
+            # session came back, so a run asked to resume says so here.
+            if (args.resume and store.enabled(args)
+                    and args.web_token is None):
+                web_warnings.append(
+                    f"{C.YELLOW}the token in that URL was made up for this "
+                    f"run, so a browser left open cannot reconnect after a "
+                    f"restart: set {WEB_TOKEN_ENV} in the environment, or "
+                    f"give --web-token, to keep one{C.RESET}")
 
     def write_banner(out, qr_key=False):
         """What a session opens with: where it is listening, and how it is set.
@@ -2428,6 +2497,13 @@ def main():
                 args.flow_commit_every,
             )
             print(f"{C.GREY}{note}{C.RESET}", file=out)
+        if resume_line:
+            # Grey for a session picked up, and yellow for every way of
+            # starting from nothing that a line is written for: one that could
+            # not be read, one let go, or a store with nowhere to keep one.
+            # Starting afresh is the surprising outcome under either flag.
+            print(f"{C.GREY if resumed else C.YELLOW}{resume_line}{C.RESET}",
+                  file=out)
         for warning in web_warnings:
             print(warning, file=out)
 
@@ -2524,6 +2600,17 @@ def main():
         # the collector was started, beside readonly and json, and because it
         # cannot change while the process lives.
         "detail_refresh": float(args.web_detail_refresh),
+        # Which process this is. A tab that loses its stream and finds this
+        # different on the way back knows the collector was restarted rather
+        # than merely out of reach, and says so: flows sent while it was down
+        # were never received, by it or by anything, and that is a gap worth
+        # a line. Random rather than a start time, which two runs in one
+        # second would share.
+        "run": secrets.token_urlsafe(8),
+        # Whether this process picked up a saved session. Without one the
+        # figures start again, and a tab's arithmetic across the restart
+        # would subtract one session's count from another's.
+        "resumed": bool(resumed),
     })
 
     # Only now does it start answering. Serving before the greeting was set
@@ -2836,6 +2923,13 @@ def main():
             bar.update(lambda s=snap: s if s is not None else take_snapshot())
             if flow_store.prune_due(now):
                 flow_store.prune(now=now)
+            # A save commits, and commits the flows waiting beside it, so the
+            # session goes to disk in the same commit as the flows it
+            # describes and a crash loses the two from one moment.
+            if resume is not None and resume.due(now):
+                trouble = resume.save(now=now)
+                if trouble:
+                    print(f"{C.YELLOW}{trouble}{C.RESET}", file=sys.stderr)
             if flow_store.flush_due(now):
                 flow_store.flush(now=now)
 
@@ -2967,17 +3061,35 @@ def main():
         sock.close()
         if records is not None:
             records.close()
+        # The session, saved as clean, before the store is closed: closing
+        # is what commits it.
+        if resume is not None:
+            trouble = resume.save(clean=True)
+            if trouble:
+                print(f"{C.YELLOW}{trouble}{C.RESET}", file=sys.stderr)
         flow_store.close()
         resolver.shutdown()
+
+        def report(out):
+            write_summary(stats, tally, resolver, sequences, sampling, args,
+                          controls.started, out=out)
+
         # Teed like the summary the s key prints, and for a better reason: a
         # browser that watched the whole session should not be missing the one
         # report that says how it went. Published before the server is told to
         # stop, so that the report is on its way out before anything starts
         # closing connections.
-        tee(bus, "summary",
-            lambda out: write_summary(stats, tally, resolver, sequences,
-                                      sampling, args, controls.started,
-                                      out=out))
+        #
+        # Unless the session is being kept. Then the report is not how it went,
+        # since it is going on after the restart, and a browser left open
+        # would have the summary put in the middle of its table at every
+        # restart, between flows that read as one session either side of it.
+        # The terminal still gets it, which under a container is the log, and
+        # the s key gives a browser one whenever it wants it.
+        if resume is not None:
+            report(sys.stderr)
+        else:
+            tee(bus, "summary", report)
         if web is not None:
             # Ordered rather than left to the daemon threads. server_close()
             # joins nothing, so without this the interpreter is free to exit
