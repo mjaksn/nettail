@@ -126,6 +126,11 @@ services:
     # startup that a browser's URL will not survive a restart, and everything
     # else still works. It goes in a file rather than on the command line so
     # that it stays out of ps; nettail reads NETTAIL_WEB_TOKEN itself.
+    #
+    # `required: false` needs Docker Compose 2.24 or later, and an older
+    # Compose refuses this whole file because of it. On one of those, delete
+    # the three lines below and either create nettail.env before starting or
+    # use `env_file: ./nettail.env`, which then has to exist.
     env_file:
       - path: ./nettail.env   # NETTAIL_WEB_TOKEN=the-token-you-want-to-keep
         required: false

@@ -1267,6 +1267,10 @@ their tables are capped, so a save that took long puts the next one further
 off. A save with nothing new since the last, on a quiet network, is skipped. A
 session that cannot be read, from another build or a damaged file, is met with
 a line saying so and a new session, never with a run that refuses to start.
+Nor is a session picked up when the store holds flows that arrived well after
+it was last due to be saved, which is what a run that was not keeping it,
+such as an image rolled back to an earlier release, leaves behind: its figures
+would come back without that run's flows in them.
 
 `--resume` is off unless asked for, because a run at a terminal that is stopped
 and started again is usually meant to start afresh. The image, the compose file
@@ -2794,7 +2798,10 @@ docker run -d --name nettail --restart unless-stopped --env-file nettail.env \
     --network host ghcr.io/mjaksn/nettail:latest --web --web-bind 0.0.0.0 --resume
 ```
 
-The compose file reads `nettail.env` beside it when there is one.
+The compose file reads `nettail.env` beside it when there is one. That uses
+`env_file` with `required: false`, which needs Docker Compose 2.24 or later; an
+older Compose refuses the whole file, and the comment above the block says
+what to change it to.
 
 Two more things are worth mounting. Your own static name mappings:
 

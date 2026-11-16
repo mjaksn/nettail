@@ -318,6 +318,14 @@ try:
     # greeting, and only a greeting after the first can be a restart.
     check("the page tells a restart from a dropped connection",
           "greeted && !!hello.run && hello.run !== runId" in body)
+    # And reads what the greeting says about how the process was started in
+    # one place for both, so a field added to one cannot be left behind by a
+    # tab kept open across a restart.
+    check("the first greeting and a restart's are read by one function",
+          body.count("function takeGreeting(") == 1
+          and body.count("takeGreeting(hello);") == 2
+          and body.count("readonly = !!hello.readonly") == 1,
+          str(body.count("takeGreeting(hello);")))
 
     # A tab in the background gives up its stream, because a browser that is
     # not running the page goes on buffering what arrives until the tab is

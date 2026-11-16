@@ -2104,6 +2104,30 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
     }
   }, BEAT);
 
+  // The half of a greeting that says how this collector process was started
+  // and what a browser may do with it, taken from the first greeting and
+  // again from the first after a restart, since a new process may have been
+  // started differently. One function for both, so that a field added later
+  // cannot be read at page load and then left at the old process's value by
+  // a tab kept open across a restart.
+  function takeGreeting(hello) {
+    readonly = !!hello.readonly;
+    // How the collector was started, like readonly and json beside it. The
+    // dialog works under --web-readonly, which is why this is read whatever
+    // that says: asking what a flow was changes nothing.
+    if (typeof hello.detail_refresh === "number") {
+      detailRefreshMs = Math.max(hello.detail_refresh, 0) * 1000;
+    }
+    if (typeof hello.restore_max === "number") {
+      restoreMax = Math.max(hello.restore_max, 0);
+    }
+    if (typeof hello.history_rows === "number") {
+      historyRows = Math.max(hello.history_rows, 0);
+    }
+    buildKeys(hello.keys || []);
+    pressable = hello.pressable || [];
+  }
+
   // How many failures in a row before the state line stops saying
   // "reconnecting", which reads as a moment, and says the collector is being
   // waited for. And the longest the page waits between its attempts, which
@@ -2239,18 +2263,7 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
         // the greeting that says what a browser may do is taken again. The
         // columns are not: the rows on the page were laid out under the ones
         // they have, and a release that changed them is a page to reload.
-        readonly = !!hello.readonly;
-        if (typeof hello.detail_refresh === "number") {
-          detailRefreshMs = Math.max(hello.detail_refresh, 0) * 1000;
-        }
-        if (typeof hello.restore_max === "number") {
-          restoreMax = Math.max(hello.restore_max, 0);
-        }
-        if (typeof hello.history_rows === "number") {
-          historyRows = Math.max(hello.history_rows, 0);
-        }
-        buildKeys(hello.keys || []);
-        pressable = hello.pressable || [];
+        takeGreeting(hello);
         // The count of flows missed is left unreported across a restart, and
         // the line below says what the gap was instead. Without the session
         // the count starts again; with it, a process that was killed rather
@@ -2261,22 +2274,8 @@ footer span.credit a:hover { color: var(--ink); text-decoration: underline; }
       }
       if (!greeted) {
         greeted = true;
-        readonly = !!hello.readonly;
-        // How the collector was started, like readonly and json beside it.
-        // The dialog works under --web-readonly, which is why this is read
-        // whatever that says: asking what a flow was changes nothing.
-        if (typeof hello.detail_refresh === "number") {
-          detailRefreshMs = Math.max(hello.detail_refresh, 0) * 1000;
-        }
-        if (typeof hello.restore_max === "number") {
-          restoreMax = Math.max(hello.restore_max, 0);
-        }
-        if (typeof hello.history_rows === "number") {
-          historyRows = Math.max(hello.history_rows, 0);
-        }
+        takeGreeting(hello);
         buildHead(hello.columns || []);
-        buildKeys(hello.keys || []);
-        pressable = hello.pressable || [];
         document.title = "nettail " + (hello.nettail || "");
         followLabel.hidden = false;
         whereBox.textContent = hello.json

@@ -85,6 +85,19 @@ SAVE_SPACING = 100
 # has resent its templates anyway.
 TEMPLATE_AGE = 30 * 60
 
+# How far past the moment a session expected to be saved again a stored flow
+# may have arrived before the session is taken for somebody else's, in
+# seconds. A run of this build saves on the way out, and while running saves
+# again by a time it writes into the session, so the only flows that should
+# be in the store after a session's own expected next save are a minute or so
+# of a run killed while saving. More than that, and something that was not
+# keeping this session wrote to the store after it: a run without
+# `--resume` from a build that does not let a session go, which is exactly
+# what an image rolled back to the release before this one is. Picking the
+# session up then would bring back figures from before it, without the flows
+# that run counted.
+STALE_AFTER = 60.0
+
 # How far the flow serial is moved on after a session that was not saved on the
 # way out. The flows published between the last save and the crash were given
 # numbers the saved serial does not know about, and a tab still showing them
@@ -201,12 +214,14 @@ class Session:
 
     # -- saving -------------------------------------------------------------
 
-    def capture(self, now=None):
+    def capture(self, now=None, clean=False):
         """Everything a restart would want, as one JSON-ready dictionary.
 
-        Whether it was saved on the way out is not in here. The store keeps
-        that beside it, so it can be taken back the moment a session is
-        picked up without the whole text being written again.
+        Whether it was saved on the way out is not in here; the store keeps
+        that in a row of its own. What is in here is when the next save was
+        due, which for a save on the way out is now, since nothing more is
+        coming. A restore compares it with the newest flow in the store: see
+        `STALE_AFTER`.
         """
         now = time.time() if now is None else now
         decoder = self.decoder
@@ -217,6 +232,8 @@ class Session:
         return {
             "format": FORMAT,
             "saved": now,
+            "until": now if clean else now + max(self.every,
+                                                SAVE_SPACING * self.cost),
             "elapsed": now - self.controls.started,
             "shown": self.shown[0],
             "serial": self.serial[0],
@@ -294,7 +311,8 @@ class Session:
             if not clean and mark == self._fingerprint:
                 self._next = now + max(self.every, SAVE_SPACING * self.cost)
                 return None
-            text = json.dumps(self.capture(now=now), separators=(",", ":"))
+            text = json.dumps(self.capture(now=now, clean=clean),
+                              separators=(",", ":"))
             self.store.save_session(text, clean=clean, now=now)
             self.store.flush(now=now)
         except Exception as exc:  # reported, and never fatal
@@ -320,6 +338,7 @@ class Session:
         now = time.time() if now is None else now
         try:
             saved = self.store.load_session()
+            newest = self.store.latest_received()
         except Exception as exc:  # a new session, said so
             return False, ("the saved session could not be read, so this is a "
                            "new one: %s" % (exc,))
@@ -332,7 +351,19 @@ class Session:
                 return False, ("the saved session was written by a build this "
                                "one cannot read, so this is a new one")
             built = self._build(state)
-            fresh = now - saved_at <= TEMPLATE_AGE
+            until = _finite(state.get("until", state["saved"]),
+                            "when the next save was due")
+            if newest is not None and newest > until + STALE_AFTER:
+                return False, ("the saved session is older than flows a run "
+                               "that did not keep it stored after it, so this "
+                               "is a new one")
+            # An age below zero is a clock that is behind the one the session
+            # was saved by, which is what a machine with no battery backed
+            # clock has after a power cut and before it has synchronised. It
+            # says nothing about how long the collector was down, so what an
+            # exporter said about itself is not trusted on the strength of it.
+            age = now - saved_at
+            fresh = 0 <= age <= TEMPLATE_AGE
             line = self._describe(state, clean, fresh, now)
         except (ValueError, TypeError, KeyError, AttributeError, IndexError,
                 OverflowError) as exc:

@@ -1147,7 +1147,7 @@ The token is not part of it: a URL survives a restart only through
 token out of every file this program writes, and a run that resumes with a
 token it made up says so at startup.
 
-Thirteen things about it are easy to break and quiet when broken.
+Fifteen things about it are easy to break and quiet when broken.
 
 - **The session table is an addition, not a schema version.** `_check_schema`
   refuses any version it was not built for, so a bump would stop the previous
@@ -1212,6 +1212,16 @@ Thirteen things about it are easy to break and quiet when broken.
   killed before its own first save the next run must find a crash's leftovers,
   numbered past this run's skip. Without the save, two kills in a row hand out
   the same range twice. `test_resume` kills three runs in a row to hold it.
+- **A session another run has written past is not picked up.** A save
+  records when the next one was due, now for a save on the way out, and a
+  restore refuses a session when the store holds flows that arrived more
+  than `STALE_AFTER` after that. Clearing on a run without the flag covers
+  this build; this covers a build that never clears, which is what rolling
+  the image back to the release before this one runs.
+- **A clock behind the saved one is not a young session.** `fresh` needs an
+  age of zero or more as well as under `TEMPLATE_AGE`, because a machine with
+  no battery backed clock boots behind and would otherwise trust day old
+  templates as just saved.
 - **Leaving the flag out lets the session go.** A run with a store that was
   not asked to resume clears the session row, so a session cannot come back
   weeks stale the next time the flag is given. `--resume` with the store off

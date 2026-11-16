@@ -258,6 +258,15 @@ class FlowStore:
         """How many rows are in the durable history."""
         return int(self._db.execute("SELECT COUNT(*) FROM flows").fetchone()[0])
 
+    def latest_received(self):
+        """When the newest stored flow arrived, or None for an empty store.
+
+        What a restore compares a session's expected next save with, to tell
+        a session that is still the last word from one another run wrote past.
+        """
+        row = self._db.execute("SELECT MAX(received) FROM flows").fetchone()
+        return None if row[0] is None else float(row[0])
+
     def latest(self):
         """The newest row, for the tests."""
         row = self._db.execute(
@@ -375,6 +384,9 @@ class DisabledStore:
 
     def count(self):
         return 0
+
+    def latest_received(self):
+        return None
 
     def latest(self):
         return None

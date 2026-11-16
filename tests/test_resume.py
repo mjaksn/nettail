@@ -126,7 +126,7 @@ def comparable(state):
     `SERIAL_SKIP` when it is read back, which has a check of its own below.
     """
     state = dict(state)
-    for moment in ("saved", "elapsed", "serial"):
+    for moment in ("saved", "until", "elapsed", "serial"):
         state.pop(moment, None)
     return text(state)
 
@@ -347,6 +347,77 @@ check("while the figures still come back",
       aged.tally.flows == before.tally.flows)
 aged.store.close()
 aged.close()
+
+# A clock behind the one the session was saved by is what a machine with no
+# battery backed clock has after a power cut and before it synchronises. That
+# says nothing about how long the collector was down, so it is not taken as a
+# young session.
+behind = Collector(["--templates", "--size-scale-dynamic"],
+                   store.FlowStore(path, retention_days=7))
+saved_at = behind.store.load_session()[0]
+ok, said = behind.session.restore(now=saved_at - 3600)
+check("a clock behind the saved one still resumes", ok, repr(said))
+check("without trusting templates of an age it cannot tell",
+      len(behind.decoder.templates) == 0 and "learned again" in said,
+      "%d held, %r" % (len(behind.decoder.templates), said))
+behind.store.close()
+behind.close()
+
+# -- a session another run has written past is not picked up ----------------
+#
+# A build that never lets a session go, such as the release before this one
+# after a rollback, can run on the same store for days and leave the session
+# where it was. Picked up after rolling forward, its figures would come back
+# without that run's flows in them. Flows that arrived well after the session
+# expected to be saved again are what tells.
+
+
+def flow_at(when):
+    return {"_received": when, "_timestamp": when, "_exporter": "10.0.0.9",
+            "_version": 5, "src_addr": "192.168.1.10", "dst_addr": "8.8.8.8"}
+
+
+for clean_stop in (True, False):
+    target = os.path.join(work, "past-%s.sqlite3" % clean_stop)
+    writer = Collector([], store.FlowStore(target, retention_days=7))
+    writer.feed(datagrams(4))
+    moment = time.time()
+    writer.session.save(clean=clean_stop, now=moment)
+    writer.store.close()
+    writer.close()
+    # Within the minute or so a run killed while saving can leave: the same
+    # session, still the last word.
+    db = store.FlowStore(target, retention_days=7)
+    db.write(flow_at(moment + session.STALE_AFTER / 2))
+    db.close()
+    near = Collector([], store.FlowStore(target, retention_days=7))
+    ok, said = near.session.restore()
+    check("a session with flows only just after its save is picked up (%s)"
+          % ("clean" if clean_stop else "running"), ok, repr(said))
+    near.store.close()
+    near.close()
+
+    target = os.path.join(work, "past-%s-later.sqlite3" % clean_stop)
+    writer = Collector([], store.FlowStore(target, retention_days=7))
+    writer.feed(datagrams(4))
+    writer.session.save(clean=clean_stop, now=moment)
+    expected = json.loads(writer.store.load_session()[1])["until"]
+    writer.store.close()
+    writer.close()
+    db = store.FlowStore(target, retention_days=7)
+    db.write(flow_at(expected + session.STALE_AFTER + 3600))
+    db.close()
+    later = Collector([], store.FlowStore(target, retention_days=7))
+    later.feed(datagrams(1))
+    figures = later.tally.flows
+    ok, said = later.session.restore()
+    check("one another run has stored flows past is not (%s)"
+          % ("clean" if clean_stop else "running"),
+          not ok and said and "new one" in said, repr(said))
+    check("and leaves what this run has counted alone",
+          later.tally.flows == figures)
+    later.store.close()
+    later.close()
 
 # -- what cannot be read starts a new session, and says so ----------------
 

@@ -27,8 +27,10 @@ parsed, and it is treated as public.
   save that took long puts the next one further off, since it pauses the
   collector for as long as it takes. Templates and sampling rates are put back
   only after less than half an hour down, because an exporter rebooted in the
-  meantime may reuse a template ID for another layout. A session that cannot
-  be read is met with a line and a new session rather than a refusal to start.
+  meantime may reuse a template ID for another layout, and only when the
+  clock is not behind the one the session was saved by. A session that cannot
+  be read is met with a line and a new session rather than a refusal to start,
+  and so is one the store shows another run has stored flows past.
   Off unless asked for. A run with a store that is not asked to resume lets a
   saved session go, so leaving the flag out means starting afresh for good,
   and with `--flow-store off` the flag says it has nowhere to keep a session
@@ -65,7 +67,8 @@ parsed, and it is treated as public.
   browser's URL does not survive the restart unless the token does.
 - **The shipped compose file reads `nettail.env` beside it**, not required, so
   `NETTAIL_WEB_TOKEN` can be set without editing the file. It needs Compose
-  2.24 or later for the `required: false` it uses.
+  2.24 or later for the `required: false` it uses, and an older Compose
+  refuses the whole file; the comment above the block says what to change.
 
 ### Upgrading
 
@@ -75,7 +78,9 @@ survives a restart only once `NETTAIL_WEB_TOKEN` is set, in `nettail.env` or
 however the file passes it. A systemd unit picks `--resume` up when
 `scripts/install.sh` is run again, and already has its token in
 `/etc/nettail/nettail.env`. An older release can still open a flow store this
-one has written to, so rolling the image back is safe.
+one has written to, so rolling the image back is safe, and a session saved
+before the rollback is not picked up again after rolling forward once the
+older release has stored flows past it.
 
 ## [0.21.0] - 2026-11-12
 
