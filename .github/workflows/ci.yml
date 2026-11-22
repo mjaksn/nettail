@@ -59,19 +59,19 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        # The floor and the ceiling are the two that earn their place, and the
-        # ceiling is 3.14 rather than 3.13 because the classifiers claim it,
-        # `cli.py` branches on it for argparse's own colour scheme, and
-        # `test_help_colour` says of itself that every check in it passes
-        # vacuously below 3.14. Topping out at 3.13 meant the suite written for
-        # that behaviour proved nothing anywhere. 3.15 is still at release
-        # candidate and is left until it is not.
+        # The floor and the ceiling are the two that earn their place. 3.14
+        # stays in the list below the ceiling because `cli.py` branches on it
+        # for argparse's own colour scheme, and `test_help_colour` says of
+        # itself that every check in it passes vacuously below 3.14. The
+        # ceiling is 3.15 because the classifiers claim it and the container
+        # image runs it, so the interpreter people actually get is one the
+        # suite has run on.
         #
         # The floor is 3.11 from 0.16.0, and both axes run every version with
         # nothing excluded: the one cell that used to be left out was 3.9 on
         # windows, whose interpreter the runner image no longer caches, and
         # 3.9 is not built here any more.
-        python: ["3.11", "3.12", "3.13", "3.14"]
+        python: ["3.11", "3.12", "3.13", "3.14", "3.15"]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -17,7 +17,7 @@
 # time. The digest names a manifest list covering amd64, arm64 and arm/v7, and
 # the daemon picks the right one out of it.
 #
-# A patch tag rather than the rolling 3.14-slim, and that is not fussiness.
+# A patch tag rather than the rolling 3.15-slim, and that is not fussiness.
 # The rolling tags are rebuilt every few days, so whatever digest they point
 # at is always a few days old, and nothing that young may be used here. A
 # patch tag stops moving once the next one ships, so it can be both specific
@@ -27,7 +27,7 @@
 # this line, because it would describe whichever digest was pinned when
 # somebody wrote it and the next bump would move the digest out from under
 # it, which is what happened to the last one.
-FROM python:3.14.7-slim@sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6 AS builder
+FROM python:3.15.2-slim@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928 AS builder
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -62,7 +62,7 @@ RUN pip install --no-deps --no-build-isolation . \
     && pip uninstall --yes setuptools
 
 
-FROM python:3.14.7-slim@sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6
+FROM python:3.15.2-slim@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928
 
 LABEL org.opencontainers.image.title="nettail" \
       org.opencontainers.image.description="A NetFlow v5, NetFlow v9 and IPFIX collector that prints flows to a console, with hostnames, colour, a live status bar and an optional browser view" \
