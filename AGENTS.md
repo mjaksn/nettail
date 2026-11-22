@@ -1544,7 +1544,7 @@ the flows keep the rows they should and that nothing is drawn over.
   the package is still written in the older spelling throughout, with ruff's
   pyupgrade rules still off. Match the file around you rather than mixing the
   two: rewriting the annotations is a change worth making on its own. CI runs
-  3.11 through 3.14, on ubuntu and windows both, and it is easy to break this
+  3.11 through 3.15, on ubuntu and windows both, and it is easy to break this
   on a newer interpreter without noticing.
 - **ruff line length is 88.** CI fails on 89.
 - **Every `zip()` says `strict=`.** B905 is in the `B` rules and asks for
